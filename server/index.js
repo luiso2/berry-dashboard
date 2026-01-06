@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
+import crypto from 'crypto';
 import { Resend } from 'resend';
 import pg from 'pg';
 
@@ -555,11 +556,60 @@ app.get('/api/stats', async (req, res) => {
 // RESEND WEBHOOK ENDPOINT FOR EMAIL TRACKING
 // ============================================
 
+// Webhook secret for signature verification
+const RESEND_WEBHOOK_SECRET = process.env.RESEND_WEBHOOK_SECRET;
+
+// Verify Resend webhook signature
+const verifyWebhookSignature = (payload, signature, secret) => {
+  if (!secret) {
+    console.warn('RESEND_WEBHOOK_SECRET not configured, skipping verification');
+    return true;
+  }
+
+  try {
+    const signatures = signature.split(' ');
+    const timestamp = signatures.find(s => s.startsWith('t='))?.split('=')[1];
+    const v1Signature = signatures.find(s => s.startsWith('v1='))?.split('=')[1];
+
+    if (!timestamp || !v1Signature) {
+      console.error('Invalid signature format');
+      return false;
+    }
+
+    // Create the signed payload
+    const signedPayload = `${timestamp}.${JSON.stringify(payload)}`;
+
+    // Calculate expected signature
+    const expectedSignature = crypto
+      .createHmac('sha256', secret)
+      .update(signedPayload)
+      .digest('base64');
+
+    return crypto.timingSafeEqual(
+      Buffer.from(v1Signature),
+      Buffer.from(expectedSignature)
+    );
+  } catch (error) {
+    console.error('Signature verification error:', error);
+    return false;
+  }
+};
+
 // Webhook endpoint for Resend email events
 // Configure in Resend Dashboard: https://resend.com/webhooks
 // Webhook URL: https://berry.merktop.com/api/webhooks/resend
 app.post('/api/webhooks/resend', async (req, res) => {
   try {
+    // Verify webhook signature
+    const signature = req.headers['svix-signature'];
+    if (RESEND_WEBHOOK_SECRET && signature) {
+      const isValid = verifyWebhookSignature(req.body, signature, RESEND_WEBHOOK_SECRET);
+      if (!isValid) {
+        console.error('Invalid webhook signature');
+        return res.status(401).json({ error: 'Invalid signature' });
+      }
+    }
+
     const payload = req.body;
     const eventType = payload.type;
     const data = payload.data;
