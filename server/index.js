@@ -2,16 +2,47 @@ import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import { Resend } from 'resend';
-import { readFileSync, writeFileSync } from 'fs';
-import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
+import pg from 'pg';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+const { Pool } = pg;
 
 const app = express();
 const PORT = process.env.PORT || 8080;
-const GUESTS_FILE = join(__dirname, 'guests.json');
+
+// PostgreSQL connection
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+});
+
+// Initialize database tables
+const initDatabase = async () => {
+  const client = await pool.connect();
+  try {
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS guests (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(255) NOT NULL,
+        email VARCHAR(255) NOT NULL,
+        phone VARCHAR(100),
+        instagram VARCHAR(255),
+        party_size INTEGER DEFAULT 1,
+        event_date TIMESTAMP,
+        notes TEXT,
+        category VARCHAR(50) DEFAULT 'pending',
+        email_sent BOOLEAN DEFAULT false,
+        email_sent_at TIMESTAMP,
+        checked_in_at TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    console.log('Database tables initialized successfully');
+  } catch (error) {
+    console.error('Error initializing database:', error);
+  } finally {
+    client.release();
+  }
+};
 
 // Resend setup - uses RESEND_API_KEY from .env
 const resend = new Resend(process.env.RESEND_API_KEY);
@@ -55,14 +86,14 @@ const sendAdminConfirmation = async (sentGuests, category) => {
       <div style="max-width: 600px; margin: 0 auto; padding: 40px 20px;">
         <!-- Header -->
         <div style="text-align: center; margin-bottom: 40px;">
-          <h1 style="color: #d4af37; font-size: 28px; margin: 0;">✨ Berry Bly Dashboard</h1>
+          <h1 style="color: #d4af37; font-size: 28px; margin: 0;">Berry Bly Dashboard</h1>
           <p style="color: #666; font-size: 12px; text-transform: uppercase; letter-spacing: 3px; margin-top: 8px;">Admin Notification</p>
         </div>
 
         <!-- Success Message -->
         <div style="background: linear-gradient(180deg, rgba(34, 197, 94, 0.1) 0%, transparent 100%); border: 1px solid rgba(34, 197, 94, 0.3); border-radius: 16px; padding: 30px; margin-bottom: 30px; text-align: center;">
           <div style="width: 60px; height: 60px; background: rgba(34, 197, 94, 0.2); border-radius: 50%; margin: 0 auto 20px; display: flex; align-items: center; justify-content: center;">
-            <span style="font-size: 30px;">✓</span>
+            <span style="font-size: 30px;">OK</span>
           </div>
           <h2 style="color: #22c55e; font-size: 22px; margin: 0 0 10px 0;">Invitations Sent Successfully!</h2>
           <p style="color: #999; font-size: 16px; margin: 0;">
@@ -91,7 +122,7 @@ const sendAdminConfirmation = async (sentGuests, category) => {
         <!-- Timestamp -->
         <div style="text-align: center; color: #666; font-size: 12px;">
           <p style="margin: 0;">Sent on ${new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</p>
-          <p style="margin: 10px 0 0 0; color: #444;">© ${new Date().getFullYear()} Berry Bly Events Dashboard</p>
+          <p style="margin: 10px 0 0 0; color: #444;">Berry Bly Events Dashboard</p>
         </div>
       </div>
     </body>
@@ -102,10 +133,10 @@ const sendAdminConfirmation = async (sentGuests, category) => {
     await resend.emails.send({
       from: EMAIL_CONFIG.from,
       to: EMAIL_CONFIG.adminEmail,
-      subject: `✓ ${sentGuests.length} Invitation${sentGuests.length > 1 ? 's' : ''} Sent Successfully - Berry Bly`,
+      subject: `${sentGuests.length} Invitation${sentGuests.length > 1 ? 's' : ''} Sent Successfully - Berry Bly`,
       html,
     });
-    console.log(`📬 Admin confirmation sent to ${EMAIL_CONFIG.adminEmail}`);
+    console.log(`Admin confirmation sent to ${EMAIL_CONFIG.adminEmail}`);
   } catch (error) {
     console.error('Failed to send admin confirmation:', error);
   }
@@ -130,19 +161,22 @@ app.use(cors({
 }));
 app.use(express.json());
 
-// Helper functions
-const readGuests = () => {
-  try {
-    const data = readFileSync(GUESTS_FILE, 'utf-8');
-    return JSON.parse(data);
-  } catch {
-    return [];
-  }
-};
-
-const writeGuests = (guests) => {
-  writeFileSync(GUESTS_FILE, JSON.stringify(guests, null, 2));
-};
+// Helper to transform DB row to API response
+const transformGuest = (row) => ({
+  id: String(row.id),
+  name: row.name,
+  email: row.email,
+  phone: row.phone || '',
+  instagram: row.instagram || '',
+  partySize: row.party_size,
+  eventDate: row.event_date ? row.event_date.toISOString() : '',
+  notes: row.notes || '',
+  category: row.category,
+  emailSent: row.email_sent,
+  emailSentAt: row.email_sent_at ? row.email_sent_at.toISOString() : null,
+  checkedInAt: row.checked_in_at ? row.checked_in_at.toISOString() : null,
+  createdAt: row.created_at.toISOString(),
+});
 
 // Email template generator
 const generateInvitationEmail = (guest, category, customMessage = '') => {
@@ -165,7 +199,7 @@ const generateInvitationEmail = (guest, category, customMessage = '') => {
         <div style="max-width: 600px; margin: 0 auto; padding: 40px 20px;">
           <!-- Header -->
           <div style="text-align: center; margin-bottom: 40px;">
-            <h1 style="color: #d4af37; font-size: 32px; margin: 0;">✨ Berry Bly</h1>
+            <h1 style="color: #d4af37; font-size: 32px; margin: 0;">Berry Bly</h1>
             <p style="color: #666; font-size: 12px; text-transform: uppercase; letter-spacing: 3px; margin-top: 8px;">Exclusive Events</p>
           </div>
 
@@ -194,12 +228,12 @@ const generateInvitationEmail = (guest, category, customMessage = '') => {
                 </tr>
                 <tr>
                   <td style="padding: 8px 0; color: #666;">Party Size</td>
-                  <td style="padding: 8px 0; color: #ffffff; text-align: right;">${guest.partySize} ${guest.partySize > 1 ? 'guests' : 'guest'}</td>
+                  <td style="padding: 8px 0; color: #ffffff; text-align: right;">${guest.partySize || guest.party_size} ${(guest.partySize || guest.party_size) > 1 ? 'guests' : 'guest'}</td>
                 </tr>
-                ${guest.eventDate ? `
+                ${guest.eventDate || guest.event_date ? `
                 <tr>
                   <td style="padding: 8px 0; color: #666;">Event Date</td>
-                  <td style="padding: 8px 0; color: #ffffff; text-align: right;">${new Date(guest.eventDate).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</td>
+                  <td style="padding: 8px 0; color: #ffffff; text-align: right;">${new Date(guest.eventDate || guest.event_date).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</td>
                 </tr>
                 ` : ''}
               </table>
@@ -209,7 +243,7 @@ const generateInvitationEmail = (guest, category, customMessage = '') => {
           <!-- Footer -->
           <div style="text-align: center; color: #666; font-size: 12px;">
             <p style="margin: 0 0 10px 0;">Questions? Reply to this email or contact us directly.</p>
-            <p style="margin: 0; color: #444;">© ${new Date().getFullYear()} Berry Bly Events. All rights reserved.</p>
+            <p style="margin: 0; color: #444;">Berry Bly Events. All rights reserved.</p>
           </div>
         </div>
       </body>
@@ -219,59 +253,113 @@ const generateInvitationEmail = (guest, category, customMessage = '') => {
 };
 
 // GET /api/guests - Get all guests
-app.get('/api/guests', (req, res) => {
-  const guests = readGuests();
-  res.json(guests);
+app.get('/api/guests', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM guests ORDER BY created_at DESC');
+    const guests = result.rows.map(transformGuest);
+    res.json(guests);
+  } catch (error) {
+    console.error('Error fetching guests:', error);
+    res.status(500).json({ error: 'Failed to fetch guests' });
+  }
 });
 
 // POST /api/guests - Add new guest (from landing page)
-app.post('/api/guests', (req, res) => {
+app.post('/api/guests', async (req, res) => {
   const { name, email, phone, instagram, partySize, eventDate, notes } = req.body;
 
   if (!name || !email) {
     return res.status(400).json({ error: 'Name and email are required' });
   }
 
-  const guests = readGuests();
+  try {
+    const result = await pool.query(
+      `INSERT INTO guests (name, email, phone, instagram, party_size, event_date, notes, category, email_sent, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', false, CURRENT_TIMESTAMP)
+       RETURNING *`,
+      [name, email, phone || '', instagram || '', partySize || 1, eventDate || null, notes || '']
+    );
 
-  const newGuest = {
-    id: Date.now().toString(),
-    name,
-    email,
-    phone: phone || '',
-    instagram: instagram || '',
-    partySize: partySize || 1,
-    eventDate: eventDate || '',
-    notes: notes || '',
-    category: 'pending',
-    emailSent: false,
-    createdAt: new Date().toISOString(),
-  };
-
-  guests.unshift(newGuest);
-  writeGuests(guests);
-
-  console.log(`✨ New guest added: ${name} (@${instagram || 'no instagram'})`);
-
-  res.status(201).json(newGuest);
+    const newGuest = transformGuest(result.rows[0]);
+    console.log(`New guest added: ${name} (@${instagram || 'no instagram'})`);
+    res.status(201).json(newGuest);
+  } catch (error) {
+    console.error('Error adding guest:', error);
+    res.status(500).json({ error: 'Failed to add guest' });
+  }
 });
 
-// PUT /api/guests/:id - Update guest (change category)
-app.put('/api/guests/:id', (req, res) => {
+// PUT /api/guests/:id - Update guest (change category, check-in, etc.)
+app.put('/api/guests/:id', async (req, res) => {
   const { id } = req.params;
-  const updates = req.body;
+  const { category, checkedInAt, emailSent, emailSentAt, notes, partySize, phone, instagram } = req.body;
 
-  const guests = readGuests();
-  const index = guests.findIndex((g) => g.id === id);
+  try {
+    // Build dynamic update query
+    const updates = [];
+    const values = [];
+    let paramCount = 1;
 
-  if (index === -1) {
-    return res.status(404).json({ error: 'Guest not found' });
+    if (category !== undefined) {
+      updates.push(`category = $${paramCount}`);
+      values.push(category);
+      paramCount++;
+    }
+    if (checkedInAt !== undefined) {
+      updates.push(`checked_in_at = $${paramCount}`);
+      values.push(checkedInAt);
+      paramCount++;
+    }
+    if (emailSent !== undefined) {
+      updates.push(`email_sent = $${paramCount}`);
+      values.push(emailSent);
+      paramCount++;
+    }
+    if (emailSentAt !== undefined) {
+      updates.push(`email_sent_at = $${paramCount}`);
+      values.push(emailSentAt);
+      paramCount++;
+    }
+    if (notes !== undefined) {
+      updates.push(`notes = $${paramCount}`);
+      values.push(notes);
+      paramCount++;
+    }
+    if (partySize !== undefined) {
+      updates.push(`party_size = $${paramCount}`);
+      values.push(partySize);
+      paramCount++;
+    }
+    if (phone !== undefined) {
+      updates.push(`phone = $${paramCount}`);
+      values.push(phone);
+      paramCount++;
+    }
+    if (instagram !== undefined) {
+      updates.push(`instagram = $${paramCount}`);
+      values.push(instagram);
+      paramCount++;
+    }
+
+    if (updates.length === 0) {
+      return res.status(400).json({ error: 'No fields to update' });
+    }
+
+    values.push(id);
+    const query = `UPDATE guests SET ${updates.join(', ')} WHERE id = $${paramCount} RETURNING *`;
+
+    const result = await pool.query(query, values);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Guest not found' });
+    }
+
+    const updatedGuest = transformGuest(result.rows[0]);
+    res.json(updatedGuest);
+  } catch (error) {
+    console.error('Error updating guest:', error);
+    res.status(500).json({ error: 'Failed to update guest' });
   }
-
-  guests[index] = { ...guests[index], ...updates };
-  writeGuests(guests);
-
-  res.json(guests[index]);
 });
 
 // POST /api/guests/:id/send-invitation - Send invitation email
@@ -279,16 +367,16 @@ app.post('/api/guests/:id/send-invitation', async (req, res) => {
   const { id } = req.params;
   const { category, customMessage, emailOnly } = req.body;
 
-  const guests = readGuests();
-  const guest = guests.find((g) => g.id === id);
-
-  if (!guest) {
-    return res.status(404).json({ error: 'Guest not found' });
-  }
-
-  const emailContent = generateInvitationEmail(guest, category, customMessage);
-
   try {
+    const guestResult = await pool.query('SELECT * FROM guests WHERE id = $1', [id]);
+
+    if (guestResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Guest not found' });
+    }
+
+    const guest = guestResult.rows[0];
+    const emailContent = generateInvitationEmail(guest, category, customMessage);
+
     const { data, error } = await resend.emails.send({
       from: EMAIL_CONFIG.from,
       to: guest.email,
@@ -303,21 +391,26 @@ app.post('/api/guests/:id/send-invitation', async (req, res) => {
     }
 
     // Update guest status
-    const index = guests.findIndex((g) => g.id === id);
+    let updateQuery;
+    let updateValues;
+
     if (emailOnly) {
-      // Email only - don't change category
-      guests[index] = { ...guests[index], emailSent: true, emailSentAt: new Date().toISOString() };
-      console.log(`📧 Email only sent to ${guest.name} (${guest.email}) - Category unchanged`);
+      updateQuery = 'UPDATE guests SET email_sent = true, email_sent_at = CURRENT_TIMESTAMP WHERE id = $1 RETURNING *';
+      updateValues = [id];
+      console.log(`Email only sent to ${guest.name} (${guest.email}) - Category unchanged`);
     } else {
-      guests[index] = { ...guests[index], category, emailSent: true, emailSentAt: new Date().toISOString() };
-      console.log(`📧 Invitation sent to ${guest.name} (${guest.email}) - Category: ${category}`);
+      updateQuery = 'UPDATE guests SET category = $1, email_sent = true, email_sent_at = CURRENT_TIMESTAMP WHERE id = $2 RETURNING *';
+      updateValues = [category, id];
+      console.log(`Invitation sent to ${guest.name} (${guest.email}) - Category: ${category}`);
     }
-    writeGuests(guests);
+
+    const updatedResult = await pool.query(updateQuery, updateValues);
+    const updatedGuest = transformGuest(updatedResult.rows[0]);
 
     // Send confirmation to admin
-    await sendAdminConfirmation([guest], emailOnly ? 'Email Only' : category);
+    await sendAdminConfirmation([{ name: guest.name, email: guest.email }], emailOnly ? 'Email Only' : category);
 
-    res.json({ success: true, emailId: data?.id, guest: guests[index] });
+    res.json({ success: true, emailId: data?.id, guest: updatedGuest });
   } catch (error) {
     console.error('Email send error:', error);
     res.status(500).json({ error: 'Failed to send email', details: error.message });
@@ -332,23 +425,23 @@ app.post('/api/guests/bulk-send', async (req, res) => {
     return res.status(400).json({ error: 'guestIds array is required' });
   }
 
-  const guests = readGuests();
   const results = [];
   const errors = [];
 
   for (const id of guestIds) {
-    const guest = guests.find((g) => g.id === id);
-
-    if (!guest) {
-      errors.push({ id, error: 'Guest not found' });
-      continue;
-    }
-
-    const guestCategory = category || guest.category || 'C';
-    const customMessage = customMessages?.[id] || '';
-    const emailContent = generateInvitationEmail(guest, guestCategory, customMessage);
-
     try {
+      const guestResult = await pool.query('SELECT * FROM guests WHERE id = $1', [id]);
+
+      if (guestResult.rows.length === 0) {
+        errors.push({ id, error: 'Guest not found' });
+        continue;
+      }
+
+      const guest = guestResult.rows[0];
+      const guestCategory = category || guest.category || 'C';
+      const customMessage = customMessages?.[id] || '';
+      const emailContent = generateInvitationEmail(guest, guestCategory, customMessage);
+
       const { data, error } = await resend.emails.send({
         from: EMAIL_CONFIG.from,
         to: guest.email,
@@ -363,24 +456,21 @@ app.post('/api/guests/bulk-send', async (req, res) => {
       }
 
       // Update guest status
-      const index = guests.findIndex((g) => g.id === id);
-      guests[index] = { ...guests[index], category: guestCategory, emailSent: true, emailSentAt: new Date().toISOString() };
+      await pool.query(
+        'UPDATE guests SET category = $1, email_sent = true, email_sent_at = CURRENT_TIMESTAMP WHERE id = $2',
+        [guestCategory, id]
+      );
 
-      results.push({ id, email: guest.email, emailId: data?.id });
-      console.log(`📧 Bulk send: ${guest.name} (${guest.email}) - Category: ${guestCategory}`);
+      results.push({ id, email: guest.email, emailId: data?.id, name: guest.name });
+      console.log(`Bulk send: ${guest.name} (${guest.email}) - Category: ${guestCategory}`);
     } catch (error) {
-      errors.push({ id, email: guest.email, error: error.message });
+      errors.push({ id, error: error.message });
     }
   }
 
-  writeGuests(guests);
-
   // Send confirmation to admin with all successfully sent guests
   if (results.length > 0) {
-    const sentGuestsList = results.map(r => {
-      const g = guests.find(guest => guest.id === r.id);
-      return g ? { name: g.name, email: g.email } : { name: 'Unknown', email: r.email };
-    });
+    const sentGuestsList = results.map(r => ({ name: r.name, email: r.email }));
     await sendAdminConfirmation(sentGuestsList, category || 'C');
   }
 
@@ -394,38 +484,84 @@ app.post('/api/guests/bulk-send', async (req, res) => {
 });
 
 // DELETE /api/guests/:id - Remove guest
-app.delete('/api/guests/:id', (req, res) => {
+app.delete('/api/guests/:id', async (req, res) => {
   const { id } = req.params;
 
-  const guests = readGuests();
-  const filtered = guests.filter((g) => g.id !== id);
+  try {
+    const result = await pool.query('DELETE FROM guests WHERE id = $1 RETURNING *', [id]);
 
-  if (filtered.length === guests.length) {
-    return res.status(404).json({ error: 'Guest not found' });
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Guest not found' });
+    }
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error deleting guest:', error);
+    res.status(500).json({ error: 'Failed to delete guest' });
   }
+});
 
-  writeGuests(filtered);
-  res.json({ success: true });
+// GET /api/stats - Get dashboard statistics
+app.get('/api/stats', async (req, res) => {
+  try {
+    const totalResult = await pool.query('SELECT COUNT(*) as count FROM guests');
+    const pendingResult = await pool.query("SELECT COUNT(*) as count FROM guests WHERE category = 'pending'");
+    const vipResult = await pool.query("SELECT COUNT(*) as count FROM guests WHERE category = 'A'");
+    const priorityResult = await pool.query("SELECT COUNT(*) as count FROM guests WHERE category = 'B'");
+    const standardResult = await pool.query("SELECT COUNT(*) as count FROM guests WHERE category = 'C'");
+    const emailsSentResult = await pool.query('SELECT COUNT(*) as count FROM guests WHERE email_sent = true');
+    const checkedInResult = await pool.query('SELECT COUNT(*) as count FROM guests WHERE checked_in_at IS NOT NULL');
+
+    res.json({
+      total: parseInt(totalResult.rows[0].count),
+      pending: parseInt(pendingResult.rows[0].count),
+      vip: parseInt(vipResult.rows[0].count),
+      priority: parseInt(priorityResult.rows[0].count),
+      standard: parseInt(standardResult.rows[0].count),
+      emailsSent: parseInt(emailsSentResult.rows[0].count),
+      checkedIn: parseInt(checkedInResult.rows[0].count),
+    });
+  } catch (error) {
+    console.error('Error fetching stats:', error);
+    res.status(500).json({ error: 'Failed to fetch stats' });
+  }
 });
 
 // Health check
-app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+app.get('/api/health', async (req, res) => {
+  try {
+    await pool.query('SELECT 1');
+    res.json({ status: 'ok', database: 'connected', timestamp: new Date().toISOString() });
+  } catch (error) {
+    res.json({ status: 'error', database: 'disconnected', timestamp: new Date().toISOString() });
+  }
 });
 
-app.listen(PORT, () => {
-  console.log(`
-  ╔═══════════════════════════════════════════════════════╗
-  ║         Berry Dashboard API Server                    ║
-  ╠═══════════════════════════════════════════════════════╣
-  ║  Local:   http://localhost:${PORT}                       ║
-  ║                                                       ║
-  ║  Endpoints:                                           ║
-  ║  GET    /api/guests              - List all           ║
-  ║  POST   /api/guests              - Add new guest      ║
-  ║  PUT    /api/guests/:id          - Update guest       ║
-  ║  DELETE /api/guests/:id          - Remove guest       ║
-  ║  POST   /api/guests/:id/send-invitation - Send email  ║
-  ╚═══════════════════════════════════════════════════════╝
-  `);
-});
+// Start server
+const startServer = async () => {
+  await initDatabase();
+
+  app.listen(PORT, () => {
+    console.log(`
+  ========================================================
+           Berry Dashboard API Server (PostgreSQL)
+  ========================================================
+    Local:   http://localhost:${PORT}
+
+    Endpoints:
+    GET    /api/guests              - List all guests
+    POST   /api/guests              - Add new guest
+    PUT    /api/guests/:id          - Update guest
+    DELETE /api/guests/:id          - Remove guest
+    POST   /api/guests/:id/send-invitation - Send email
+    POST   /api/guests/bulk-send    - Bulk send emails
+    GET    /api/stats               - Dashboard statistics
+    GET    /api/health              - Health check
+
+    Database: PostgreSQL (Railway)
+  ========================================================
+    `);
+  });
+};
+
+startServer();
