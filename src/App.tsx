@@ -2,31 +2,16 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { QRCode, generateGuestQRData } from './components/QRCode';
 
 // API Configuration - supports both local and production
-// Production API: set VITE_API_URL=https://berry.merktop.com/api/v1 in .env
+// Production API: set VITE_API_URL=https://berry.merktop.com/api in .env
 const LOCAL_API = 'http://localhost:3001/api';
-const PROD_API = import.meta.env.VITE_API_URL;
-const API_URL = PROD_API || LOCAL_API;
-const IS_PROD = !!PROD_API;
+const API_URL = import.meta.env.VITE_API_URL || LOCAL_API;
 
-// API Endpoints - different for local vs production
+// API Endpoints - same for local and production (monorepo)
 const ENDPOINTS = {
-  guests: IS_PROD ? '/guest-lists' : '/guests',
-  stats: IS_PROD ? '/guest-lists/stats' : '/stats',
+  guests: '/guests',
+  stats: '/stats',
 };
 
-// Map production status to local category
-const statusToCategory = (status: string): GuestCategory => {
-  if (status === 'approved') return 'A';
-  if (status === 'declined') return 'C';
-  return 'pending';
-};
-
-// Map local category to production status
-const categoryToStatus = (category: GuestCategory): string => {
-  if (category === 'A' || category === 'B') return 'approved';
-  if (category === 'C') return 'declined';
-  return 'pending';
-};
 
 type GuestCategory = 'pending' | 'A' | 'B' | 'C';
 type GuestStatus = 'pending' | 'approved' | 'declined'; // For production API
@@ -421,10 +406,10 @@ function App() {
       const res = await fetch(`${API_URL}${ENDPOINTS.guests}`);
       const responseData = await res.json();
 
-      // Handle different API response formats
-      const data = IS_PROD ? (responseData.data || responseData) : responseData;
+      // Handle API response (supports both array and { data: [] } formats)
+      const data = responseData.data || responseData;
 
-      // Transform production API data to local format
+      // Transform API data to Guest format
       const transformedData = Array.isArray(data) ? data.map((g: any) => ({
         id: String(g.id),
         name: g.name || '',
@@ -434,8 +419,7 @@ function App() {
         partySize: g.partySize || g.party_size || 1,
         eventDate: g.eventDate || g.event_date || new Date().toISOString(),
         notes: g.notes || '',
-        category: IS_PROD ? statusToCategory(g.status) : (g.category || 'pending'),
-        status: g.status,
+        category: g.category || 'pending',
         emailSent: g.emailSent || g.email_sent || false,
         emailSentAt: g.emailSentAt || g.email_sent_at,
         createdAt: g.createdAt || g.created_at || new Date().toISOString(),
@@ -521,14 +505,10 @@ function App() {
   const checkInGuest = async (guest: Guest) => {
     try {
       const checkedInAt = new Date().toISOString();
-      const body = IS_PROD
-        ? { status: 'approved', checked_in_at: checkedInAt }
-        : { ...guest, checkedInAt };
-
       const response = await fetch(`${API_URL}${ENDPOINTS.guests}/${guest.id}`, {
-        method: IS_PROD ? 'PATCH' : 'PUT',
+        method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+        body: JSON.stringify({ ...guest, checkedInAt }),
       });
       if (response.ok) {
         setGuests(prev => prev.map(g => g.id === guest.id ? { ...g, checkedInAt } : g));
@@ -773,14 +753,10 @@ function App() {
     if (!confirmation.guests.length || !confirmation.category) return;
     try {
       for (const guest of confirmation.guests) {
-        const body = IS_PROD
-          ? { status: categoryToStatus(confirmation.category) }
-          : { category: confirmation.category };
-
         await fetch(`${API_URL}${ENDPOINTS.guests}/${guest.id}`, {
-          method: IS_PROD ? 'PATCH' : 'PUT',
+          method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
+          body: JSON.stringify({ ...guest, category: confirmation.category }),
         });
         addActivity('Category Changed', `Moved to ${catLabel(confirmation.category)}`, guest.name, 'category');
       }
@@ -811,41 +787,27 @@ function App() {
       return;
     }
     try {
-      // Transform form data for production API if needed
-      const body = IS_PROD
-        ? {
-            name: formData.name,
-            email: formData.email,
-            phone: formData.phone,
-            instagram: formData.instagram,
-            party_size: formData.partySize,
-            status: 'pending',
-            notes: formData.notes,
-          }
-        : formData;
-
       const res = await fetch(`${API_URL}${ENDPOINTS.guests}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+        body: JSON.stringify(formData),
       });
       const responseData = await res.json();
 
-      // Transform response to local format
-      const newGuest: Guest = IS_PROD
-        ? {
-            id: String(responseData.id),
-            name: responseData.name,
-            email: responseData.email,
-            phone: responseData.phone || '',
-            instagram: responseData.instagram || '',
-            partySize: responseData.party_size || responseData.partySize || 1,
-            eventDate: responseData.event_date || new Date().toISOString(),
-            category: statusToCategory(responseData.status),
-            createdAt: responseData.created_at || new Date().toISOString(),
-            aiScore: 0,
-          }
-        : responseData;
+      // Transform response to Guest format
+      const newGuest: Guest = {
+        id: String(responseData.id),
+        name: responseData.name || formData.name,
+        email: responseData.email || formData.email,
+        phone: responseData.phone || formData.phone || '',
+        instagram: responseData.instagram || formData.instagram || '',
+        partySize: responseData.partySize || responseData.party_size || formData.partySize || 1,
+        eventDate: responseData.eventDate || responseData.event_date || new Date().toISOString(),
+        notes: responseData.notes || formData.notes || '',
+        category: responseData.category || 'pending',
+        createdAt: responseData.createdAt || responseData.created_at || new Date().toISOString(),
+        aiScore: 0,
+      };
 
       newGuest.aiScore = calculateAIScore(newGuest);
       setGuests((prev) => [newGuest, ...prev]);
