@@ -10,7 +10,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const app = express();
-const PORT = 3001;
+const PORT = process.env.PORT || 8080;
 const GUESTS_FILE = join(__dirname, 'guests.json');
 
 // Resend setup - uses RESEND_API_KEY from .env
@@ -22,6 +22,14 @@ const EMAIL_CONFIG = {
   replyTo: 'berrybly@gmail.com',
   adminEmail: 'berrybly@gmail.com', // Admin confirmation email
 };
+
+// CORS configuration - Allow dashboard domains
+const allowedOrigins = [
+  'https://berrydashboard.merktop.com',
+  'https://berry-dashboard.up.railway.app',
+  'http://localhost:5173',
+  'http://localhost:3000',
+];
 
 // Send confirmation email to admin
 const sendAdminConfirmation = async (sentGuests, category) => {
@@ -103,8 +111,23 @@ const sendAdminConfirmation = async (sentGuests, category) => {
   }
 };
 
-// Middleware
-app.use(cors());
+// Middleware - CORS with specific origins
+app.use(cors({
+  origin: function(origin, callback) {
+    // Allow requests with no origin (mobile apps, curl, etc.)
+    if (!origin) return callback(null, true);
+
+    if (allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      console.log('CORS blocked origin:', origin);
+      callback(null, true); // Allow all for now, log blocked
+    }
+  },
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true
+}));
 app.use(express.json());
 
 // Helper functions
