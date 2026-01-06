@@ -17,6 +17,7 @@ const statusToCategory = (status: string): GuestCategory => {
   switch (status) {
     case 'approved': return 'A';
     case 'declined': return 'C';
+    case 'rejected': return 'rejected';
     default: return 'pending';
   }
 };
@@ -26,12 +27,13 @@ const categoryToStatus = (category: GuestCategory): string => {
     case 'A': return 'approved';
     case 'B': return 'approved'; // B also maps to approved
     case 'C': return 'declined';
+    case 'rejected': return 'rejected';
     default: return 'pending';
   }
 };
 
-type GuestCategory = 'pending' | 'A' | 'B' | 'C';
-type GuestStatus = 'pending' | 'approved' | 'declined';
+type GuestCategory = 'pending' | 'A' | 'B' | 'C' | 'rejected';
+type GuestStatus = 'pending' | 'approved' | 'declined' | 'rejected';
 type ViewType = 'overview' | 'guests' | 'emails' | 'vip' | 'priority' | 'standard' | 'analytics' | 'activity' | 'automation' | 'checkin';
 type ThemeMode = 'dark' | 'light';
 
@@ -855,7 +857,7 @@ function App() {
     }
   };
 
-  const catLabel = (c: GuestCategory | null) => ({ A: 'VIP', B: 'Priority', C: 'Standard', pending: 'Pending' }[c || 'pending']);
+  const catLabel = (c: GuestCategory | null) => ({ A: 'VIP', B: 'Priority', C: 'Standard', rejected: 'Rejected', pending: 'Pending' }[c || 'pending']);
 
   const getViewTitle = () => {
     switch (activeView) {
@@ -2364,6 +2366,7 @@ const StatusBadge = ({ category }: { category: GuestCategory }) => {
     A: { bg: '#a78bfa15', color: '#a78bfa', label: 'VIP' },
     B: { bg: '#60a5fa15', color: '#60a5fa', label: 'Priority' },
     C: { bg: '#6b728015', color: '#9ca3af', label: 'Standard' },
+    rejected: { bg: '#ef444415', color: '#ef4444', label: 'Rejected' },
   };
   const s = badgeStyles[category];
   return (
