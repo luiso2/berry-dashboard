@@ -161,14 +161,6 @@ const estimateFollowers = (instagram: string): number => {
   return Math.round(baseEstimate * multiplier);
 };
 
-// Estimate following count
-const estimateFollowing = (instagram: string, followers: number): number => {
-  if (!instagram) return 0;
-  const hash = instagram.replace('@', '').split('').reduce((a, b) => a + b.charCodeAt(0), 0);
-  // Ratio typically between 0.1 (influencer) to 1.5 (regular user)
-  const ratio = 0.1 + (hash % 140) / 100;
-  return Math.round(followers * ratio);
-};
 
 const generateAIMessage = (guest: Guest, category: GuestCategory): string => {
   const firstName = guest.name.split(' ')[0];
