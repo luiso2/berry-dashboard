@@ -1,20 +1,37 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { QRCode, generateGuestQRData } from './components/QRCode';
 
-// API Configuration - supports both local and production
-// Production API: set VITE_API_URL=https://berry.merktop.com/api in .env
-const LOCAL_API = 'http://localhost:3001/api';
+// API Configuration - connects to berry-bly-productions backend
+// Production API: https://berry.merktop.com/api/v1
+const LOCAL_API = 'http://localhost:3001/api/v1';
 const API_URL = import.meta.env.VITE_API_URL || LOCAL_API;
 
-// API Endpoints - same for local and production (monorepo)
+// API Endpoints - berry-bly-productions format
 const ENDPOINTS = {
-  guests: '/guests',
-  stats: '/stats',
+  guests: '/guest-lists',
+  stats: '/guest-lists/stats',
 };
 
+// Status to Category mapping (backend uses status, dashboard uses category)
+const statusToCategory = (status: string): GuestCategory => {
+  switch (status) {
+    case 'approved': return 'A';
+    case 'declined': return 'C';
+    default: return 'pending';
+  }
+};
+
+const categoryToStatus = (category: GuestCategory): string => {
+  switch (category) {
+    case 'A': return 'approved';
+    case 'B': return 'approved'; // B also maps to approved
+    case 'C': return 'declined';
+    default: return 'pending';
+  }
+};
 
 type GuestCategory = 'pending' | 'A' | 'B' | 'C';
-type GuestStatus = 'pending' | 'approved' | 'declined'; // For production API
+type GuestStatus = 'pending' | 'approved' | 'declined';
 type ViewType = 'overview' | 'guests' | 'emails' | 'vip' | 'priority' | 'standard' | 'analytics' | 'activity' | 'automation' | 'checkin';
 type ThemeMode = 'dark' | 'light';
 
@@ -406,20 +423,21 @@ function App() {
       const res = await fetch(`${API_URL}${ENDPOINTS.guests}`);
       const responseData = await res.json();
 
-      // Handle API response (supports both array and { data: [] } formats)
-      const data = responseData.data || responseData;
+      // Handle berry-bly API response format: { entries: [...], total, limit, offset }
+      const data = responseData.entries || responseData.data || responseData;
 
-      // Transform API data to Guest format
+      // Transform berry-bly API data to Dashboard Guest format
       const transformedData = Array.isArray(data) ? data.map((g: any) => ({
         id: String(g.id),
         name: g.name || '',
         email: g.email || '',
         phone: g.phone || '',
         instagram: g.instagram || '',
-        partySize: g.partySize || g.party_size || 1,
+        partySize: g.numberOfGuests || g.partySize || g.number_of_guests || 1,
         eventDate: g.eventDate || g.event_date || new Date().toISOString(),
-        notes: g.notes || '',
-        category: g.category || 'pending',
+        notes: g.notes || g.vipPreferences || '',
+        category: g.category || statusToCategory(g.status),
+        status: g.status,
         emailSent: g.emailSent || g.email_sent || false,
         emailSentAt: g.emailSentAt || g.email_sent_at,
         createdAt: g.createdAt || g.created_at || new Date().toISOString(),
@@ -505,13 +523,17 @@ function App() {
   const checkInGuest = async (guest: Guest) => {
     try {
       const checkedInAt = new Date().toISOString();
+      // berry-bly uses PATCH - mark as approved and add check-in note
       const response = await fetch(`${API_URL}${ENDPOINTS.guests}/${guest.id}`, {
-        method: 'PUT',
+        method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...guest, checkedInAt }),
+        body: JSON.stringify({
+          status: 'approved',
+          notes: `Checked in at ${new Date().toLocaleString()}`
+        }),
       });
       if (response.ok) {
-        setGuests(prev => prev.map(g => g.id === guest.id ? { ...g, checkedInAt } : g));
+        setGuests(prev => prev.map(g => g.id === guest.id ? { ...g, checkedInAt, category: 'A' } : g));
         addToast(`${guest.name} checked in!`, 'success');
         addActivity('Guest Checked In', `${guest.name} (Party of ${guest.partySize})`, guest.name, 'guest');
       }
@@ -753,10 +775,11 @@ function App() {
     if (!confirmation.guests.length || !confirmation.category) return;
     try {
       for (const guest of confirmation.guests) {
+        // berry-bly uses PATCH with status
         await fetch(`${API_URL}${ENDPOINTS.guests}/${guest.id}`, {
-          method: 'PUT',
+          method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ...guest, category: confirmation.category }),
+          body: JSON.stringify({ status: categoryToStatus(confirmation.category) }),
         });
         addActivity('Category Changed', `Moved to ${catLabel(confirmation.category)}`, guest.name, 'category');
       }
@@ -787,25 +810,37 @@ function App() {
       return;
     }
     try {
+      // Transform to berry-bly API format
+      const berryBlyData = {
+        eventId: formData.eventDate || 'default-event', // berry-bly requires eventId
+        name: formData.name,
+        email: formData.email,
+        phone: formData.phone || '0000000000',
+        instagram: formData.instagram || '@guest',
+        numberOfGuests: formData.partySize || 1,
+        vipPreferences: formData.notes || '',
+      };
+
       const res = await fetch(`${API_URL}${ENDPOINTS.guests}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData),
+        body: JSON.stringify(berryBlyData),
       });
       const responseData = await res.json();
 
-      // Transform response to Guest format
+      // Transform berry-bly response to Dashboard Guest format
+      const entry = responseData.entry || responseData;
       const newGuest: Guest = {
-        id: String(responseData.id),
-        name: responseData.name || formData.name,
-        email: responseData.email || formData.email,
-        phone: responseData.phone || formData.phone || '',
-        instagram: responseData.instagram || formData.instagram || '',
-        partySize: responseData.partySize || responseData.party_size || formData.partySize || 1,
-        eventDate: responseData.eventDate || responseData.event_date || new Date().toISOString(),
-        notes: responseData.notes || formData.notes || '',
-        category: responseData.category || 'pending',
-        createdAt: responseData.createdAt || responseData.created_at || new Date().toISOString(),
+        id: String(entry.id),
+        name: entry.name || formData.name,
+        email: entry.email || formData.email,
+        phone: entry.phone || formData.phone || '',
+        instagram: entry.instagram || formData.instagram || '',
+        partySize: entry.numberOfGuests || entry.number_of_guests || formData.partySize || 1,
+        eventDate: entry.eventDate || entry.event_date || new Date().toISOString(),
+        notes: entry.vipPreferences || entry.notes || formData.notes || '',
+        category: statusToCategory(entry.status),
+        createdAt: entry.createdAt || entry.created_at || new Date().toISOString(),
         aiScore: 0,
       };
 
