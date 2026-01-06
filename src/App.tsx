@@ -1254,7 +1254,11 @@ function App() {
                     </div>
                     <div style={{ minWidth: 0 }}>
                       <div style={{ fontSize: 15, fontWeight: 500 }}>{guest.name}</div>
-                      <div style={{ fontSize: 13, color: '#666' }}>@{guest.instagram || 'no-ig'}</div>
+                      {guest.instagram ? (
+                        <a href={`https://instagram.com/${guest.instagram.replace('@', '')}`} target="_blank" rel="noopener noreferrer" style={{ fontSize: 13, color: '#E1306C', textDecoration: 'none' }} onClick={(e) => e.stopPropagation()}>@{guest.instagram.replace('@', '')}</a>
+                      ) : (
+                        <div style={{ fontSize: 13, color: '#666' }}>no-ig</div>
+                      )}
                     </div>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -2524,7 +2528,7 @@ const GuestList = ({ guests, selectedGuests, toggleSelect, selectAll, openModal,
               <td style={{ ...tdStyle, color: '#888', fontSize: 14 }}>{guest.email}</td>
               <td style={tdStyle} className="hide-tablet">
                 {guest.instagram ? (
-                  <span style={{ color: '#888', fontSize: 14 }}>@{guest.instagram.replace('@', '')}</span>
+                  <a href={`https://instagram.com/${guest.instagram.replace('@', '')}`} target="_blank" rel="noopener noreferrer" style={{ color: '#E1306C', fontSize: 14, textDecoration: 'none' }}>@{guest.instagram.replace('@', '')}</a>
                 ) : (
                   <span style={{ color: '#333' }}>—</span>
                 )}
@@ -2621,7 +2625,7 @@ const GuestList = ({ guests, selectedGuests, toggleSelect, selectAll, openModal,
               </div>
 
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, fontSize: 14, color: '#666', marginBottom: 8 }}>
-                {guest.instagram && <span>@{guest.instagram.replace('@', '')}</span>}
+                {guest.instagram && <a href={`https://instagram.com/${guest.instagram.replace('@', '')}`} target="_blank" rel="noopener noreferrer" style={{ color: '#E1306C', textDecoration: 'none' }}>@{guest.instagram.replace('@', '')}</a>}
                 <span>Party: {guest.partySize}</span>
               </div>
 
