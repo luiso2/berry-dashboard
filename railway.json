@@ -4,7 +4,7 @@
     "builder": "NIXPACKS"
   },
   "deploy": {
-    "startCommand": "npx serve dist -s -l 3000",
+    "startCommand": "npx serve dist -s -l 8080",
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 10
   }
