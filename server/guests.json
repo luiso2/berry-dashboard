@@ -1,0 +1,49 @@
+[
+  {
+    "id": "1767663172572",
+    "name": "Test User",
+    "email": "test@landing.com",
+    "phone": "",
+    "instagram": "testuser",
+    "partySize": 2,
+    "eventDate": "",
+    "notes": "",
+    "category": "C",
+    "createdAt": "2026-01-06T01:32:52.572Z"
+  },
+  {
+    "id": "1",
+    "name": "Sofia Martinez",
+    "email": "sofia@example.com",
+    "phone": "+1 310-555-0101",
+    "instagram": "sofia_martinez",
+    "partySize": 4,
+    "eventDate": "2025-02-14",
+    "notes": "VIP client, requires private table",
+    "category": "A",
+    "createdAt": "2025-01-05T12:00:00.000Z"
+  },
+  {
+    "id": "2",
+    "name": "James Wilson",
+    "email": "james.w@example.com",
+    "phone": "+1 424-555-0202",
+    "instagram": "jameswilson",
+    "partySize": 2,
+    "eventDate": "2025-02-14",
+    "category": "A",
+    "createdAt": "2025-01-05T12:00:00.000Z"
+  },
+  {
+    "id": "3",
+    "name": "Isabella Chen",
+    "email": "bella.chen@example.com",
+    "phone": "+1 818-555-0303",
+    "instagram": "bella.chen",
+    "partySize": 6,
+    "eventDate": "2025-02-14",
+    "notes": "Birthday celebration",
+    "category": "B",
+    "createdAt": "2025-01-05T12:00:00.000Z"
+  }
+]
