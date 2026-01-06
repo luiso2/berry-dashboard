@@ -1720,11 +1720,66 @@ function App() {
               </div>
             </div>
 
+            {/* AI Assistant Panel */}
+            <div style={{ background: 'linear-gradient(135deg, #d4af3710 0%, #a78bfa10 100%)', border: '1px solid #d4af3730', borderRadius: 16, padding: 24, marginBottom: 24 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+                <div style={{ width: 40, height: 40, borderRadius: 10, background: '#d4af37', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20 }}>🤖</div>
+                <div>
+                  <div style={{ fontSize: 16, fontWeight: 600, color: '#d4af37' }}>AI Check-In Assistant</div>
+                  <div style={{ fontSize: 13, color: '#888' }}>Smart suggestions based on guest score and status</div>
+                </div>
+              </div>
+
+              {/* VIP Waiting Alert */}
+              {guests.filter(g => g.category === 'A' && !g.checkedInAt).length > 0 && (
+                <div style={{ background: '#a78bfa15', border: '1px solid #a78bfa30', borderRadius: 12, padding: 16, marginBottom: 16 }}>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: '#a78bfa', marginBottom: 8 }}>⭐ VIP Guests Waiting ({guests.filter(g => g.category === 'A' && !g.checkedInAt).length})</div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                    {guests.filter(g => g.category === 'A' && !g.checkedInAt).slice(0, 5).map(vip => (
+                      <button
+                        key={vip.id}
+                        onClick={() => checkInGuest(vip)}
+                        className="btn-hover"
+                        style={{ background: '#a78bfa20', border: '1px solid #a78bfa40', color: '#a78bfa', padding: '8px 16px', borderRadius: 8, fontSize: 13, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8 }}
+                      >
+                        <span>{vip.name}</span>
+                        <span style={{ background: '#a78bfa', color: '#000', padding: '2px 6px', borderRadius: 4, fontSize: 11, fontWeight: 700 }}>{vip.aiScore || calculateAIScore(vip)}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* High Score Guests Not Checked In */}
+              {guests.filter(g => (g.aiScore || calculateAIScore(g)) >= 50 && !g.checkedInAt && g.category !== 'pending').length > 0 && (
+                <div style={{ background: '#22c55e10', border: '1px solid #22c55e30', borderRadius: 12, padding: 16 }}>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: '#22c55e', marginBottom: 8 }}>🎯 High-Value Guests Waiting ({guests.filter(g => (g.aiScore || calculateAIScore(g)) >= 50 && !g.checkedInAt && g.category !== 'pending').length})</div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                    {guests
+                      .filter(g => (g.aiScore || calculateAIScore(g)) >= 50 && !g.checkedInAt && g.category !== 'pending')
+                      .sort((a, b) => (b.aiScore || calculateAIScore(b)) - (a.aiScore || calculateAIScore(a)))
+                      .slice(0, 8)
+                      .map(guest => (
+                        <button
+                          key={guest.id}
+                          onClick={() => checkInGuest(guest)}
+                          className="btn-hover"
+                          style={{ background: '#22c55e15', border: '1px solid #22c55e30', color: '#22c55e', padding: '8px 16px', borderRadius: 8, fontSize: 13, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8 }}
+                        >
+                          <span>{guest.name}</span>
+                          <span style={{ background: '#22c55e', color: '#000', padding: '2px 6px', borderRadius: 4, fontSize: 11, fontWeight: 700 }}>{guest.aiScore || calculateAIScore(guest)}</span>
+                        </button>
+                      ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
             {/* Quick Check-In Search */}
-            <div style={{ marginBottom: 24 }}>
+            <div style={{ marginBottom: 24, position: 'relative' }}>
               <input
                 type="text"
-                placeholder="Search guest name to check in..."
+                placeholder="🔍 Search by name, @instagram, email, or phone..."
                 value={filters.search}
                 onChange={(e) => setFilters({ ...filters, search: e.target.value })}
                 className="input-focus"
@@ -1739,6 +1794,21 @@ function App() {
                   outline: 'none',
                 }}
               />
+              {filters.search && (
+                <div style={{ position: 'absolute', right: 16, top: '50%', transform: 'translateY(-50%)', display: 'flex', gap: 8 }}>
+                  <span style={{ color: '#666', fontSize: 14 }}>
+                    {guests.filter(g =>
+                      g.category !== 'pending' && (
+                        g.name.toLowerCase().includes(filters.search.toLowerCase()) ||
+                        g.instagram.toLowerCase().includes(filters.search.toLowerCase()) ||
+                        g.email.toLowerCase().includes(filters.search.toLowerCase()) ||
+                        g.phone.includes(filters.search)
+                      )
+                    ).length} results
+                  </span>
+                  <button onClick={() => setFilters({ ...filters, search: '' })} style={{ background: 'none', border: 'none', color: '#666', cursor: 'pointer', fontSize: 16 }}>✕</button>
+                </div>
+              )}
             </div>
 
             {/* Approved Guests List for Check-In */}
@@ -1749,12 +1819,19 @@ function App() {
               </div>
               {guests
                 .filter(g => g.category !== 'pending')
-                .filter(g => !filters.search || g.name.toLowerCase().includes(filters.search.toLowerCase()))
+                .filter(g => !filters.search ||
+                  g.name.toLowerCase().includes(filters.search.toLowerCase()) ||
+                  g.instagram.toLowerCase().includes(filters.search.toLowerCase()) ||
+                  g.email.toLowerCase().includes(filters.search.toLowerCase()) ||
+                  g.phone.includes(filters.search)
+                )
                 .sort((a, b) => {
-                  // Sort: not checked in first, then by name
+                  // Sort: not checked in first, then by AI score (high to low)
                   if (a.checkedInAt && !b.checkedInAt) return 1;
                   if (!a.checkedInAt && b.checkedInAt) return -1;
-                  return a.name.localeCompare(b.name);
+                  const scoreA = a.aiScore || calculateAIScore(a);
+                  const scoreB = b.aiScore || calculateAIScore(b);
+                  return scoreB - scoreA;
                 })
                 .map((guest, idx) => (
                   <div
@@ -1790,9 +1867,15 @@ function App() {
                         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                           <span style={{ fontSize: 14, color: '#888' }}>Party of {guest.partySize}</span>
                           <StatusBadge category={guest.category} />
+                          <span style={{ background: getScoreColor(guest.aiScore || calculateAIScore(guest)) + '20', color: getScoreColor(guest.aiScore || calculateAIScore(guest)), padding: '2px 8px', borderRadius: 4, fontSize: 12, fontWeight: 600 }}>
+                            Score: {guest.aiScore || calculateAIScore(guest)}
+                          </span>
+                          {guest.instagram && (
+                            <a href={`https://instagram.com/${guest.instagram.replace('@', '')}`} target="_blank" rel="noopener noreferrer" style={{ color: '#d4af37', fontSize: 13, textDecoration: 'none' }}>@{guest.instagram.replace('@', '')}</a>
+                          )}
                           {guest.checkedInAt && (
                             <span style={{ fontSize: 12, color: '#22c55e' }}>
-                              Checked in {formatDate(guest.checkedInAt)}
+                              ✓ {formatDate(guest.checkedInAt)}
                             </span>
                           )}
                         </div>
