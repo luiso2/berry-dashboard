@@ -19,6 +19,7 @@ const pool = new Pool({
 const initDatabase = async () => {
   const client = await pool.connect();
   try {
+    // Create guests table
     await client.query(`
       CREATE TABLE IF NOT EXISTS guests (
         id SERIAL PRIMARY KEY,
@@ -36,6 +37,29 @@ const initDatabase = async () => {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `);
+
+    // Create email_events table for Resend webhook tracking
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS email_events (
+        id SERIAL PRIMARY KEY,
+        email_id VARCHAR(255),
+        guest_id INTEGER REFERENCES guests(id) ON DELETE SET NULL,
+        event_type VARCHAR(50) NOT NULL,
+        recipient_email VARCHAR(255),
+        subject VARCHAR(500),
+        timestamp TIMESTAMP,
+        raw_payload JSONB,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    // Create index for faster lookups
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_email_events_guest_id ON email_events(guest_id);
+      CREATE INDEX IF NOT EXISTS idx_email_events_email_id ON email_events(email_id);
+      CREATE INDEX IF NOT EXISTS idx_email_events_event_type ON email_events(event_type);
+    `);
+
     console.log('Database tables initialized successfully');
   } catch (error) {
     console.error('Error initializing database:', error);
@@ -527,6 +551,238 @@ app.get('/api/stats', async (req, res) => {
   }
 });
 
+// ============================================
+// RESEND WEBHOOK ENDPOINT FOR EMAIL TRACKING
+// ============================================
+
+// Webhook endpoint for Resend email events
+// Configure in Resend Dashboard: https://resend.com/webhooks
+// Webhook URL: https://berry.merktop.com/api/webhooks/resend
+app.post('/api/webhooks/resend', async (req, res) => {
+  try {
+    const payload = req.body;
+    const eventType = payload.type;
+    const data = payload.data;
+
+    console.log(`Resend webhook received: ${eventType}`, JSON.stringify(data, null, 2));
+
+    // Extract email info
+    const emailId = data.email_id;
+    const recipientEmail = data.to?.[0] || data.email;
+    const subject = data.subject;
+    const timestamp = data.created_at || new Date().toISOString();
+
+    // Find guest by email
+    let guestId = null;
+    if (recipientEmail) {
+      const guestResult = await pool.query(
+        'SELECT id FROM guests WHERE email = $1 ORDER BY created_at DESC LIMIT 1',
+        [recipientEmail]
+      );
+      if (guestResult.rows.length > 0) {
+        guestId = guestResult.rows[0].id;
+      }
+    }
+
+    // Store the event
+    await pool.query(
+      `INSERT INTO email_events (email_id, guest_id, event_type, recipient_email, subject, timestamp, raw_payload)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [emailId, guestId, eventType, recipientEmail, subject, timestamp, JSON.stringify(payload)]
+    );
+
+    // Update guest record based on event type
+    if (guestId) {
+      switch (eventType) {
+        case 'email.sent':
+          await pool.query(
+            'UPDATE guests SET email_sent = true, email_sent_at = $1 WHERE id = $2',
+            [timestamp, guestId]
+          );
+          console.log(`Email sent to guest ${guestId}`);
+          break;
+        case 'email.delivered':
+          console.log(`Email delivered to guest ${guestId}`);
+          break;
+        case 'email.bounced':
+          console.log(`Email bounced for guest ${guestId}`);
+          break;
+        case 'email.complained':
+          console.log(`Email complaint from guest ${guestId}`);
+          break;
+        case 'email.opened':
+          console.log(`Email opened by guest ${guestId}`);
+          break;
+        case 'email.clicked':
+          console.log(`Email link clicked by guest ${guestId}`);
+          break;
+      }
+    }
+
+    res.json({ received: true, event: eventType });
+  } catch (error) {
+    console.error('Webhook error:', error);
+    res.status(500).json({ error: 'Webhook processing failed' });
+  }
+});
+
+// GET email events for a guest
+app.get('/api/guests/:id/email-events', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const result = await pool.query(
+      'SELECT * FROM email_events WHERE guest_id = $1 ORDER BY timestamp DESC',
+      [id]
+    );
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching email events:', error);
+    res.status(500).json({ error: 'Failed to fetch email events' });
+  }
+});
+
+// GET all email events with stats
+app.get('/api/email-events', async (req, res) => {
+  try {
+    const events = await pool.query(
+      'SELECT * FROM email_events ORDER BY timestamp DESC LIMIT 100'
+    );
+
+    const stats = await pool.query(`
+      SELECT
+        event_type,
+        COUNT(*) as count
+      FROM email_events
+      GROUP BY event_type
+    `);
+
+    res.json({
+      events: events.rows,
+      stats: stats.rows.reduce((acc, row) => {
+        acc[row.event_type] = parseInt(row.count);
+        return acc;
+      }, {})
+    });
+  } catch (error) {
+    console.error('Error fetching email events:', error);
+    res.status(500).json({ error: 'Failed to fetch email events' });
+  }
+});
+
+// ============================================
+// API V1 ROUTES (aliases for compatibility)
+// ============================================
+app.use('/api/v1', (req, res, next) => {
+  // Rewrite /api/v1/* to /api/*
+  req.url = req.url;
+  next();
+});
+
+// Mount all /api routes also on /api/v1
+app.get('/api/v1/guests', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM guests ORDER BY created_at DESC');
+    const guests = result.rows.map(transformGuest);
+    res.json(guests);
+  } catch (error) {
+    console.error('Error fetching guests:', error);
+    res.status(500).json({ error: 'Failed to fetch guests' });
+  }
+});
+
+app.post('/api/v1/guests', async (req, res) => {
+  const { name, email, phone, instagram, partySize, eventDate, notes } = req.body;
+  if (!name || !email) {
+    return res.status(400).json({ error: 'Name and email are required' });
+  }
+  try {
+    const result = await pool.query(
+      `INSERT INTO guests (name, email, phone, instagram, party_size, event_date, notes, category, email_sent, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', false, CURRENT_TIMESTAMP)
+       RETURNING *`,
+      [name, email, phone || '', instagram || '', partySize || 1, eventDate || null, notes || '']
+    );
+    const newGuest = transformGuest(result.rows[0]);
+    console.log(`New guest added: ${name}`);
+    res.status(201).json(newGuest);
+  } catch (error) {
+    console.error('Error adding guest:', error);
+    res.status(500).json({ error: 'Failed to add guest' });
+  }
+});
+
+app.put('/api/v1/guests/:id', async (req, res) => {
+  const { id } = req.params;
+  const { category, checkedInAt, emailSent, emailSentAt, notes, partySize, phone, instagram } = req.body;
+  try {
+    const updates = [];
+    const values = [];
+    let paramCount = 1;
+    if (category !== undefined) { updates.push(`category = $${paramCount}`); values.push(category); paramCount++; }
+    if (checkedInAt !== undefined) { updates.push(`checked_in_at = $${paramCount}`); values.push(checkedInAt); paramCount++; }
+    if (emailSent !== undefined) { updates.push(`email_sent = $${paramCount}`); values.push(emailSent); paramCount++; }
+    if (emailSentAt !== undefined) { updates.push(`email_sent_at = $${paramCount}`); values.push(emailSentAt); paramCount++; }
+    if (notes !== undefined) { updates.push(`notes = $${paramCount}`); values.push(notes); paramCount++; }
+    if (partySize !== undefined) { updates.push(`party_size = $${paramCount}`); values.push(partySize); paramCount++; }
+    if (phone !== undefined) { updates.push(`phone = $${paramCount}`); values.push(phone); paramCount++; }
+    if (instagram !== undefined) { updates.push(`instagram = $${paramCount}`); values.push(instagram); paramCount++; }
+    if (updates.length === 0) return res.status(400).json({ error: 'No fields to update' });
+    values.push(id);
+    const query = `UPDATE guests SET ${updates.join(', ')} WHERE id = $${paramCount} RETURNING *`;
+    const result = await pool.query(query, values);
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Guest not found' });
+    res.json(transformGuest(result.rows[0]));
+  } catch (error) {
+    console.error('Error updating guest:', error);
+    res.status(500).json({ error: 'Failed to update guest' });
+  }
+});
+
+app.delete('/api/v1/guests/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const result = await pool.query('DELETE FROM guests WHERE id = $1 RETURNING *', [id]);
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Guest not found' });
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error deleting guest:', error);
+    res.status(500).json({ error: 'Failed to delete guest' });
+  }
+});
+
+app.get('/api/v1/stats', async (req, res) => {
+  try {
+    const totalResult = await pool.query('SELECT COUNT(*) as count FROM guests');
+    const pendingResult = await pool.query("SELECT COUNT(*) as count FROM guests WHERE category = 'pending'");
+    const vipResult = await pool.query("SELECT COUNT(*) as count FROM guests WHERE category = 'A'");
+    const priorityResult = await pool.query("SELECT COUNT(*) as count FROM guests WHERE category = 'B'");
+    const standardResult = await pool.query("SELECT COUNT(*) as count FROM guests WHERE category = 'C'");
+    const emailsSentResult = await pool.query('SELECT COUNT(*) as count FROM guests WHERE email_sent = true');
+    const checkedInResult = await pool.query('SELECT COUNT(*) as count FROM guests WHERE checked_in_at IS NOT NULL');
+    res.json({
+      total: parseInt(totalResult.rows[0].count),
+      pending: parseInt(pendingResult.rows[0].count),
+      vip: parseInt(vipResult.rows[0].count),
+      priority: parseInt(priorityResult.rows[0].count),
+      standard: parseInt(standardResult.rows[0].count),
+      emailsSent: parseInt(emailsSentResult.rows[0].count),
+      checkedIn: parseInt(checkedInResult.rows[0].count),
+    });
+  } catch (error) {
+    console.error('Error fetching stats:', error);
+    res.status(500).json({ error: 'Failed to fetch stats' });
+  }
+});
+
+app.get('/api/v1/health', async (req, res) => {
+  try {
+    await pool.query('SELECT 1');
+    res.json({ status: 'ok', database: 'connected', timestamp: new Date().toISOString() });
+  } catch (error) {
+    res.json({ status: 'error', database: 'disconnected', timestamp: new Date().toISOString() });
+  }
+});
+
 // Health check
 app.get('/api/health', async (req, res) => {
   try {
@@ -548,7 +804,7 @@ const startServer = async () => {
   ========================================================
     Local:   http://localhost:${PORT}
 
-    Endpoints:
+    Guest Endpoints (also available at /api/v1/*):
     GET    /api/guests              - List all guests
     POST   /api/guests              - Add new guest
     PUT    /api/guests/:id          - Update guest
@@ -557,6 +813,13 @@ const startServer = async () => {
     POST   /api/guests/bulk-send    - Bulk send emails
     GET    /api/stats               - Dashboard statistics
     GET    /api/health              - Health check
+
+    Email Tracking (Resend Webhooks):
+    POST   /api/webhooks/resend     - Resend webhook receiver
+    GET    /api/email-events        - All email events + stats
+    GET    /api/guests/:id/email-events - Guest email history
+
+    Resend Webhook URL: https://berry.merktop.com/api/webhooks/resend
 
     Database: PostgreSQL (Railway)
   ========================================================
