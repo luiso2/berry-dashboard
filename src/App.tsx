@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { QRCode, generateGuestQRData } from './components/QRCode';
+import * as XLSX from 'xlsx';
 
 // API Configuration - connects to berry-bly-productions backend
 // Production API: https://berry.merktop.com/api/v1
@@ -37,6 +38,17 @@ type GuestStatus = 'pending' | 'approved' | 'declined' | 'rejected';
 type ViewType = 'overview' | 'guests' | 'emails' | 'vip' | 'priority' | 'standard' | 'analytics' | 'activity' | 'automation' | 'checkin';
 type ThemeMode = 'dark' | 'light';
 
+interface Purchase {
+  id: string;
+  eventId: string;
+  eventName: string;
+  ticketType: string;
+  amount: number;
+  currency: string;
+  purchaseDate: string;
+  status: 'completed' | 'pending' | 'refunded';
+}
+
 interface Guest {
   id: string;
   name: string;
@@ -59,6 +71,10 @@ interface Guest {
   engagementScore?: number;
   attendanceHistory?: number;
   aiScore?: number;
+  // Purchase history
+  purchaseHistory?: Purchase[];
+  totalSpent?: number;
+  isRecurring?: boolean;
 }
 
 interface QRModal {
@@ -677,7 +693,7 @@ function App() {
       g.instagram,
       g.partySize,
       g.category === 'A' ? 'VIP' : g.category === 'B' ? 'Priority' : g.category === 'C' ? 'Standard' : 'Pending',
-      g.aiScore || 0,
+      g.aiScore || calculateAIScore(g),
       g.emailSent ? 'Yes' : 'No',
       new Date(g.createdAt).toLocaleDateString(),
     ]);
@@ -692,6 +708,39 @@ function App() {
     URL.revokeObjectURL(url);
     addToast(`Exported ${filteredGuests.length} guests to CSV`, 'success');
     addActivity('Export CSV', `${filteredGuests.length} guests exported`, undefined, 'system');
+  };
+
+  // Export to Excel with full data
+  const exportToExcel = () => {
+    const data = filteredGuests.map((g) => ({
+      'Name': g.name,
+      'Email': g.email,
+      'Phone': g.phone,
+      'Instagram': g.instagram,
+      'Instagram Followers (Est.)': estimateFollowers(g.instagram),
+      'Party Size': g.partySize,
+      'Category': g.category === 'A' ? 'VIP' : g.category === 'B' ? 'Priority' : g.category === 'C' ? 'Standard' : g.category === 'rejected' ? 'Rejected' : 'Pending',
+      'AI Score': g.aiScore || calculateAIScore(g),
+      'Email Sent': g.emailSent ? 'Yes' : 'No',
+      'Checked In': g.checkedInAt ? 'Yes' : 'No',
+      'Checked In At': g.checkedInAt ? new Date(g.checkedInAt).toLocaleString() : '',
+      'Created At': new Date(g.createdAt).toLocaleString(),
+      'Notes': g.notes || '',
+      'Total Purchases': g.purchaseHistory?.length || 0,
+      'Total Spent': g.purchaseHistory?.reduce((sum, p) => sum + p.amount, 0) || 0,
+    }));
+
+    const worksheet = XLSX.utils.json_to_sheet(data);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Guests');
+
+    // Auto-fit columns
+    const colWidths = Object.keys(data[0] || {}).map(key => ({ wch: Math.max(key.length, 15) }));
+    worksheet['!cols'] = colWidths;
+
+    XLSX.writeFile(workbook, `berry-guests-${new Date().toISOString().split('T')[0]}.xlsx`);
+    addToast(`Exported ${filteredGuests.length} guests to Excel`, 'success');
+    addActivity('Export Excel', `${filteredGuests.length} guests exported`, undefined, 'system');
   };
 
   const toggleSelect = (id: string) => {
@@ -1097,6 +1146,23 @@ function App() {
                 >
                   ⚙ Filters
                 </button>
+                <div style={{ position: 'relative', display: 'inline-block' }}>
+                  <button
+                    onClick={exportToExcel}
+                    className="btn-hover"
+                    style={{
+                      background: '#22c55e15',
+                      color: '#22c55e',
+                      border: '1px solid #22c55e30',
+                      padding: '10px 16px',
+                      borderRadius: 8,
+                      fontSize: 14,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    📊 Excel
+                  </button>
+                </div>
                 <button
                   onClick={exportToCSV}
                   className="btn-hover"
@@ -1110,7 +1176,7 @@ function App() {
                     cursor: 'pointer',
                   }}
                 >
-                  ↓ Export
+                  ↓ CSV
                 </button>
               </>
             )}
