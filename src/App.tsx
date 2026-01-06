@@ -719,7 +719,7 @@ function App() {
         const cat = confirmation.emailOnly ? guest.category : confirmation.category;
         const msg = confirmation.guests.length === 1 ? customMessage : generateAIMessage(guest, cat || 'C');
 
-        const response = await fetch(`${API_URL}/guests/${guest.id}/send-invitation`, {
+        const response = await fetch(`${API_URL}${ENDPOINTS.guests}/${guest.id}/send-invitation`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ category: cat, customMessage: msg, emailOnly: confirmation.emailOnly }),
