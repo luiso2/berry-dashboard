@@ -72,11 +72,11 @@ const initDatabase = async () => {
 // Resend setup - uses RESEND_API_KEY from .env
 const resend = new Resend(process.env.RESEND_API_KEY);
 
-// Email configuration
+// Email configuration - Use verified domain from environment or fallback
 const EMAIL_CONFIG = {
-  from: 'Berry Bly <onboarding@resend.dev>', // Change to your verified domain
-  replyTo: 'berrybly@gmail.com',
-  adminEmail: 'berrybly@gmail.com', // Admin confirmation email
+  from: process.env.RESEND_FROM_EMAIL || 'Berry Bly <noreply@merktop.com>',
+  replyTo: process.env.RESEND_REPLY_TO || 'berrybly@gmail.com',
+  adminEmail: process.env.ADMIN_EMAIL || 'berrybly@gmail.com',
 };
 
 // CORS configuration - Allow dashboard domains
@@ -86,6 +86,9 @@ const allowedOrigins = [
   'http://localhost:5173',
   'http://localhost:3000',
 ];
+
+// Backend API del monorepo (source of truth para guest data)
+const MONOREPO_API_URL = 'https://backend-production-b84e.up.railway.app/api/v1';
 
 // Send confirmation email to admin
 const sendAdminConfirmation = async (sentGuests, category) => {
@@ -833,6 +836,9 @@ app.get('/api/v1/health', async (req, res) => {
   }
 });
 
+// NOTE: All guest-lists routes are in the PROXY ROUTES section below
+// They fetch data from the monorepo backend and handle emails via Resend
+
 // Health check
 app.get('/api/health', async (req, res) => {
   try {
@@ -841,6 +847,315 @@ app.get('/api/health', async (req, res) => {
   } catch (error) {
     res.json({ status: 'error', database: 'disconnected', timestamp: new Date().toISOString() });
   }
+});
+
+// ============================================
+// PROXY ROUTES TO MONOREPO BACKEND
+// These routes fetch data from the monorepo backend
+// and handle email sending via Resend
+// ============================================
+
+// GET /api/v1/guest-lists - Proxy to monorepo backend
+app.get('/api/v1/guest-lists', async (req, res) => {
+  try {
+    const queryParams = new URLSearchParams(req.query).toString();
+    const url = `${MONOREPO_API_URL}/guest-lists${queryParams ? '?' + queryParams : ''}`;
+    const response = await fetch(url);
+    const data = await response.json();
+    res.status(response.status).json(data);
+  } catch (error) {
+    console.error('Error proxying guest-lists:', error);
+    res.status(500).json({ error: 'Failed to fetch guest lists' });
+  }
+});
+
+// GET /api/v1/guest-lists/stats - Proxy stats
+app.get('/api/v1/guest-lists/stats', async (req, res) => {
+  try {
+    const queryParams = new URLSearchParams(req.query).toString();
+    const url = `${MONOREPO_API_URL}/guest-lists/stats${queryParams ? '?' + queryParams : ''}`;
+    const response = await fetch(url);
+    const data = await response.json();
+    res.status(response.status).json(data);
+  } catch (error) {
+    console.error('Error proxying stats:', error);
+    res.status(500).json({ error: 'Failed to fetch stats' });
+  }
+});
+
+// GET /api/v1/guest-lists/:id - Get single guest from monorepo
+app.get('/api/v1/guest-lists/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const response = await fetch(`${MONOREPO_API_URL}/guest-lists/${id}`);
+    const data = await response.json();
+    res.status(response.status).json(data);
+  } catch (error) {
+    console.error('Error proxying guest:', error);
+    res.status(500).json({ error: 'Failed to fetch guest' });
+  }
+});
+
+// POST /api/v1/guest-lists - Create guest in monorepo
+app.post('/api/v1/guest-lists', async (req, res) => {
+  try {
+    const response = await fetch(`${MONOREPO_API_URL}/guest-lists`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(req.body),
+    });
+    const data = await response.json();
+    res.status(response.status).json(data);
+  } catch (error) {
+    console.error('Error creating guest:', error);
+    res.status(500).json({ error: 'Failed to create guest' });
+  }
+});
+
+// PATCH /api/v1/guest-lists/:id - Update guest in monorepo
+app.patch('/api/v1/guest-lists/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const response = await fetch(`${MONOREPO_API_URL}/guest-lists/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(req.body),
+    });
+    const data = await response.json();
+    res.status(response.status).json(data);
+  } catch (error) {
+    console.error('Error updating guest:', error);
+    res.status(500).json({ error: 'Failed to update guest' });
+  }
+});
+
+// DELETE /api/v1/guest-lists/:id - Delete guest in monorepo
+app.delete('/api/v1/guest-lists/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const response = await fetch(`${MONOREPO_API_URL}/guest-lists/${id}`, {
+      method: 'DELETE',
+    });
+    if (response.status === 204) {
+      return res.status(204).send();
+    }
+    const data = await response.json();
+    res.status(response.status).json(data);
+  } catch (error) {
+    console.error('Error deleting guest:', error);
+    res.status(500).json({ error: 'Failed to delete guest' });
+  }
+});
+
+// POST /api/v1/guest-lists/:id/send-invitation - Send invitation email
+// This is the main endpoint that fetches guest from monorepo and sends email via Resend
+app.post('/api/v1/guest-lists/:id/send-invitation', async (req, res) => {
+  const { id } = req.params;
+  const { category, customMessage, emailOnly } = req.body;
+
+  try {
+    // 1. Fetch guest data from monorepo backend
+    const guestResponse = await fetch(`${MONOREPO_API_URL}/guest-lists/${id}`);
+
+    if (!guestResponse.ok) {
+      const errorData = await guestResponse.json();
+      return res.status(guestResponse.status).json(errorData);
+    }
+
+    const guest = await guestResponse.json();
+    console.log(`Sending invitation to: ${guest.name} (${guest.email})`);
+
+    // 2. Generate email content
+    const categoryNames = { A: 'VIP', B: 'Priority', C: 'Standard' };
+    const guestCategory = category || 'A';
+
+    const emailHtml = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      </head>
+      <body style="margin: 0; padding: 0; background-color: #0a0a0a; font-family: Georgia, serif;">
+        <div style="max-width: 600px; margin: 0 auto; padding: 40px 20px;">
+          <div style="text-align: center; margin-bottom: 40px;">
+            <h1 style="color: #d4af37; font-size: 32px; margin: 0;">Berry Bly</h1>
+            <p style="color: #666; font-size: 12px; text-transform: uppercase; letter-spacing: 3px; margin-top: 8px;">Exclusive Events</p>
+          </div>
+          <div style="background: linear-gradient(180deg, rgba(212, 175, 55, 0.1) 0%, transparent 100%); border: 1px solid rgba(212, 175, 55, 0.3); border-radius: 16px; padding: 40px; margin-bottom: 30px;">
+            <h2 style="color: #ffffff; font-size: 24px; margin: 0 0 20px 0;">Dear ${guest.name},</h2>
+            <p style="color: #cccccc; font-size: 16px; line-height: 1.8; margin: 0 0 20px 0;">
+              We are delighted to confirm your <strong style="color: #d4af37;">${categoryNames[guestCategory] || 'VIP'}</strong> invitation to our exclusive event.
+            </p>
+            ${customMessage ? `
+            <div style="background: rgba(255,255,255,0.05); border-left: 3px solid #d4af37; padding: 20px; margin: 20px 0; border-radius: 0 8px 8px 0;">
+              <p style="color: #ffffff; font-size: 16px; line-height: 1.6; margin: 0;">${customMessage}</p>
+            </div>
+            ` : ''}
+            <div style="margin-top: 30px; padding-top: 30px; border-top: 1px solid rgba(255,255,255,0.1);">
+              <h3 style="color: #d4af37; font-size: 14px; text-transform: uppercase; letter-spacing: 2px; margin: 0 0 20px 0;">Your Details</h3>
+              <table style="width: 100%; color: #999;">
+                <tr>
+                  <td style="padding: 8px 0; color: #666;">Guest Status</td>
+                  <td style="padding: 8px 0; color: #d4af37; text-align: right;">${categoryNames[guestCategory] || 'VIP'}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 8px 0; color: #666;">Party Size</td>
+                  <td style="padding: 8px 0; color: #ffffff; text-align: right;">${guest.numberOfGuests || 1} ${(guest.numberOfGuests || 1) > 1 ? 'guests' : 'guest'}</td>
+                </tr>
+              </table>
+            </div>
+          </div>
+          <div style="text-align: center; color: #666; font-size: 12px;">
+            <p style="margin: 0 0 10px 0;">Questions? Reply to this email or contact us directly.</p>
+            <p style="margin: 0; color: #444;">Berry Bly Events. All rights reserved.</p>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+
+    // 3. Send email via Resend
+    const { data: emailData, error: emailError } = await resend.emails.send({
+      from: EMAIL_CONFIG.from,
+      to: guest.email,
+      replyTo: EMAIL_CONFIG.replyTo,
+      subject: `You're Invited! - Berry Bly Events`,
+      html: emailHtml,
+    });
+
+    if (emailError) {
+      console.error('Resend error:', emailError);
+      return res.status(500).json({
+        error: 'Failed to send email',
+        details: emailError.message || emailError,
+        hint: 'If using onboarding@resend.dev, you can only send to verified emails. Verify a domain at resend.com/domains'
+      });
+    }
+
+    console.log(`✅ Email sent to ${guest.email} - Email ID: ${emailData?.id}`);
+
+    // 4. Update guest status in monorepo (optional, if not emailOnly)
+    if (!emailOnly) {
+      try {
+        await fetch(`${MONOREPO_API_URL}/guest-lists/${id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            status: category === 'rejected' ? 'rejected' : 'approved',
+            notes: `Email sent: ${new Date().toISOString()}`
+          }),
+        });
+      } catch (updateError) {
+        console.error('Failed to update guest status:', updateError);
+      }
+    }
+
+    // 5. Send admin confirmation
+    await sendAdminConfirmation([{ name: guest.name, email: guest.email }], guestCategory);
+
+    res.json({
+      success: true,
+      emailId: emailData?.id,
+      guest: {
+        id: guest.id,
+        name: guest.name,
+        email: guest.email,
+        status: emailOnly ? guest.status : 'approved',
+      }
+    });
+
+  } catch (error) {
+    console.error('Send invitation error:', error);
+    res.status(500).json({ error: 'Failed to send invitation', details: error.message });
+  }
+});
+
+// POST /api/v1/guest-lists/bulk-send - Send invitations to multiple guests
+app.post('/api/v1/guest-lists/bulk-send', async (req, res) => {
+  const { guestIds, category, customMessages } = req.body;
+
+  if (!guestIds || !Array.isArray(guestIds) || guestIds.length === 0) {
+    return res.status(400).json({ error: 'guestIds array is required' });
+  }
+
+  const results = [];
+  const errors = [];
+
+  for (const id of guestIds) {
+    try {
+      // Fetch guest from monorepo
+      const guestResponse = await fetch(`${MONOREPO_API_URL}/guest-lists/${id}`);
+      if (!guestResponse.ok) {
+        errors.push({ id, error: 'Guest not found' });
+        continue;
+      }
+
+      const guest = await guestResponse.json();
+      const customMessage = customMessages?.[id] || '';
+      const guestCategory = category || 'A';
+      const categoryNames = { A: 'VIP', B: 'Priority', C: 'Standard' };
+
+      // Generate and send email
+      const emailHtml = `
+        <!DOCTYPE html>
+        <html>
+        <body style="margin: 0; padding: 0; background-color: #0a0a0a; font-family: Georgia, serif;">
+          <div style="max-width: 600px; margin: 0 auto; padding: 40px 20px;">
+            <div style="text-align: center; margin-bottom: 40px;">
+              <h1 style="color: #d4af37; font-size: 32px; margin: 0;">Berry Bly</h1>
+            </div>
+            <div style="background: linear-gradient(180deg, rgba(212, 175, 55, 0.1) 0%, transparent 100%); border: 1px solid rgba(212, 175, 55, 0.3); border-radius: 16px; padding: 40px;">
+              <h2 style="color: #ffffff; font-size: 24px; margin: 0 0 20px 0;">Dear ${guest.name},</h2>
+              <p style="color: #cccccc; font-size: 16px; line-height: 1.8;">
+                Your <strong style="color: #d4af37;">${categoryNames[guestCategory]}</strong> invitation is confirmed.
+              </p>
+              ${customMessage ? `<p style="color: #ffffff; margin-top: 20px;">${customMessage}</p>` : ''}
+            </div>
+          </div>
+        </body>
+        </html>
+      `;
+
+      const { data, error } = await resend.emails.send({
+        from: EMAIL_CONFIG.from,
+        to: guest.email,
+        replyTo: EMAIL_CONFIG.replyTo,
+        subject: `You're Invited! - Berry Bly Events`,
+        html: emailHtml,
+      });
+
+      if (error) {
+        errors.push({ id, email: guest.email, error: error.message });
+        continue;
+      }
+
+      // Update guest status
+      await fetch(`${MONOREPO_API_URL}/guest-lists/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'approved' }),
+      });
+
+      results.push({ id, email: guest.email, emailId: data?.id, name: guest.name });
+      console.log(`Bulk send: ${guest.name} (${guest.email})`);
+    } catch (error) {
+      errors.push({ id, error: error.message });
+    }
+  }
+
+  // Send admin confirmation
+  if (results.length > 0) {
+    await sendAdminConfirmation(results.map(r => ({ name: r.name, email: r.email })), category || 'A');
+  }
+
+  res.json({
+    success: true,
+    sent: results.length,
+    failed: errors.length,
+    results,
+    errors
+  });
 });
 
 // Start server
