@@ -61,7 +61,43 @@ const initDatabase = async () => {
       CREATE INDEX IF NOT EXISTS idx_email_events_event_type ON email_events(event_type);
     `);
 
-    console.log('Database tables initialized successfully');
+    // Create tickets table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS tickets (
+        id VARCHAR(50) PRIMARY KEY,
+        event_id VARCHAR(50) NOT NULL,
+        external_id VARCHAR(100),
+        ticket_type VARCHAR(100) NOT NULL DEFAULT 'General',
+        holder_name VARCHAR(255),
+        holder_email VARCHAR(255),
+        qr_code VARCHAR(500),
+        status VARCHAR(20) DEFAULT 'valid',
+        check_in_time TIMESTAMP,
+        price INTEGER DEFAULT 0,
+        source VARCHAR(50) DEFAULT 'manual',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_tickets_event ON tickets(event_id);
+      CREATE INDEX IF NOT EXISTS idx_tickets_status ON tickets(status);
+    `);
+
+    // Create activity_log table for persistent activity tracking
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS activity_log (
+        id SERIAL PRIMARY KEY,
+        action VARCHAR(100) NOT NULL,
+        details TEXT,
+        guest_name VARCHAR(255),
+        guest_id INTEGER,
+        event_type VARCHAR(50) DEFAULT 'system',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_activity_log_type ON activity_log(event_type);
+      CREATE INDEX IF NOT EXISTS idx_activity_log_created ON activity_log(created_at DESC);
+    `);
+
+    console.log('Database tables initialized successfully (guests, email_events, tickets, activity_log)');
   } catch (error) {
     console.error('Error initializing database:', error);
   } finally {
@@ -1349,6 +1385,248 @@ app.post('/api/v1/guest-lists/bulk-send', async (req, res) => {
   });
 });
 
+// ============================================
+// TICKETS ENDPOINTS
+// ============================================
+
+// Helper to generate ticket ID
+const generateTicketId = () => `tkt_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+// GET /api/v1/tickets - List all tickets
+app.get('/api/v1/tickets', async (req, res) => {
+  try {
+    const { eventId, status } = req.query;
+    let queryText = 'SELECT * FROM tickets WHERE 1=1';
+    const params = [];
+    let paramIndex = 1;
+
+    if (eventId) {
+      queryText += ` AND event_id = $${paramIndex++}`;
+      params.push(eventId);
+    }
+    if (status) {
+      queryText += ` AND status = $${paramIndex++}`;
+      params.push(status);
+    }
+
+    queryText += ' ORDER BY created_at DESC';
+    const result = await pool.query(queryText, params);
+
+    const tickets = result.rows.map(t => ({
+      id: t.id,
+      eventId: t.event_id,
+      externalId: t.external_id,
+      ticketType: t.ticket_type,
+      holderName: t.holder_name,
+      holderEmail: t.holder_email,
+      qrCode: t.qr_code,
+      status: t.status,
+      checkInTime: t.check_in_time,
+      price: t.price,
+      source: t.source,
+      createdAt: t.created_at,
+    }));
+
+    res.json(tickets);
+  } catch (error) {
+    console.error('Error fetching tickets:', error);
+    res.status(500).json({ error: 'Failed to fetch tickets' });
+  }
+});
+
+// GET /api/v1/tickets/stats - Get ticket statistics
+app.get('/api/v1/tickets/stats', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT
+        COUNT(*) as total,
+        COUNT(*) FILTER (WHERE status = 'valid') as valid,
+        COUNT(*) FILTER (WHERE status = 'used') as used,
+        COALESCE(SUM(price), 0) as revenue
+      FROM tickets
+    `);
+
+    const stats = result.rows[0];
+    res.json({
+      total: parseInt(stats.total || 0),
+      valid: parseInt(stats.valid || 0),
+      used: parseInt(stats.used || 0),
+      revenue: parseInt(stats.revenue || 0),
+    });
+  } catch (error) {
+    console.error('Error fetching ticket stats:', error);
+    res.status(500).json({ error: 'Failed to fetch ticket stats' });
+  }
+});
+
+// POST /api/v1/tickets - Create a ticket
+app.post('/api/v1/tickets', async (req, res) => {
+  try {
+    const { eventId, ticketType, holderName, holderEmail, price, source } = req.body;
+    const ticketId = generateTicketId();
+
+    const result = await pool.query(
+      `INSERT INTO tickets (id, event_id, ticket_type, holder_name, holder_email, price, source)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       RETURNING *`,
+      [ticketId, eventId || 'default', ticketType || 'General', holderName, holderEmail, price || 0, source || 'manual']
+    );
+
+    const ticket = result.rows[0];
+    res.status(201).json({
+      id: ticket.id,
+      eventId: ticket.event_id,
+      ticketType: ticket.ticket_type,
+      holderName: ticket.holder_name,
+      holderEmail: ticket.holder_email,
+      status: ticket.status,
+      price: ticket.price,
+    });
+  } catch (error) {
+    console.error('Error creating ticket:', error);
+    res.status(500).json({ error: 'Failed to create ticket' });
+  }
+});
+
+// POST /api/v1/tickets/import - Import tickets from CSV data
+app.post('/api/v1/tickets/import', async (req, res) => {
+  try {
+    const { tickets, eventId } = req.body;
+
+    if (!Array.isArray(tickets)) {
+      return res.status(400).json({ error: 'tickets must be an array' });
+    }
+
+    const imported = [];
+    for (const ticket of tickets) {
+      const ticketId = generateTicketId();
+      await pool.query(
+        `INSERT INTO tickets (id, event_id, ticket_type, holder_name, holder_email, external_id, price)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [
+          ticketId,
+          eventId || 'default',
+          ticket.ticketType || 'General',
+          ticket.holderName,
+          ticket.holderEmail,
+          ticket.externalId,
+          ticket.price || 0
+        ]
+      );
+      imported.push(ticketId);
+    }
+
+    res.json({ success: true, imported: imported.length });
+  } catch (error) {
+    console.error('Error importing tickets:', error);
+    res.status(500).json({ error: 'Failed to import tickets' });
+  }
+});
+
+// POST /api/v1/tickets/:ticketId/check-in - Check in a ticket
+app.post('/api/v1/tickets/:ticketId/check-in', async (req, res) => {
+  try {
+    const { ticketId } = req.params;
+
+    const ticketResult = await pool.query('SELECT * FROM tickets WHERE id = $1', [ticketId]);
+
+    if (ticketResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Ticket not found' });
+    }
+
+    const ticket = ticketResult.rows[0];
+
+    if (ticket.status === 'used') {
+      return res.status(400).json({ error: 'Ticket already used', checkInTime: ticket.check_in_time });
+    }
+
+    await pool.query(
+      `UPDATE tickets SET status = 'used', check_in_time = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
+      [ticketId]
+    );
+
+    res.json({ success: true, ticketId, checkInTime: new Date().toISOString() });
+  } catch (error) {
+    console.error('Error checking in ticket:', error);
+    res.status(500).json({ error: 'Failed to check in ticket' });
+  }
+});
+
+// ============================================
+// ACTIVITY LOG ENDPOINTS
+// ============================================
+
+// POST /api/v1/activity - Log an activity
+app.post('/api/v1/activity', async (req, res) => {
+  try {
+    const { action, details, guestName, guestId, eventType } = req.body;
+
+    const result = await pool.query(
+      `INSERT INTO activity_log (action, details, guest_name, guest_id, event_type)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING *`,
+      [action, details, guestName || null, guestId || null, eventType || 'system']
+    );
+
+    res.status(201).json({
+      id: result.rows[0].id.toString(),
+      action: result.rows[0].action,
+      details: result.rows[0].details,
+      guestName: result.rows[0].guest_name,
+      type: result.rows[0].event_type,
+      timestamp: result.rows[0].created_at,
+    });
+  } catch (error) {
+    console.error('Error logging activity:', error);
+    res.status(500).json({ error: 'Failed to log activity' });
+  }
+});
+
+// GET /api/v1/activity - Get activity log
+app.get('/api/v1/activity', async (req, res) => {
+  try {
+    const { limit = 100, type } = req.query;
+
+    let queryText = 'SELECT * FROM activity_log';
+    const params = [];
+
+    if (type) {
+      queryText += ' WHERE event_type = $1';
+      params.push(type);
+    }
+
+    queryText += ' ORDER BY created_at DESC LIMIT $' + (params.length + 1);
+    params.push(parseInt(limit));
+
+    const result = await pool.query(queryText, params);
+
+    const activities = result.rows.map(row => ({
+      id: row.id.toString(),
+      action: row.action,
+      details: row.details,
+      guestName: row.guest_name,
+      type: row.event_type,
+      timestamp: row.created_at,
+    }));
+
+    res.json(activities);
+  } catch (error) {
+    console.error('Error fetching activity log:', error);
+    res.status(500).json({ error: 'Failed to fetch activity log' });
+  }
+});
+
+// DELETE /api/v1/activity - Clear activity log
+app.delete('/api/v1/activity', async (req, res) => {
+  try {
+    await pool.query('DELETE FROM activity_log');
+    res.json({ success: true, message: 'Activity log cleared' });
+  } catch (error) {
+    console.error('Error clearing activity log:', error);
+    res.status(500).json({ error: 'Failed to clear activity log' });
+  }
+});
+
 // Start server
 const startServer = async () => {
   await initDatabase();
@@ -1374,6 +1652,18 @@ const startServer = async () => {
     POST   /api/webhooks/resend     - Resend webhook receiver
     GET    /api/email-events        - All email events + stats
     GET    /api/guests/:id/email-events - Guest email history
+
+    Tickets Endpoints:
+    GET    /api/v1/tickets          - List all tickets
+    GET    /api/v1/tickets/stats    - Ticket statistics
+    POST   /api/v1/tickets          - Create ticket
+    POST   /api/v1/tickets/import   - Import tickets
+    POST   /api/v1/tickets/:id/check-in - Check in ticket
+
+    Activity Log Endpoints:
+    GET    /api/v1/activity         - Get activity log
+    POST   /api/v1/activity         - Log activity
+    DELETE /api/v1/activity         - Clear activity log
 
     Resend Webhook URL: https://berry.merktop.com/api/webhooks/resend
 
