@@ -2844,7 +2844,7 @@ function App() {
         {activeView === 'sponsors' && (
           <div className="page-content" style={{ padding: '32px', animation: 'fadeIn 0.3s ease' }}>
             {/* Sponsors Stats */}
-            <div className="stats-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 32 }}>
+            <div className="stats-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, marginBottom: 32 }}>
               <div className="stat-card" style={{ background: '#0a0a0a', border: '1px solid #1a1a1a', borderRadius: 12, padding: 20 }}>
                 <div style={{ fontSize: 13, color: '#666', marginBottom: 4 }}>Total Sponsors</div>
                 <div style={{ fontSize: 32, fontWeight: 700 }}>{sponsorStats.total}</div>
@@ -2857,24 +2857,19 @@ function App() {
                 <div style={{ fontSize: 13, color: '#22c55e', marginBottom: 4 }}>Active</div>
                 <div style={{ fontSize: 32, fontWeight: 700, color: '#22c55e' }}>{sponsorStats.active}</div>
               </div>
-              <div className="stat-card" style={{ background: '#0a0a0a', border: '1px solid #d4af3740', borderRadius: 12, padding: 20 }}>
-                <div style={{ fontSize: 13, color: '#d4af37', marginBottom: 4 }}>Revenue</div>
-                <div style={{ fontSize: 32, fontWeight: 700, color: '#d4af37' }}>${sponsorStats.revenue.toLocaleString()}</div>
-              </div>
             </div>
 
             {/* Sponsor Tiers */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 24 }}>
               {[
-                { tier: 'Platinum', price: 10000, color: '#e5e4e2' },
-                { tier: 'Gold', price: 5000, color: '#d4af37' },
-                { tier: 'Silver', price: 2500, color: '#c0c0c0' },
-                { tier: 'Bronze', price: 1000, color: '#cd7f32' }
+                { tier: 'Platinum', color: '#e5e4e2' },
+                { tier: 'Gold', color: '#d4af37' },
+                { tier: 'Silver', color: '#c0c0c0' },
+                { tier: 'Bronze', color: '#cd7f32' }
               ].map(t => (
                 <div key={t.tier} style={{ background: '#0a0a0a', border: `1px solid ${t.color}40`, borderRadius: 12, padding: 20, textAlign: 'center' }}>
                   <div style={{ fontSize: 28, marginBottom: 8, color: t.color }}>◆</div>
                   <div style={{ fontSize: 16, fontWeight: 600, color: t.color }}>{t.tier}</div>
-                  <div style={{ fontSize: 24, fontWeight: 700, marginTop: 8 }}>${t.price.toLocaleString()}</div>
                 </div>
               ))}
             </div>
@@ -2962,7 +2957,6 @@ function App() {
                         }}>
                           {sponsor.tier}
                         </span>
-                        <span style={{ fontSize: 13, color: '#d4af37' }}>${sponsor.tierPrice?.toLocaleString() || '0'}</span>
                       </div>
                     </div>
                   </div>
@@ -3198,18 +3192,14 @@ function App() {
               </p>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 16, marginBottom: 24 }}>
-              <div style={{ background: '#111', padding: 16, borderRadius: 8 }}>
-                <div style={{ fontSize: 12, color: '#666', marginBottom: 4 }}>Investment</div>
-                <div style={{ fontSize: 24, fontWeight: 700, color: '#d4af37' }}>${selectedSponsor.tierPrice?.toLocaleString() || '0'}</div>
-              </div>
-              <div style={{ background: '#111', padding: 16, borderRadius: 8 }}>
+            {selectedSponsor.website && (
+              <div style={{ background: '#111', padding: 16, borderRadius: 8, marginBottom: 24 }}>
                 <div style={{ fontSize: 12, color: '#666', marginBottom: 4 }}>Website</div>
                 <a href={selectedSponsor.website} target="_blank" rel="noreferrer" style={{ fontSize: 14, color: '#3b82f6' }}>
-                  {selectedSponsor.website || 'Not provided'}
+                  {selectedSponsor.website}
                 </a>
               </div>
-            </div>
+            )}
 
             <div style={{ marginBottom: 24 }}>
               <h4 style={{ margin: '0 0 12px', fontSize: 14, color: '#666' }}>Upload Logo</h4>
