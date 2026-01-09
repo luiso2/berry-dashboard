@@ -119,6 +119,19 @@ const initDatabase = async () => {
       CREATE INDEX IF NOT EXISTS idx_sponsors_tier ON sponsors(sponsorship_tier);
     `);
 
+    // Add missing columns to sponsors table (for existing databases)
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='sponsors' AND column_name='tier_name') THEN
+          ALTER TABLE sponsors ADD COLUMN tier_name VARCHAR(100);
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='sponsors' AND column_name='tier_price') THEN
+          ALTER TABLE sponsors ADD COLUMN tier_price VARCHAR(50);
+        END IF;
+      END $$;
+    `);
+
     console.log('Database tables initialized successfully (guests, email_events, tickets, activity_log, sponsors)');
   } catch (error) {
     console.error('Error initializing database:', error);
