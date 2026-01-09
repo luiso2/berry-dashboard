@@ -141,6 +141,9 @@ const initDatabase = async () => {
         IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='sponsors' AND column_name='tier_name') THEN
           ALTER TABLE sponsors ADD COLUMN tier_name VARCHAR(100);
         END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='sponsors' AND column_name='logo_url') THEN
+          ALTER TABLE sponsors ADD COLUMN logo_url TEXT;
+        END IF;
         IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='sponsors' AND column_name='tier_price') THEN
           ALTER TABLE sponsors ADD COLUMN tier_price VARCHAR(50);
         END IF;
@@ -1924,6 +1927,7 @@ app.get('/api/v1/sponsors', async (req, res) => {
       message: s.message,
       status: s.status,
       notes: s.notes,
+      logoUrl: s.logo_url,
       createdAt: s.created_at,
     }));
 
@@ -1958,6 +1962,7 @@ app.get('/api/v1/sponsors/:id', async (req, res) => {
       message: s.message,
       status: s.status,
       notes: s.notes,
+      logoUrl: s.logo_url,
       createdAt: s.created_at,
     });
   } catch (error) {
@@ -1970,7 +1975,7 @@ app.get('/api/v1/sponsors/:id', async (req, res) => {
 app.patch('/api/v1/sponsors/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { status, notes } = req.body;
+    const { status, notes, logoUrl } = req.body;
 
     const updates = [];
     const params = [];
@@ -1983,6 +1988,10 @@ app.patch('/api/v1/sponsors/:id', async (req, res) => {
     if (notes !== undefined) {
       updates.push(`notes = $${paramIndex++}`);
       params.push(notes);
+    }
+    if (logoUrl !== undefined) {
+      updates.push(`logo_url = $${paramIndex++}`);
+      params.push(logoUrl);
     }
 
     if (updates.length === 0) {
@@ -2040,8 +2049,16 @@ app.patch('/api/v1/sponsors/:id', async (req, res) => {
       companyName: s.company_name,
       contactName: s.contact_name,
       email: s.email,
+      phone: s.phone,
+      website: s.website,
+      tier: s.sponsorship_tier,
+      tierName: s.tier_name,
+      tierPrice: s.tier_price,
+      message: s.message,
       status: s.status,
       notes: s.notes,
+      logoUrl: s.logo_url,
+      createdAt: s.created_at,
     });
   } catch (error) {
     console.error('Error updating sponsor:', error);

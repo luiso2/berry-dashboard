@@ -1,6 +1,7 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { QRCode, generateGuestQRData } from './components/QRCode';
 import * as XLSX from 'xlsx';
+import * as htmlToImage from 'html-to-image';
 
 // API Configuration - connects to berry-bly-productions backend
 // Production API: https://berry.merktop.com/api/v1
@@ -520,6 +521,8 @@ function App() {
   const [ticketStats, setTicketStats] = useState({ total: 0, valid: 0, used: 0, revenue: 0 });
   const [sponsors, setSponsors] = useState<Sponsor[]>([]);
   const [sponsorStats, setSponsorStats] = useState({ total: 0, pending: 0, active: 0, revenue: 0 });
+  const [selectedSponsor, setSelectedSponsor] = useState<Sponsor | null>(null);
+  const [showFlyerGenerator, setShowFlyerGenerator] = useState(false);
 
   // Collapsible menu state
   const [expandedMenus, setExpandedMenus] = useState<Set<string>>(new Set(['main', 'intelligence']));
@@ -684,13 +687,81 @@ function App() {
       });
       if (res.ok) {
         fetchSponsors();
+        addToast('Sponsor deleted successfully', 'success');
       } else {
         console.error('Error deleting sponsor');
+        addToast('Failed to delete sponsor', 'error');
       }
     } catch (error) {
       console.error('Error deleting sponsor:', error);
+      addToast('Failed to delete sponsor', 'error');
     }
   }, [fetchSponsors]);
+
+  // Update Sponsor (approve, logo, etc.)
+  const updateSponsor = useCallback(async (id: string, updates: { status?: string; logoUrl?: string; notes?: string }) => {
+    try {
+      const res = await fetch(`${API_URL}/sponsors/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updates),
+      });
+      if (res.ok) {
+        const updated = await res.json();
+        setSponsors(prev => prev.map(s => s.id === id ? { ...s, ...updated } : s));
+        if (updates.status === 'approved') {
+          addToast(`Sponsor approved! Email sent to ${updated.email}`, 'success');
+        } else if (updates.logoUrl) {
+          addToast('Logo uploaded successfully', 'success');
+        } else {
+          addToast('Sponsor updated', 'success');
+        }
+        fetchSponsors();
+        return updated;
+      } else {
+        addToast('Failed to update sponsor', 'error');
+      }
+    } catch (error) {
+      console.error('Error updating sponsor:', error);
+      addToast('Failed to update sponsor', 'error');
+    }
+  }, [fetchSponsors]);
+
+  // Handle logo upload (converts to base64)
+  const handleLogoUpload = useCallback(async (sponsorId: string, file: File) => {
+    return new Promise<void>((resolve) => {
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        const logoUrl = e.target?.result as string;
+        await updateSponsor(sponsorId, { logoUrl });
+        resolve();
+      };
+      reader.readAsDataURL(file);
+    });
+  }, [updateSponsor]);
+
+  // Flyer ref for html-to-image
+  const flyerRef = useRef<HTMLDivElement>(null);
+
+  // Generate and download flyer
+  const downloadFlyer = useCallback(async () => {
+    if (!flyerRef.current) return;
+    try {
+      const dataUrl = await htmlToImage.toPng(flyerRef.current, {
+        quality: 1,
+        pixelRatio: 2,
+        backgroundColor: '#000',
+      });
+      const link = document.createElement('a');
+      link.download = `berry-bly-event-flyer-${Date.now()}.png`;
+      link.href = dataUrl;
+      link.click();
+      addToast('Flyer downloaded!', 'success');
+    } catch (error) {
+      console.error('Error generating flyer:', error);
+      addToast('Failed to generate flyer', 'error');
+    }
+  }, []);
 
   // Fetch new modules when view changes
   useEffect(() => {
@@ -2812,25 +2883,47 @@ function App() {
             <div style={{ background: '#0a0a0a', borderRadius: 12, border: '1px solid #1a1a1a', overflow: 'hidden' }}>
               <div style={{ padding: '16px 20px', borderBottom: '1px solid #1a1a1a', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span style={{ fontSize: 15, fontWeight: 600 }}>Sponsors</span>
-                <button
-                  onClick={() => addToast('Sponsor portal link copied!', 'success')}
-                  style={{
-                    background: '#d4af37',
-                    border: 'none',
-                    color: '#000',
-                    padding: '8px 16px',
-                    borderRadius: 6,
-                    fontSize: 13,
-                    fontWeight: 600,
-                    cursor: 'pointer'
-                  }}
-                >
-                  Copy Application Link
-                </button>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button
+                    onClick={() => setShowFlyerGenerator(true)}
+                    style={{
+                      background: '#a78bfa20',
+                      border: '1px solid #a78bfa40',
+                      color: '#a78bfa',
+                      padding: '8px 16px',
+                      borderRadius: 6,
+                      fontSize: 13,
+                      fontWeight: 600,
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Generate Flyer
+                  </button>
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(`${window.location.origin}/sponsor-application`);
+                      addToast('Sponsor portal link copied!', 'success');
+                    }}
+                    style={{
+                      background: '#d4af37',
+                      border: 'none',
+                      color: '#000',
+                      padding: '8px 16px',
+                      borderRadius: 6,
+                      fontSize: 13,
+                      fontWeight: 600,
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Copy Application Link
+                  </button>
+                </div>
               </div>
               {sponsors.map((sponsor, idx) => (
                 <div
                   key={sponsor.id}
+                  onClick={() => setSelectedSponsor(sponsor)}
+                  className="nav-hover"
                   style={{
                     padding: '16px 20px',
                     borderBottom: '1px solid #1a1a1a',
@@ -2838,6 +2931,7 @@ function App() {
                     alignItems: 'center',
                     justifyContent: 'space-between',
                     animation: `fadeIn 0.2s ease ${idx * 0.02}s both`,
+                    cursor: 'pointer',
                   }}
                 >
                   <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
@@ -2846,6 +2940,7 @@ function App() {
                       height: 48,
                       borderRadius: 12,
                       background: sponsor.logoUrl ? `url(${sponsor.logoUrl}) center/cover` : '#1a1a1a',
+                      backgroundSize: 'cover',
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
@@ -2867,14 +2962,59 @@ function App() {
                         }}>
                           {sponsor.tier}
                         </span>
-                        <span style={{ fontSize: 13, color: '#d4af37' }}>${sponsor.tierPrice.toLocaleString()}</span>
+                        <span style={{ fontSize: 13, color: '#d4af37' }}>${sponsor.tierPrice?.toLocaleString() || '0'}</span>
                       </div>
                     </div>
                   </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    {sponsor.status === 'pending' && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          updateSponsor(sponsor.id, { status: 'approved' });
+                        }}
+                        style={{
+                          background: '#22c55e20',
+                          border: 'none',
+                          color: '#22c55e',
+                          padding: '6px 12px',
+                          borderRadius: 6,
+                          fontSize: 12,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        Approve
+                      </button>
+                    )}
+                    <label
+                      onClick={(e) => e.stopPropagation()}
+                      style={{
+                        background: '#3b82f620',
+                        border: 'none',
+                        color: '#3b82f6',
+                        padding: '6px 12px',
+                        borderRadius: 6,
+                        fontSize: 12,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 4,
+                      }}
+                    >
+                      {sponsor.logoUrl ? '✓ Logo' : '+ Logo'}
+                      <input
+                        type="file"
+                        accept="image/*"
+                        style={{ display: 'none' }}
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) handleLogoUpload(sponsor.id, file);
+                        }}
+                      />
+                    </label>
                     <span style={{
-                      background: sponsor.status === 'active' ? '#22c55e20' : sponsor.status === 'pending' ? '#fbbf2420' : '#66666620',
-                      color: sponsor.status === 'active' ? '#22c55e' : sponsor.status === 'pending' ? '#fbbf24' : '#888',
+                      background: sponsor.status === 'approved' || sponsor.status === 'active' ? '#22c55e20' : sponsor.status === 'pending' ? '#fbbf2420' : '#66666620',
+                      color: sponsor.status === 'approved' || sponsor.status === 'active' ? '#22c55e' : sponsor.status === 'pending' ? '#fbbf24' : '#888',
                       padding: '4px 12px',
                       borderRadius: 6,
                       fontSize: 12,
@@ -2895,13 +3035,10 @@ function App() {
                         borderRadius: 6,
                         fontSize: 12,
                         cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 4,
                       }}
                       title="Delete sponsor"
                     >
-                      ✕ Delete
+                      ✕
                     </button>
                   </div>
                 </div>
@@ -2968,6 +3105,342 @@ function App() {
               }}
             >
               Close
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Sponsor Detail Modal */}
+      {selectedSponsor && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,0.9)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 200,
+            animation: 'fadeIn 0.2s ease',
+            padding: 16,
+          }}
+          onClick={() => setSelectedSponsor(null)}
+        >
+          <div
+            style={{
+              background: '#0a0a0a',
+              border: '1px solid #1a1a1a',
+              borderRadius: 16,
+              width: '100%',
+              maxWidth: 600,
+              padding: 32,
+              animation: 'slideUp 0.3s ease',
+              maxHeight: '90vh',
+              overflowY: 'auto',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 24 }}>
+              <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
+                <div style={{
+                  width: 80,
+                  height: 80,
+                  borderRadius: 16,
+                  background: selectedSponsor.logoUrl ? `url(${selectedSponsor.logoUrl}) center/cover` : '#1a1a1a',
+                  backgroundSize: 'cover',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: 32,
+                  color: selectedSponsor.tier === 'platinum' ? '#e5e4e2' : selectedSponsor.tier === 'gold' ? '#d4af37' : '#666',
+                }}>
+                  {!selectedSponsor.logoUrl && '◆'}
+                </div>
+                <div>
+                  <h2 style={{ margin: 0, fontSize: 24, fontWeight: 600 }}>{selectedSponsor.companyName}</h2>
+                  <p style={{ margin: '4px 0 0', fontSize: 14, color: '#888' }}>{selectedSponsor.contactName} • {selectedSponsor.email}</p>
+                  <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                    <span style={{
+                      background: selectedSponsor.tier === 'platinum' ? '#e5e4e220' : selectedSponsor.tier === 'gold' ? '#d4af3720' : '#66666620',
+                      color: selectedSponsor.tier === 'platinum' ? '#e5e4e2' : selectedSponsor.tier === 'gold' ? '#d4af37' : '#666',
+                      padding: '4px 12px',
+                      borderRadius: 6,
+                      fontSize: 12,
+                      textTransform: 'capitalize',
+                    }}>
+                      {selectedSponsor.tier}
+                    </span>
+                    <span style={{
+                      background: selectedSponsor.status === 'approved' || selectedSponsor.status === 'active' ? '#22c55e20' : selectedSponsor.status === 'pending' ? '#fbbf2420' : '#66666620',
+                      color: selectedSponsor.status === 'approved' || selectedSponsor.status === 'active' ? '#22c55e' : selectedSponsor.status === 'pending' ? '#fbbf24' : '#888',
+                      padding: '4px 12px',
+                      borderRadius: 6,
+                      fontSize: 12,
+                      textTransform: 'capitalize',
+                    }}>
+                      {selectedSponsor.status}
+                    </span>
+                  </div>
+                </div>
+              </div>
+              <button
+                onClick={() => setSelectedSponsor(null)}
+                style={{ background: 'none', border: 'none', color: '#666', fontSize: 24, cursor: 'pointer' }}
+              >
+                ×
+              </button>
+            </div>
+
+            <div style={{ marginBottom: 24 }}>
+              <h4 style={{ margin: '0 0 8px', fontSize: 14, color: '#666' }}>Message</h4>
+              <p style={{ margin: 0, fontSize: 15, color: '#ccc', background: '#111', padding: 16, borderRadius: 8 }}>
+                {selectedSponsor.message || 'No message provided'}
+              </p>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 16, marginBottom: 24 }}>
+              <div style={{ background: '#111', padding: 16, borderRadius: 8 }}>
+                <div style={{ fontSize: 12, color: '#666', marginBottom: 4 }}>Investment</div>
+                <div style={{ fontSize: 24, fontWeight: 700, color: '#d4af37' }}>${selectedSponsor.tierPrice?.toLocaleString() || '0'}</div>
+              </div>
+              <div style={{ background: '#111', padding: 16, borderRadius: 8 }}>
+                <div style={{ fontSize: 12, color: '#666', marginBottom: 4 }}>Website</div>
+                <a href={selectedSponsor.website} target="_blank" rel="noreferrer" style={{ fontSize: 14, color: '#3b82f6' }}>
+                  {selectedSponsor.website || 'Not provided'}
+                </a>
+              </div>
+            </div>
+
+            <div style={{ marginBottom: 24 }}>
+              <h4 style={{ margin: '0 0 12px', fontSize: 14, color: '#666' }}>Upload Logo</h4>
+              <label style={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: 24,
+                border: '2px dashed #333',
+                borderRadius: 12,
+                cursor: 'pointer',
+                background: '#0f0f0f',
+              }}>
+                <span style={{ fontSize: 32, marginBottom: 8 }}>📁</span>
+                <span style={{ fontSize: 14, color: '#888' }}>{selectedSponsor.logoUrl ? 'Change logo' : 'Click to upload logo'}</span>
+                <input
+                  type="file"
+                  accept="image/*"
+                  style={{ display: 'none' }}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) {
+                      handleLogoUpload(selectedSponsor.id, file);
+                      setSelectedSponsor({ ...selectedSponsor, logoUrl: URL.createObjectURL(file) });
+                    }
+                  }}
+                />
+              </label>
+            </div>
+
+            <div style={{ display: 'flex', gap: 12 }}>
+              {selectedSponsor.status === 'pending' && (
+                <>
+                  <button
+                    onClick={() => {
+                      updateSponsor(selectedSponsor.id, { status: 'approved' });
+                      setSelectedSponsor({ ...selectedSponsor, status: 'approved' });
+                    }}
+                    style={{
+                      flex: 1,
+                      background: '#22c55e',
+                      border: 'none',
+                      color: '#000',
+                      padding: '12px 24px',
+                      borderRadius: 8,
+                      fontSize: 14,
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Approve Sponsor
+                  </button>
+                  <button
+                    onClick={() => {
+                      updateSponsor(selectedSponsor.id, { status: 'declined' });
+                      setSelectedSponsor({ ...selectedSponsor, status: 'declined' });
+                    }}
+                    style={{
+                      flex: 1,
+                      background: '#ef444420',
+                      border: '1px solid #ef444440',
+                      color: '#ef4444',
+                      padding: '12px 24px',
+                      borderRadius: 8,
+                      fontSize: 14,
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Decline
+                  </button>
+                </>
+              )}
+              <button
+                onClick={() => setSelectedSponsor(null)}
+                style={{
+                  flex: selectedSponsor.status !== 'pending' ? 1 : 0,
+                  minWidth: selectedSponsor.status !== 'pending' ? 'auto' : 100,
+                  background: '#1a1a1a',
+                  border: 'none',
+                  color: '#fff',
+                  padding: '12px 24px',
+                  borderRadius: 8,
+                  fontSize: 14,
+                  cursor: 'pointer',
+                }}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Flyer Generator Modal */}
+      {showFlyerGenerator && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,0.95)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 200,
+            animation: 'fadeIn 0.2s ease',
+            padding: 16,
+          }}
+          onClick={() => setShowFlyerGenerator(false)}
+        >
+          <div
+            style={{
+              background: '#0a0a0a',
+              border: '1px solid #1a1a1a',
+              borderRadius: 16,
+              padding: 24,
+              animation: 'slideUp 0.3s ease',
+              maxHeight: '95vh',
+              overflowY: 'auto',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+              <h2 style={{ margin: 0, fontSize: 20, fontWeight: 600 }}>Event Flyer Generator</h2>
+              <button
+                onClick={() => setShowFlyerGenerator(false)}
+                style={{ background: 'none', border: 'none', color: '#666', fontSize: 24, cursor: 'pointer' }}
+              >
+                ×
+              </button>
+            </div>
+
+            {/* Flyer Preview */}
+            <div
+              ref={flyerRef}
+              style={{
+                width: 600,
+                height: 800,
+                background: 'linear-gradient(180deg, #0a0a0a 0%, #1a1a1a 100%)',
+                borderRadius: 16,
+                padding: 40,
+                position: 'relative',
+                overflow: 'hidden',
+                marginBottom: 20,
+              }}
+            >
+              {/* Gold border effect */}
+              <div style={{ position: 'absolute', inset: 0, border: '2px solid #d4af37', borderRadius: 16, opacity: 0.5 }} />
+
+              {/* Header */}
+              <div style={{ textAlign: 'center', marginBottom: 40 }}>
+                <h1 style={{ fontSize: 48, fontWeight: 700, color: '#d4af37', margin: '0 0 8px', fontFamily: 'Georgia, serif' }}>BERRY BLY</h1>
+                <p style={{ fontSize: 14, color: '#666', letterSpacing: 4, textTransform: 'uppercase', margin: 0 }}>Luxury Events</p>
+              </div>
+
+              {/* Event Info */}
+              <div style={{ textAlign: 'center', marginBottom: 60 }}>
+                <h2 style={{ fontSize: 32, fontWeight: 600, color: '#fff', margin: '0 0 16px' }}>EXCLUSIVE EVENT</h2>
+                <p style={{ fontSize: 18, color: '#888', margin: 0 }}>An Unforgettable Night</p>
+              </div>
+
+              {/* Stats */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 20, marginBottom: 60 }}>
+                <div style={{ textAlign: 'center' }}>
+                  <div style={{ fontSize: 36, fontWeight: 700, color: '#d4af37' }}>{stats.total}</div>
+                  <div style={{ fontSize: 12, color: '#666', textTransform: 'uppercase' }}>Guests</div>
+                </div>
+                <div style={{ textAlign: 'center' }}>
+                  <div style={{ fontSize: 36, fontWeight: 700, color: '#a78bfa' }}>{stats.vip}</div>
+                  <div style={{ fontSize: 12, color: '#666', textTransform: 'uppercase' }}>VIP</div>
+                </div>
+                <div style={{ textAlign: 'center' }}>
+                  <div style={{ fontSize: 36, fontWeight: 700, color: '#22c55e' }}>{sponsorStats.active}</div>
+                  <div style={{ fontSize: 12, color: '#666', textTransform: 'uppercase' }}>Sponsors</div>
+                </div>
+              </div>
+
+              {/* Sponsor Logos */}
+              {sponsors.filter(s => s.status === 'approved' || s.status === 'active').length > 0 && (
+                <div style={{ marginBottom: 40 }}>
+                  <p style={{ fontSize: 12, color: '#666', textAlign: 'center', marginBottom: 20, textTransform: 'uppercase', letterSpacing: 2 }}>Sponsored By</p>
+                  <div style={{ display: 'flex', justifyContent: 'center', gap: 24, flexWrap: 'wrap' }}>
+                    {sponsors.filter(s => s.status === 'approved' || s.status === 'active').slice(0, 6).map(sponsor => (
+                      <div
+                        key={sponsor.id}
+                        style={{
+                          width: 80,
+                          height: 80,
+                          borderRadius: 12,
+                          background: sponsor.logoUrl ? `url(${sponsor.logoUrl}) center/contain no-repeat` : '#1a1a1a',
+                          backgroundSize: 'contain',
+                          border: '1px solid #333',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontSize: 12,
+                          color: '#666',
+                          padding: 8,
+                          textAlign: 'center',
+                        }}
+                      >
+                        {!sponsor.logoUrl && sponsor.companyName.substring(0, 10)}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Footer */}
+              <div style={{ position: 'absolute', bottom: 40, left: 40, right: 40, textAlign: 'center' }}>
+                <div style={{ fontSize: 14, color: '#d4af37', marginBottom: 8 }}>berrybly.com</div>
+                <div style={{ fontSize: 11, color: '#444' }}>Follow @berrybly on Instagram</div>
+              </div>
+            </div>
+
+            <button
+              onClick={downloadFlyer}
+              style={{
+                width: '100%',
+                background: '#d4af37',
+                border: 'none',
+                color: '#000',
+                padding: '14px 24px',
+                borderRadius: 8,
+                fontSize: 16,
+                fontWeight: 600,
+                cursor: 'pointer',
+              }}
+            >
+              Download Flyer (PNG)
             </button>
           </div>
         </div>
