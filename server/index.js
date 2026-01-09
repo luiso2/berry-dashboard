@@ -35,8 +35,23 @@ const initDatabase = async () => {
         email_sent BOOLEAN DEFAULT false,
         email_sent_at TIMESTAMP,
         checked_in_at TIMESTAMP,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        is_featured BOOLEAN DEFAULT false,
+        rating INTEGER DEFAULT 0
       );
+    `);
+
+    // Add featured columns if missing (for existing databases)
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='guests' AND column_name='is_featured') THEN
+          ALTER TABLE guests ADD COLUMN is_featured BOOLEAN DEFAULT false;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='guests' AND column_name='rating') THEN
+          ALTER TABLE guests ADD COLUMN rating INTEGER DEFAULT 0;
+        END IF;
+      END $$;
     `);
 
     // Create email_events table for Resend webhook tracking
@@ -280,6 +295,8 @@ const transformGuest = (row) => ({
   emailSentAt: row.email_sent_at ? row.email_sent_at.toISOString() : null,
   checkedInAt: row.checked_in_at ? row.checked_in_at.toISOString() : null,
   createdAt: row.created_at.toISOString(),
+  isFeatured: row.is_featured || false,
+  rating: row.rating || 0,
 });
 
 // Email template generator
@@ -439,10 +456,10 @@ app.post('/api/guests', async (req, res) => {
   }
 });
 
-// PUT /api/guests/:id - Update guest (change category, check-in, etc.)
+// PUT /api/guests/:id - Update guest (change category, check-in, featured, rating, etc.)
 app.put('/api/guests/:id', async (req, res) => {
   const { id } = req.params;
-  const { category, checkedInAt, emailSent, emailSentAt, notes, partySize, phone, instagram } = req.body;
+  const { category, checkedInAt, emailSent, emailSentAt, notes, partySize, phone, instagram, isFeatured, rating } = req.body;
 
   try {
     // Build dynamic update query
@@ -488,6 +505,16 @@ app.put('/api/guests/:id', async (req, res) => {
     if (instagram !== undefined) {
       updates.push(`instagram = $${paramCount}`);
       values.push(instagram);
+      paramCount++;
+    }
+    if (isFeatured !== undefined) {
+      updates.push(`is_featured = $${paramCount}`);
+      values.push(isFeatured);
+      paramCount++;
+    }
+    if (rating !== undefined) {
+      updates.push(`rating = $${paramCount}`);
+      values.push(Math.min(10, Math.max(0, parseInt(rating) || 0))); // Clamp 0-10
       paramCount++;
     }
 
@@ -661,6 +688,7 @@ app.get('/api/stats', async (req, res) => {
     const standardResult = await pool.query("SELECT COUNT(*) as count FROM guests WHERE category = 'C'");
     const emailsSentResult = await pool.query('SELECT COUNT(*) as count FROM guests WHERE email_sent = true');
     const checkedInResult = await pool.query('SELECT COUNT(*) as count FROM guests WHERE checked_in_at IS NOT NULL');
+    const featuredResult = await pool.query('SELECT COUNT(*) as count FROM guests WHERE is_featured = true');
 
     res.json({
       total: parseInt(totalResult.rows[0].count),
@@ -670,10 +698,39 @@ app.get('/api/stats', async (req, res) => {
       standard: parseInt(standardResult.rows[0].count),
       emailsSent: parseInt(emailsSentResult.rows[0].count),
       checkedIn: parseInt(checkedInResult.rows[0].count),
+      featured: parseInt(featuredResult.rows[0].count),
     });
   } catch (error) {
     console.error('Error fetching stats:', error);
     res.status(500).json({ error: 'Failed to fetch stats' });
+  }
+});
+
+// GET /api/guests/featured - Get featured guests (Hot selection)
+app.get('/api/guests/featured', async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT * FROM guests WHERE is_featured = true ORDER BY rating DESC, created_at DESC'
+    );
+    const guests = result.rows.map(transformGuest);
+    res.json(guests);
+  } catch (error) {
+    console.error('Error fetching featured guests:', error);
+    res.status(500).json({ error: 'Failed to fetch featured guests' });
+  }
+});
+
+// GET /api/v1/guests/featured - Alias for featured guests
+app.get('/api/v1/guests/featured', async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT * FROM guests WHERE is_featured = true ORDER BY rating DESC, created_at DESC'
+    );
+    const guests = result.rows.map(transformGuest);
+    res.json(guests);
+  } catch (error) {
+    console.error('Error fetching featured guests:', error);
+    res.status(500).json({ error: 'Failed to fetch featured guests' });
   }
 });
 
