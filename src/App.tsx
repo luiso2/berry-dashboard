@@ -75,6 +75,9 @@ interface Guest {
   purchaseHistory?: Purchase[];
   totalSpent?: number;
   isRecurring?: boolean;
+  // Featured/Hot classification
+  isFeatured?: boolean;
+  rating?: number;
 }
 
 interface QRModal {
@@ -518,6 +521,17 @@ function App() {
   const [sponsors, setSponsors] = useState<Sponsor[]>([]);
   const [sponsorStats, setSponsorStats] = useState({ total: 0, pending: 0, active: 0, revenue: 0 });
 
+  // Collapsible menu state
+  const [expandedMenus, setExpandedMenus] = useState<Set<string>>(new Set(['main', 'intelligence']));
+  const toggleMenu = (menu: string) => {
+    setExpandedMenus(prev => {
+      const next = new Set(prev);
+      if (next.has(menu)) next.delete(menu);
+      else next.add(menu);
+      return next;
+    });
+  };
+
   const addToast = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
     const id = Date.now().toString();
     setToasts((prev) => [...prev, { id, message, type }]);
@@ -661,6 +675,23 @@ function App() {
     }
   }, []);
 
+  // Delete Sponsor
+  const deleteSponsor = useCallback(async (id: string) => {
+    if (!confirm('Are you sure you want to delete this sponsor?')) return;
+    try {
+      const res = await fetch(`${API_URL}/sponsors/${id}`, {
+        method: 'DELETE',
+      });
+      if (res.ok) {
+        fetchSponsors();
+      } else {
+        console.error('Error deleting sponsor');
+      }
+    } catch (error) {
+      console.error('Error deleting sponsor:', error);
+    }
+  }, [fetchSponsors]);
+
   // Fetch new modules when view changes
   useEffect(() => {
     if (activeView === 'models') fetchModels();
@@ -773,11 +804,13 @@ function App() {
     const checkedIn = guests.filter((g) => g.checkedInAt).length;
     const checkedInPartySize = guests.filter(g => g.checkedInAt).reduce((sum, g) => sum + g.partySize, 0);
     const checkInRate = accepted > 0 ? Math.round((checkedIn / accepted) * 100) : 0;
+    // Featured/Hot stats
+    const featured = guests.filter((g) => g.isFeatured).length;
 
     return {
       total, pending, vip, priority, standard, emailsSent, accepted,
       avgScore, highScoreGuests, totalPartySize, conversionRate, emailRate,
-      checkedIn, checkedInPartySize, checkInRate,
+      checkedIn, checkedInPartySize, checkInRate, featured,
     };
   }, [guests]);
 
@@ -1210,29 +1243,65 @@ function App() {
           </button>
         </div>
 
-        <nav style={{ flex: 1 }}>
-          <div style={{ fontSize: 12, color: '#444', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: 8, paddingLeft: 12 }}>Main</div>
-          <NavItem label="Overview" active={activeView === 'overview'} icon="◈" onClick={() => navigateTo('overview')} />
-          <NavItem label="Guests" active={activeView === 'guests'} icon="◉" count={stats.total} onClick={() => navigateTo('guests')} />
-          <NavItem label="Emails Sent" active={activeView === 'emails'} icon="✉" count={stats.emailsSent} onClick={() => navigateTo('emails')} />
+        <nav style={{ flex: 1, overflowY: 'auto' }}>
+          <CollapsibleMenu
+            title="Main"
+            expanded={expandedMenus.has('main')}
+            onToggle={() => toggleMenu('main')}
+            count={stats.total + stats.emailsSent}
+          >
+            <NavItem label="Overview" active={activeView === 'overview'} icon="◈" onClick={() => navigateTo('overview')} />
+            <NavItem label="Guests" active={activeView === 'guests'} icon="◉" count={stats.total} onClick={() => navigateTo('guests')} />
+            <NavItem label="Emails Sent" active={activeView === 'emails'} icon="✉" count={stats.emailsSent} onClick={() => navigateTo('emails')} />
+          </CollapsibleMenu>
 
-          <div style={{ fontSize: 12, color: '#444', textTransform: 'uppercase', letterSpacing: '1px', margin: '24px 0 8px', paddingLeft: 12 }}>Intelligence</div>
-          <NavItem label="Analytics" active={activeView === 'analytics'} icon="◐" onClick={() => navigateTo('analytics')} />
-          <NavItem label="Activity Log" active={activeView === 'activity'} icon="◷" count={activityLog.length} onClick={() => navigateTo('activity')} />
-          <NavItem label="Automation" active={activeView === 'automation'} icon="⚡" count={scheduledEmails.filter(e => e.status === 'pending').length} onClick={() => navigateTo('automation')} />
+          <CollapsibleMenu
+            title="Intelligence"
+            expanded={expandedMenus.has('intelligence')}
+            onToggle={() => toggleMenu('intelligence')}
+            count={activityLog.length}
+          >
+            <NavItem label="Analytics" active={activeView === 'analytics'} icon="◐" onClick={() => navigateTo('analytics')} />
+            <NavItem label="Activity Log" active={activeView === 'activity'} icon="◷" count={activityLog.length} onClick={() => navigateTo('activity')} />
+            <NavItem label="Automation" active={activeView === 'automation'} icon="⚡" count={scheduledEmails.filter(e => e.status === 'pending').length} onClick={() => navigateTo('automation')} />
+          </CollapsibleMenu>
 
-          <div style={{ fontSize: 12, color: '#444', textTransform: 'uppercase', letterSpacing: '1px', margin: '24px 0 8px', paddingLeft: 12 }}>Event Day</div>
-          <NavItem label="Check-In" active={activeView === 'checkin'} icon="✓" count={stats.checkedIn} onClick={() => navigateTo('checkin')} />
+          <CollapsibleMenu
+            title="Event Day"
+            expanded={expandedMenus.has('eventday')}
+            onToggle={() => toggleMenu('eventday')}
+            count={stats.checkedIn}
+          >
+            <NavItem label="Check-In" active={activeView === 'checkin'} icon="✓" count={stats.checkedIn} onClick={() => navigateTo('checkin')} />
+          </CollapsibleMenu>
 
-          <div style={{ fontSize: 12, color: '#444', textTransform: 'uppercase', letterSpacing: '1px', margin: '24px 0 8px', paddingLeft: 12 }}>Talent</div>
-          <NavItem label="Hot Girls" active={activeView === 'models'} icon="★" count={modelStats.total} onClick={() => navigateTo('models')} />
+          <CollapsibleMenu
+            title="Talent"
+            expanded={expandedMenus.has('talent')}
+            onToggle={() => toggleMenu('talent')}
+            count={stats.featured}
+          >
+            <NavItem label="Hot/Featured" active={activeView === 'models'} icon="🔥" count={stats.featured} onClick={() => navigateTo('models')} />
+          </CollapsibleMenu>
 
-          <div style={{ fontSize: 12, color: '#444', textTransform: 'uppercase', letterSpacing: '1px', margin: '24px 0 8px', paddingLeft: 12 }}>Reservations</div>
-          <NavItem label="Tables" active={activeView === 'tables'} icon="▣" count={tableStats.total} onClick={() => navigateTo('tables')} />
-          <NavItem label="Tickets" active={activeView === 'tickets'} icon="🎫" count={ticketStats.total} onClick={() => navigateTo('tickets')} />
+          <CollapsibleMenu
+            title="Reservations"
+            expanded={expandedMenus.has('reservations')}
+            onToggle={() => toggleMenu('reservations')}
+            count={tableStats.total + ticketStats.total}
+          >
+            <NavItem label="Tables" active={activeView === 'tables'} icon="▣" count={tableStats.total} onClick={() => navigateTo('tables')} />
+            <NavItem label="Tickets" active={activeView === 'tickets'} icon="🎫" count={ticketStats.total} onClick={() => navigateTo('tickets')} />
+          </CollapsibleMenu>
 
-          <div style={{ fontSize: 12, color: '#444', textTransform: 'uppercase', letterSpacing: '1px', margin: '24px 0 8px', paddingLeft: 12 }}>Business</div>
-          <NavItem label="Sponsors" active={activeView === 'sponsors'} icon="◆" count={sponsorStats.total} onClick={() => navigateTo('sponsors')} />
+          <CollapsibleMenu
+            title="Business"
+            expanded={expandedMenus.has('business')}
+            onToggle={() => toggleMenu('business')}
+            count={sponsorStats.total}
+          >
+            <NavItem label="Sponsors" active={activeView === 'sponsors'} icon="◆" count={sponsorStats.total} onClick={() => navigateTo('sponsors')} />
+          </CollapsibleMenu>
         </nav>
 
         {/* Settings Row */}
@@ -1627,7 +1696,7 @@ function App() {
             </div>
 
             {/* Score Distribution */}
-            <div style={{ background: '#0a0a0a', borderRadius: 12, border: '1px solid #1a1a1a', padding: 24 }}>
+            <div style={{ background: '#0a0a0a', borderRadius: 12, border: '1px solid #1a1a1a', padding: 24, marginBottom: 24 }}>
               <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 24, color: '#fff' }}>AI Score Distribution</h3>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', height: 150, paddingBottom: 40 }}>
                 {[
@@ -1638,6 +1707,107 @@ function App() {
                   { range: '81-100', count: guests.filter(g => (g.aiScore || 0) > 80).length, color: '#22c55e' },
                 ].map((item, idx) => (
                   <ChartBar key={idx} value={item.count} max={stats.total || 1} label={item.range} color={item.color} />
+                ))}
+              </div>
+            </div>
+
+            {/* Business Metrics Row */}
+            <h2 style={{ fontSize: 18, fontWeight: 600, marginBottom: 16, color: '#d4af37' }}>Business Metrics</h2>
+            <div className="chart-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 24, marginBottom: 24 }}>
+              {/* Sponsors by Tier */}
+              <div style={{ background: '#0a0a0a', borderRadius: 12, border: '1px solid #1a1a1a', padding: 24 }}>
+                <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 24, color: '#fff' }}>Sponsors by Tier</h3>
+                <div style={{ display: 'flex', justifyContent: 'space-around', alignItems: 'flex-end', height: 160, paddingBottom: 40 }}>
+                  <ChartBar value={sponsors.filter(s => s.tier === 'platinum').length} max={sponsorStats.total || 1} label="Platinum" color="#e5e4e2" />
+                  <ChartBar value={sponsors.filter(s => s.tier === 'gold').length} max={sponsorStats.total || 1} label="Gold" color="#d4af37" />
+                  <ChartBar value={sponsors.filter(s => s.tier === 'silver').length} max={sponsorStats.total || 1} label="Silver" color="#c0c0c0" />
+                  <ChartBar value={sponsors.filter(s => s.tier === 'bronze').length} max={sponsorStats.total || 1} label="Bronze" color="#cd7f32" />
+                </div>
+              </div>
+
+              {/* Tickets Status */}
+              <div style={{ background: '#0a0a0a', borderRadius: 12, border: '1px solid #1a1a1a', padding: 24 }}>
+                <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 24, color: '#fff' }}>Tickets Status</h3>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 160 }}>
+                  <div style={{ position: 'relative', width: 140, height: 140 }}>
+                    <svg width="140" height="140" viewBox="0 0 140 140">
+                      <circle cx="70" cy="70" r="60" fill="none" stroke="#1a1a1a" strokeWidth="16" />
+                      <circle
+                        cx="70"
+                        cy="70"
+                        r="60"
+                        fill="none"
+                        stroke="#22c55e"
+                        strokeWidth="16"
+                        strokeDasharray={`${ticketStats.total > 0 ? (ticketStats.used / ticketStats.total) * 377 : 0} 377`}
+                        transform="rotate(-90 70 70)"
+                        style={{ transition: 'stroke-dasharray 0.5s ease' }}
+                      />
+                    </svg>
+                    <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+                      <span style={{ fontSize: 28, fontWeight: 700, color: '#22c55e' }}>{ticketStats.used}</span>
+                      <span style={{ fontSize: 12, color: '#666' }}>checked in</span>
+                    </div>
+                  </div>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'center', gap: 16, marginTop: 12 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+                    <div style={{ width: 10, height: 10, borderRadius: 2, background: '#22c55e' }} />
+                    <span style={{ color: '#888' }}>Used ({ticketStats.used})</span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+                    <div style={{ width: 10, height: 10, borderRadius: 2, background: '#1a1a1a' }} />
+                    <span style={{ color: '#888' }}>Valid ({ticketStats.valid})</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Tables by Zone */}
+              <div style={{ background: '#0a0a0a', borderRadius: 12, border: '1px solid #1a1a1a', padding: 24 }}>
+                <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 24, color: '#fff' }}>Tables by Zone</h3>
+                <div style={{ display: 'flex', justifyContent: 'space-around', alignItems: 'flex-end', height: 160, paddingBottom: 40 }}>
+                  <ChartBar value={tables.filter(t => t.zone === 'VIP').length} max={tableStats.total || 1} label="VIP" color="#a78bfa" />
+                  <ChartBar value={tables.filter(t => t.zone === 'Premium').length} max={tableStats.total || 1} label="Premium" color="#60a5fa" />
+                  <ChartBar value={tables.filter(t => t.zone === 'Standard').length} max={tableStats.total || 1} label="Standard" color="#6b7280" />
+                  <ChartBar value={tables.filter(t => t.zone === 'Lounge').length} max={tableStats.total || 1} label="Lounge" color="#f97316" />
+                </div>
+              </div>
+            </div>
+
+            {/* Revenue Overview */}
+            <div className="stats-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 24 }}>
+              <MetricCard label="Sponsor Revenue" value={`$${sponsorStats.revenue.toLocaleString()}`} subtitle="From active sponsors" color="#d4af37" />
+              <MetricCard label="Ticket Revenue" value={`$${ticketStats.revenue.toLocaleString()}`} subtitle="Total ticket sales" color="#22c55e" />
+              <MetricCard label="Total Guests" value={stats.totalPartySize} subtitle="Expected party size" color="#a78bfa" />
+              <MetricCard label="Check-in Rate" value={`${stats.checkInRate}%`} subtitle={`${stats.checkedIn} checked in`} color="#3b82f6" />
+            </div>
+
+            {/* Pipeline Status */}
+            <div style={{ background: '#0a0a0a', borderRadius: 12, border: '1px solid #1a1a1a', padding: 24 }}>
+              <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 24, color: '#fff' }}>Guest Pipeline</h3>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
+                {[
+                  { label: 'Pending', count: stats.pending, color: '#fbbf24', pct: stats.total > 0 ? (stats.pending / stats.total) * 100 : 0 },
+                  { label: 'VIP', count: stats.vip, color: '#a78bfa', pct: stats.total > 0 ? (stats.vip / stats.total) * 100 : 0 },
+                  { label: 'Priority', count: stats.priority, color: '#60a5fa', pct: stats.total > 0 ? (stats.priority / stats.total) * 100 : 0 },
+                  { label: 'Standard', count: stats.standard, color: '#6b7280', pct: stats.total > 0 ? (stats.standard / stats.total) * 100 : 0 },
+                ].map((stage, idx) => (
+                  <div key={idx} style={{ flex: stage.pct || 1, height: 32, background: stage.color, borderRadius: idx === 0 ? '6px 0 0 6px' : idx === 3 ? '0 6px 6px 0' : 0, display: 'flex', alignItems: 'center', justifyContent: 'center', minWidth: stage.count > 0 ? 60 : 0, transition: 'flex 0.5s ease' }}>
+                    {stage.count > 0 && <span style={{ fontSize: 12, fontWeight: 600, color: '#000' }}>{stage.count}</span>}
+                  </div>
+                ))}
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                {[
+                  { label: 'Pending', color: '#fbbf24' },
+                  { label: 'VIP', color: '#a78bfa' },
+                  { label: 'Priority', color: '#60a5fa' },
+                  { label: 'Standard', color: '#6b7280' },
+                ].map((stage, idx) => (
+                  <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <div style={{ width: 10, height: 10, borderRadius: 2, background: stage.color }} />
+                    <span style={{ fontSize: 12, color: '#888' }}>{stage.label}</span>
+                  </div>
                 ))}
               </div>
             </div>
@@ -2712,6 +2882,27 @@ function App() {
                     }}>
                       {sponsor.status}
                     </span>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        deleteSponsor(sponsor.id);
+                      }}
+                      style={{
+                        background: '#ef444420',
+                        border: 'none',
+                        color: '#ef4444',
+                        padding: '6px 12px',
+                        borderRadius: 6,
+                        fontSize: 12,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 4,
+                      }}
+                      title="Delete sponsor"
+                    >
+                      ✕ Delete
+                    </button>
                   </div>
                 </div>
               ))}
@@ -3050,6 +3241,71 @@ function App() {
 }
 
 // Components
+const CollapsibleMenu = ({
+  title,
+  expanded,
+  onToggle,
+  children,
+  count
+}: {
+  title: string;
+  expanded: boolean;
+  onToggle: () => void;
+  children: React.ReactNode;
+  count?: number;
+}) => (
+  <div style={{ marginBottom: 4 }}>
+    <div
+      onClick={onToggle}
+      className="nav-hover"
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        padding: '10px 12px',
+        borderRadius: 8,
+        cursor: 'pointer',
+        background: expanded ? 'rgba(255,255,255,0.02)' : 'transparent',
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <span style={{
+          fontSize: 12,
+          color: '#666',
+          transition: 'transform 0.2s',
+          transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)',
+        }}>▶</span>
+        <span style={{
+          fontSize: 12,
+          color: expanded ? '#888' : '#555',
+          textTransform: 'uppercase',
+          letterSpacing: '1px',
+          fontWeight: 600,
+        }}>{title}</span>
+      </div>
+      {count !== undefined && count > 0 && (
+        <span style={{
+          fontSize: 11,
+          color: '#555',
+          background: '#1a1a1a',
+          padding: '2px 6px',
+          borderRadius: 4,
+        }}>
+          {count}
+        </span>
+      )}
+    </div>
+    <div style={{
+      overflow: 'hidden',
+      maxHeight: expanded ? '500px' : '0',
+      transition: 'max-height 0.3s ease-in-out',
+      paddingLeft: 8,
+    }}>
+      {children}
+    </div>
+  </div>
+);
+
 const NavItem = ({ label, active, icon, count, onClick }: { label: string; active: boolean; icon: string; count?: number; onClick: () => void }) => (
   <div
     onClick={onClick}
