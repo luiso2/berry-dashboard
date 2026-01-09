@@ -97,7 +97,29 @@ const initDatabase = async () => {
       CREATE INDEX IF NOT EXISTS idx_activity_log_created ON activity_log(created_at DESC);
     `);
 
-    console.log('Database tables initialized successfully (guests, email_events, tickets, activity_log)');
+    // Create sponsors table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS sponsors (
+        id VARCHAR(50) PRIMARY KEY,
+        company_name VARCHAR(255) NOT NULL,
+        contact_name VARCHAR(255) NOT NULL,
+        email VARCHAR(255) NOT NULL,
+        phone VARCHAR(100),
+        website VARCHAR(500),
+        sponsorship_tier VARCHAR(50) NOT NULL,
+        tier_name VARCHAR(100),
+        tier_price VARCHAR(50),
+        message TEXT,
+        status VARCHAR(20) DEFAULT 'pending',
+        notes TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_sponsors_status ON sponsors(status);
+      CREATE INDEX IF NOT EXISTS idx_sponsors_tier ON sponsors(sponsorship_tier);
+    `);
+
+    console.log('Database tables initialized successfully (guests, email_events, tickets, activity_log, sponsors)');
   } catch (error) {
     console.error('Error initializing database:', error);
   } finally {
@@ -1624,6 +1646,353 @@ app.delete('/api/v1/activity', async (req, res) => {
   } catch (error) {
     console.error('Error clearing activity log:', error);
     res.status(500).json({ error: 'Failed to clear activity log' });
+  }
+});
+
+// ============================================
+// SPONSORS ENDPOINTS
+// ============================================
+
+// Sponsorship tier details
+const sponsorshipTiers = {
+  bronze: { name: 'Bronze Partner', price: '$5,000' },
+  silver: { name: 'Silver Partner', price: '$15,000' },
+  gold: { name: 'Gold Partner', price: '$35,000' },
+  platinum: { name: 'Platinum Partner', price: '$75,000' },
+  title: { name: 'Title Sponsor', price: '$150,000+' },
+  custom: { name: 'Custom Partnership', price: 'TBD' },
+};
+
+// Helper to generate sponsor ID
+const generateSponsorId = () => `spo_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+// GET /api/v1/sponsors/tiers - Get sponsorship tier information
+app.get('/api/v1/sponsors/tiers', async (req, res) => {
+  res.json({
+    tiers: Object.entries(sponsorshipTiers).map(([value, details]) => ({
+      value,
+      ...details,
+    })),
+  });
+});
+
+// GET /api/v1/sponsors/stats - Get sponsor statistics
+app.get('/api/v1/sponsors/stats', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT
+        COUNT(*) as total,
+        COUNT(*) FILTER (WHERE status = 'pending') as pending,
+        COUNT(*) FILTER (WHERE status = 'approved') as active,
+        COUNT(*) FILTER (WHERE status = 'contacted') as contacted
+      FROM sponsors
+    `);
+
+    const stats = result.rows[0];
+    res.json({
+      total: parseInt(stats.total || 0),
+      pending: parseInt(stats.pending || 0),
+      active: parseInt(stats.active || 0),
+      contacted: parseInt(stats.contacted || 0),
+      revenue: 0, // Calculate based on approved sponsors
+    });
+  } catch (error) {
+    console.error('Error fetching sponsor stats:', error);
+    res.status(500).json({ error: 'Failed to fetch sponsor stats' });
+  }
+});
+
+// POST /api/v1/sponsors - Submit sponsor inquiry (public)
+app.post('/api/v1/sponsors', async (req, res) => {
+  try {
+    const { companyName, contactName, email, phone, website, sponsorshipTier, message } = req.body;
+
+    if (!companyName || !contactName || !email || !message) {
+      return res.status(400).json({ error: 'Company name, contact name, email and message are required' });
+    }
+
+    const sponsorId = generateSponsorId();
+    const tier = sponsorshipTier || 'custom';
+    const tierInfo = sponsorshipTiers[tier] || sponsorshipTiers.custom;
+
+    const result = await pool.query(
+      `INSERT INTO sponsors (id, company_name, contact_name, email, phone, website, sponsorship_tier, tier_name, tier_price, message, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending')
+       RETURNING *`,
+      [sponsorId, companyName, contactName, email, phone || '', website || '', tier, tierInfo.name, tierInfo.price, message]
+    );
+
+    console.log(`✅ New sponsor inquiry: ${companyName} - ${tierInfo.name}`);
+
+    // Send confirmation email to sponsor
+    const confirmationHtml = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      </head>
+      <body style="margin: 0; padding: 0; background-color: #0a0a0a; font-family: Georgia, serif;">
+        <div style="max-width: 600px; margin: 0 auto; padding: 40px 20px;">
+          <div style="text-align: center; margin-bottom: 40px;">
+            <h1 style="color: #d4af37; font-size: 32px; margin: 0;">Berry Bly</h1>
+            <p style="color: #666; font-size: 12px; text-transform: uppercase; letter-spacing: 3px; margin-top: 8px;">Partnership Program</p>
+          </div>
+          <div style="background: linear-gradient(180deg, rgba(212, 175, 55, 0.1) 0%, transparent 100%); border: 1px solid rgba(212, 175, 55, 0.3); border-radius: 16px; padding: 40px; margin-bottom: 30px;">
+            <h2 style="color: #ffffff; font-size: 24px; margin: 0 0 20px 0;">Thank You, ${contactName}!</h2>
+            <p style="color: #cccccc; font-size: 16px; line-height: 1.8; margin: 0 0 20px 0;">
+              We've received your partnership inquiry for <strong style="color: #d4af37;">${companyName}</strong>.
+            </p>
+            <div style="background: rgba(255,255,255,0.05); border-left: 3px solid #d4af37; padding: 20px; margin: 20px 0; border-radius: 0 8px 8px 0;">
+              <p style="color: #d4af37; font-size: 14px; text-transform: uppercase; margin: 0 0 10px 0;">Partnership Level</p>
+              <p style="color: #ffffff; font-size: 18px; margin: 0;">${tierInfo.name}</p>
+            </div>
+            <p style="color: #cccccc; font-size: 16px; line-height: 1.8;">
+              Our partnerships team will review your inquiry and contact you within 48 hours to discuss the next steps.
+            </p>
+          </div>
+          <div style="text-align: center; color: #666; font-size: 12px;">
+            <p style="margin: 0 0 10px 0;">Questions? Email us at <a href="mailto:partnerships@berrybly.com" style="color: #d4af37;">partnerships@berrybly.com</a></p>
+            <p style="margin: 0; color: #444;">Berry Bly Productions. All rights reserved.</p>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+
+    resend.emails.send({
+      from: EMAIL_CONFIG.from,
+      to: email,
+      subject: `Partnership Inquiry Received - ${tierInfo.name}`,
+      html: confirmationHtml,
+    }).catch((err) => console.error('Failed to send sponsor confirmation email:', err));
+
+    // Send notification to admin
+    const adminNotificationHtml = `
+      <!DOCTYPE html>
+      <html>
+      <body style="margin: 0; padding: 0; background-color: #0a0a0a; font-family: Arial, sans-serif;">
+        <div style="max-width: 600px; margin: 0 auto; padding: 40px 20px;">
+          <div style="text-align: center; margin-bottom: 30px;">
+            <h1 style="color: #d4af37; font-size: 24px; margin: 0;">New Sponsor Inquiry</h1>
+          </div>
+          <div style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 16px; padding: 25px;">
+            <table style="width: 100%; color: #fff;">
+              <tr><td style="padding: 8px 0; color: #666;">Company</td><td style="color: #d4af37; text-align: right;">${companyName}</td></tr>
+              <tr><td style="padding: 8px 0; color: #666;">Contact</td><td style="text-align: right;">${contactName}</td></tr>
+              <tr><td style="padding: 8px 0; color: #666;">Email</td><td style="text-align: right;">${email}</td></tr>
+              <tr><td style="padding: 8px 0; color: #666;">Phone</td><td style="text-align: right;">${phone || 'N/A'}</td></tr>
+              <tr><td style="padding: 8px 0; color: #666;">Website</td><td style="text-align: right;">${website || 'N/A'}</td></tr>
+              <tr><td style="padding: 8px 0; color: #666;">Tier</td><td style="color: #d4af37; text-align: right;">${tierInfo.name} (${tierInfo.price})</td></tr>
+            </table>
+            <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.1);">
+              <p style="color: #666; margin: 0 0 10px 0;">Message:</p>
+              <p style="color: #fff; margin: 0;">${message}</p>
+            </div>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+
+    resend.emails.send({
+      from: EMAIL_CONFIG.from,
+      to: EMAIL_CONFIG.adminEmail,
+      subject: `New Sponsor Inquiry: ${companyName} - ${tierInfo.name} (${tierInfo.price})`,
+      html: adminNotificationHtml,
+    }).catch((err) => console.error('Failed to send admin sponsor notification:', err));
+
+    res.status(201).json({
+      success: true,
+      message: 'Thank you for your interest in partnering with Berry Bly Productions! Our partnerships team will review your inquiry and contact you within 48 hours.',
+      submission: {
+        id: sponsorId,
+        companyName,
+        tier: tierInfo.name,
+        status: 'pending',
+      },
+    });
+  } catch (error) {
+    console.error('Error creating sponsor:', error);
+    res.status(500).json({ error: 'Failed to submit sponsor inquiry' });
+  }
+});
+
+// GET /api/v1/sponsors - List all sponsors (admin)
+app.get('/api/v1/sponsors', async (req, res) => {
+  try {
+    const { status, tier, limit = '50', offset = '0' } = req.query;
+    let queryText = 'SELECT * FROM sponsors WHERE 1=1';
+    const params = [];
+    let paramIndex = 1;
+
+    if (status) {
+      queryText += ` AND status = $${paramIndex++}`;
+      params.push(status);
+    }
+    if (tier) {
+      queryText += ` AND sponsorship_tier = $${paramIndex++}`;
+      params.push(tier);
+    }
+
+    queryText += ' ORDER BY created_at DESC';
+    queryText += ` LIMIT $${paramIndex++} OFFSET $${paramIndex++}`;
+    params.push(parseInt(limit), parseInt(offset));
+
+    const result = await pool.query(queryText, params);
+
+    const sponsors = result.rows.map(s => ({
+      id: s.id,
+      companyName: s.company_name,
+      contactName: s.contact_name,
+      email: s.email,
+      phone: s.phone,
+      website: s.website,
+      tier: s.sponsorship_tier,
+      tierName: s.tier_name,
+      tierPrice: s.tier_price,
+      message: s.message,
+      status: s.status,
+      notes: s.notes,
+      createdAt: s.created_at,
+    }));
+
+    res.json(sponsors);
+  } catch (error) {
+    console.error('Error fetching sponsors:', error);
+    res.status(500).json({ error: 'Failed to fetch sponsors' });
+  }
+});
+
+// GET /api/v1/sponsors/:id - Get single sponsor
+app.get('/api/v1/sponsors/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query('SELECT * FROM sponsors WHERE id = $1', [id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Sponsor not found' });
+    }
+
+    const s = result.rows[0];
+    res.json({
+      id: s.id,
+      companyName: s.company_name,
+      contactName: s.contact_name,
+      email: s.email,
+      phone: s.phone,
+      website: s.website,
+      tier: s.sponsorship_tier,
+      tierName: s.tier_name,
+      tierPrice: s.tier_price,
+      message: s.message,
+      status: s.status,
+      notes: s.notes,
+      createdAt: s.created_at,
+    });
+  } catch (error) {
+    console.error('Error fetching sponsor:', error);
+    res.status(500).json({ error: 'Failed to fetch sponsor' });
+  }
+});
+
+// PATCH /api/v1/sponsors/:id - Update sponsor status (admin)
+app.patch('/api/v1/sponsors/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status, notes } = req.body;
+
+    const updates = [];
+    const params = [];
+    let paramIndex = 1;
+
+    if (status) {
+      updates.push(`status = $${paramIndex++}`);
+      params.push(status);
+    }
+    if (notes !== undefined) {
+      updates.push(`notes = $${paramIndex++}`);
+      params.push(notes);
+    }
+
+    if (updates.length === 0) {
+      return res.status(400).json({ error: 'No valid updates provided' });
+    }
+
+    updates.push(`updated_at = CURRENT_TIMESTAMP`);
+    params.push(id);
+
+    const result = await pool.query(
+      `UPDATE sponsors SET ${updates.join(', ')} WHERE id = $${paramIndex} RETURNING *`,
+      params
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Sponsor not found' });
+    }
+
+    const s = result.rows[0];
+
+    // Send approval email if status changed to approved
+    if (status === 'approved') {
+      const approvalHtml = `
+        <!DOCTYPE html>
+        <html>
+        <body style="margin: 0; padding: 0; background-color: #0a0a0a; font-family: Georgia, serif;">
+          <div style="max-width: 600px; margin: 0 auto; padding: 40px 20px;">
+            <div style="text-align: center; margin-bottom: 40px;">
+              <h1 style="color: #d4af37; font-size: 32px; margin: 0;">Berry Bly</h1>
+            </div>
+            <div style="background: linear-gradient(180deg, rgba(34, 197, 94, 0.1) 0%, transparent 100%); border: 1px solid rgba(34, 197, 94, 0.3); border-radius: 16px; padding: 40px;">
+              <h2 style="color: #22c55e; font-size: 24px; margin: 0 0 20px 0;">Partnership Approved!</h2>
+              <p style="color: #cccccc; font-size: 16px; line-height: 1.8;">
+                Congratulations! Your partnership application for <strong style="color: #d4af37;">${s.company_name}</strong> has been approved.
+              </p>
+              <p style="color: #cccccc; font-size: 16px; line-height: 1.8;">
+                Welcome to the Berry Bly Productions family! Our team will be in touch shortly to finalize the details.
+              </p>
+            </div>
+          </div>
+        </body>
+        </html>
+      `;
+
+      resend.emails.send({
+        from: EMAIL_CONFIG.from,
+        to: s.email,
+        subject: `Partnership Approved - Welcome to Berry Bly Productions!`,
+        html: approvalHtml,
+      }).catch((err) => console.error('Failed to send sponsor approval email:', err));
+    }
+
+    res.json({
+      id: s.id,
+      companyName: s.company_name,
+      contactName: s.contact_name,
+      email: s.email,
+      status: s.status,
+      notes: s.notes,
+    });
+  } catch (error) {
+    console.error('Error updating sponsor:', error);
+    res.status(500).json({ error: 'Failed to update sponsor' });
+  }
+});
+
+// DELETE /api/v1/sponsors/:id - Delete sponsor
+app.delete('/api/v1/sponsors/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query('DELETE FROM sponsors WHERE id = $1 RETURNING *', [id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Sponsor not found' });
+    }
+
+    res.status(204).send();
+  } catch (error) {
+    console.error('Error deleting sponsor:', error);
+    res.status(500).json({ error: 'Failed to delete sponsor' });
   }
 });
 
