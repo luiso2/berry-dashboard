@@ -35,7 +35,7 @@ const categoryToStatus = (category: GuestCategory): string => {
 
 type GuestCategory = 'pending' | 'A' | 'B' | 'C' | 'rejected';
 type GuestStatus = 'pending' | 'approved' | 'declined' | 'rejected';
-type ViewType = 'overview' | 'guests' | 'emails' | 'vip' | 'priority' | 'standard' | 'analytics' | 'activity' | 'automation' | 'checkin';
+type ViewType = 'overview' | 'guests' | 'emails' | 'vip' | 'priority' | 'standard' | 'analytics' | 'activity' | 'automation' | 'checkin' | 'models' | 'tables' | 'tickets' | 'sponsors';
 type ThemeMode = 'dark' | 'light';
 
 interface Purchase {
@@ -121,6 +121,78 @@ interface Filters {
   dateTo: string;
   scoreMin: number;
   scoreMax: number;
+}
+
+// New Module Interfaces
+interface Model {
+  id: string;
+  eventId?: string;
+  name: string;
+  email: string;
+  phone: string;
+  instagram: string;
+  photos: string[];
+  height?: string;
+  experienceLevel: 'beginner' | 'intermediate' | 'professional';
+  availability?: { weekdays?: boolean; weekends?: boolean; specificDates?: string[] };
+  notes?: string;
+  status: 'pending' | 'approved' | 'declined' | 'rejected' | 'assigned';
+  aiScore?: number;
+  eventsAssigned?: { eventId: string; eventName: string; date: string; role?: string }[];
+  createdAt: string;
+  updatedAt?: string;
+}
+
+interface TableReservation {
+  id: string;
+  tableId: string;
+  tableName: string;
+  zone: 'VIP' | 'Premium' | 'Standard' | 'Lounge';
+  eventId: string;
+  customerName: string;
+  customerEmail: string;
+  customerPhone: string;
+  partySize: number;
+  specialRequests?: string;
+  status: 'pending' | 'confirmed' | 'declined' | 'cancelled' | 'completed';
+  depositPaid: boolean;
+  depositAmount: number;
+  minimumSpend: number;
+  capacity: number;
+  createdAt: string;
+}
+
+interface Ticket {
+  id: string;
+  eventId: string;
+  externalId?: string;
+  ticketType: string;
+  holderName?: string;
+  holderEmail?: string;
+  qrCode?: string;
+  status: 'valid' | 'used' | 'cancelled' | 'transferred';
+  checkInTime?: string;
+  price: number;
+  source: 'eventbrite' | 'manual' | 'import';
+  createdAt: string;
+}
+
+interface Sponsor {
+  id: string;
+  companyName: string;
+  contactName: string;
+  email: string;
+  phone: string;
+  website?: string;
+  logoUrl?: string;
+  tier: 'bronze' | 'silver' | 'gold' | 'platinum' | 'title';
+  tierPrice: number;
+  message?: string;
+  status: 'pending' | 'contacted' | 'negotiating' | 'approved' | 'declined' | 'active';
+  contractSigned: boolean;
+  paymentStatus: 'pending' | 'partial' | 'complete';
+  benefits: string[];
+  createdAt: string;
 }
 
 // Instagram-based AI Score Calculator
@@ -434,6 +506,18 @@ function App() {
   const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
   const [autoRefresh, setAutoRefresh] = useState(true);
 
+  // New modules state
+  const [models, setModels] = useState<Model[]>([]);
+  const [modelStats, setModelStats] = useState({ total: 0, pending: 0, approved: 0, assigned: 0, declined: 0, avgScore: 0 });
+  const [modelTab, setModelTab] = useState<'pending' | 'approved' | 'assigned' | 'all'>('pending');
+  const [tables, setTables] = useState<TableReservation[]>([]);
+  const [tableStats, setTableStats] = useState({ total: 0, pending: 0, confirmed: 0, revenue: 0 });
+  const [tableZone, setTableZone] = useState<'all' | 'VIP' | 'Premium' | 'Standard' | 'Lounge'>('all');
+  const [tickets, setTickets] = useState<Ticket[]>([]);
+  const [ticketStats, setTicketStats] = useState({ total: 0, valid: 0, used: 0, revenue: 0 });
+  const [sponsors, setSponsors] = useState<Sponsor[]>([]);
+  const [sponsorStats, setSponsorStats] = useState({ total: 0, pending: 0, active: 0, revenue: 0 });
+
   const addToast = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
     const id = Date.now().toString();
     setToasts((prev) => [...prev, { id, message, type }]);
@@ -502,6 +586,88 @@ function App() {
     }, 10000) : null;
     return () => { if (interval) clearInterval(interval); };
   }, [fetchGuests, autoRefresh]);
+
+  // Fetch Models
+  const fetchModels = useCallback(async () => {
+    try {
+      const [modelsRes, statsRes] = await Promise.all([
+        fetch(`${API_URL}/models`),
+        fetch(`${API_URL}/models/stats`)
+      ]);
+      const modelsData = await modelsRes.json();
+      const statsData = await statsRes.json();
+      setModels(modelsData.models || []);
+      setModelStats(statsData);
+    } catch (error) {
+      console.error('Error fetching models:', error);
+    }
+  }, []);
+
+  // Fetch Tables
+  const fetchTables = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_URL}/table-reservations`);
+      const data = await res.json();
+      const reservations = (data.reservations || data || []).map((r: any) => ({
+        ...r,
+        zone: r.zone || 'Standard',
+        tableName: r.tableName || `Table ${r.tableId}`,
+      }));
+      setTables(reservations);
+      setTableStats({
+        total: reservations.length,
+        pending: reservations.filter((r: TableReservation) => r.status === 'pending').length,
+        confirmed: reservations.filter((r: TableReservation) => r.status === 'confirmed').length,
+        revenue: reservations.filter((r: TableReservation) => r.status === 'confirmed').reduce((sum: number, r: TableReservation) => sum + (r.minimumSpend || 0), 0),
+      });
+    } catch (error) {
+      console.error('Error fetching tables:', error);
+    }
+  }, []);
+
+  // Fetch Tickets
+  const fetchTickets = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_URL}/tickets`);
+      const data = await res.json();
+      const ticketList = data.tickets || data || [];
+      setTickets(ticketList);
+      setTicketStats({
+        total: ticketList.length,
+        valid: ticketList.filter((t: Ticket) => t.status === 'valid').length,
+        used: ticketList.filter((t: Ticket) => t.status === 'used').length,
+        revenue: ticketList.reduce((sum: number, t: Ticket) => sum + (t.price || 0), 0),
+      });
+    } catch (error) {
+      console.error('Error fetching tickets:', error);
+    }
+  }, []);
+
+  // Fetch Sponsors
+  const fetchSponsors = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_URL}/sponsors`);
+      const data = await res.json();
+      const sponsorList = data.submissions || data || [];
+      setSponsors(sponsorList);
+      setSponsorStats({
+        total: sponsorList.length,
+        pending: sponsorList.filter((s: Sponsor) => s.status === 'pending').length,
+        active: sponsorList.filter((s: Sponsor) => s.status === 'active').length,
+        revenue: sponsorList.filter((s: Sponsor) => s.status === 'active').reduce((sum: number, s: Sponsor) => sum + (s.tierPrice || 0), 0),
+      });
+    } catch (error) {
+      console.error('Error fetching sponsors:', error);
+    }
+  }, []);
+
+  // Fetch new modules when view changes
+  useEffect(() => {
+    if (activeView === 'models') fetchModels();
+    if (activeView === 'tables') fetchTables();
+    if (activeView === 'tickets') fetchTickets();
+    if (activeView === 'sponsors') fetchSponsors();
+  }, [activeView, fetchModels, fetchTables, fetchTickets, fetchSponsors]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -1057,6 +1223,16 @@ function App() {
 
           <div style={{ fontSize: 12, color: '#444', textTransform: 'uppercase', letterSpacing: '1px', margin: '24px 0 8px', paddingLeft: 12 }}>Event Day</div>
           <NavItem label="Check-In" active={activeView === 'checkin'} icon="✓" count={stats.checkedIn} onClick={() => navigateTo('checkin')} />
+
+          <div style={{ fontSize: 12, color: '#444', textTransform: 'uppercase', letterSpacing: '1px', margin: '24px 0 8px', paddingLeft: 12 }}>Talent</div>
+          <NavItem label="Hot Girls" active={activeView === 'models'} icon="★" count={modelStats.total} onClick={() => navigateTo('models')} />
+
+          <div style={{ fontSize: 12, color: '#444', textTransform: 'uppercase', letterSpacing: '1px', margin: '24px 0 8px', paddingLeft: 12 }}>Reservations</div>
+          <NavItem label="Tables" active={activeView === 'tables'} icon="▣" count={tableStats.total} onClick={() => navigateTo('tables')} />
+          <NavItem label="Tickets" active={activeView === 'tickets'} icon="🎫" count={ticketStats.total} onClick={() => navigateTo('tickets')} />
+
+          <div style={{ fontSize: 12, color: '#444', textTransform: 'uppercase', letterSpacing: '1px', margin: '24px 0 8px', paddingLeft: 12 }}>Business</div>
+          <NavItem label="Sponsors" active={activeView === 'sponsors'} icon="◆" count={sponsorStats.total} onClick={() => navigateTo('sponsors')} />
         </nav>
 
         {/* Settings Row */}
@@ -2008,6 +2184,542 @@ function App() {
                   <div style={{ color: '#333', fontSize: 48, marginBottom: 12 }}>✓</div>
                   <div style={{ color: '#666', fontSize: 15 }}>No approved guests yet</div>
                   <div style={{ color: '#444', fontSize: 13, marginTop: 8 }}>Approve guests from the Guests page first</div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Models/Hot Girls Page */}
+        {activeView === 'models' && (
+          <div className="page-content" style={{ padding: '32px', animation: 'fadeIn 0.3s ease' }}>
+            {/* Models Stats */}
+            <div className="stats-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 32 }}>
+              <div className="stat-card" style={{ background: '#0a0a0a', border: '1px solid #1a1a1a', borderRadius: 12, padding: 20 }}>
+                <div style={{ fontSize: 13, color: '#666', marginBottom: 4 }}>Total Applications</div>
+                <div style={{ fontSize: 32, fontWeight: 700 }}>{modelStats.total}</div>
+              </div>
+              <div className="stat-card" style={{ background: '#0a0a0a', border: '1px solid #fbbf2440', borderRadius: 12, padding: 20 }}>
+                <div style={{ fontSize: 13, color: '#fbbf24', marginBottom: 4 }}>Pending Review</div>
+                <div style={{ fontSize: 32, fontWeight: 700, color: '#fbbf24' }}>{modelStats.pending}</div>
+              </div>
+              <div className="stat-card" style={{ background: '#0a0a0a', border: '1px solid #22c55e40', borderRadius: 12, padding: 20 }}>
+                <div style={{ fontSize: 13, color: '#22c55e', marginBottom: 4 }}>Approved</div>
+                <div style={{ fontSize: 32, fontWeight: 700, color: '#22c55e' }}>{modelStats.approved}</div>
+              </div>
+              <div className="stat-card" style={{ background: '#0a0a0a', border: '1px solid #d4af3740', borderRadius: 12, padding: 20 }}>
+                <div style={{ fontSize: 13, color: '#d4af37', marginBottom: 4 }}>Assigned to Events</div>
+                <div style={{ fontSize: 32, fontWeight: 700, color: '#d4af37' }}>{modelStats.assigned}</div>
+              </div>
+            </div>
+
+            {/* Tabs */}
+            <div style={{ display: 'flex', gap: 8, marginBottom: 24 }}>
+              {(['pending', 'approved', 'assigned', 'all'] as const).map(tab => (
+                <button
+                  key={tab}
+                  onClick={() => setModelTab(tab)}
+                  style={{
+                    background: modelTab === tab ? '#d4af37' : '#1a1a1a',
+                    border: modelTab === tab ? 'none' : '1px solid #333',
+                    color: modelTab === tab ? '#000' : '#fff',
+                    padding: '10px 20px',
+                    borderRadius: 8,
+                    fontSize: 14,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    textTransform: 'capitalize'
+                  }}
+                >
+                  {tab === 'all' ? 'All Applications' : tab}
+                </button>
+              ))}
+            </div>
+
+            {/* Models List */}
+            <div style={{ background: '#0a0a0a', borderRadius: 12, border: '1px solid #1a1a1a', overflow: 'hidden' }}>
+              <div style={{ padding: '16px 20px', borderBottom: '1px solid #1a1a1a', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: 15, fontWeight: 600 }}>Model Applications</span>
+                <span style={{ fontSize: 14, color: '#666' }}>{models.filter(m => modelTab === 'all' || m.status === modelTab).length} models</span>
+              </div>
+              {models
+                .filter(m => modelTab === 'all' || m.status === modelTab)
+                .map((model, idx) => (
+                  <div
+                    key={model.id}
+                    style={{
+                      padding: '16px 20px',
+                      borderBottom: '1px solid #1a1a1a',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      animation: `fadeIn 0.2s ease ${idx * 0.02}s both`,
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                      <div style={{
+                        width: 56,
+                        height: 56,
+                        borderRadius: 12,
+                        background: model.photos?.[0] ? `url(${model.photos[0]}) center/cover` : '#1a1a1a',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontSize: 24,
+                        color: '#666',
+                        border: model.status === 'approved' ? '2px solid #22c55e' : model.status === 'assigned' ? '2px solid #d4af37' : '2px solid transparent'
+                      }}>
+                        {!model.photos?.[0] && model.name.charAt(0).toUpperCase()}
+                      </div>
+                      <div>
+                        <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 2 }}>{model.name}</div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                          <a href={`https://instagram.com/${model.instagram.replace('@', '')}`} target="_blank" rel="noopener noreferrer" style={{ color: '#d4af37', fontSize: 13, textDecoration: 'none' }}>
+                            @{model.instagram.replace('@', '')}
+                          </a>
+                          {model.height && <span style={{ fontSize: 13, color: '#666' }}>{model.height}</span>}
+                          <span style={{
+                            background: model.experienceLevel === 'professional' ? '#22c55e20' : model.experienceLevel === 'intermediate' ? '#fbbf2420' : '#66666620',
+                            color: model.experienceLevel === 'professional' ? '#22c55e' : model.experienceLevel === 'intermediate' ? '#fbbf24' : '#888',
+                            padding: '2px 8px',
+                            borderRadius: 4,
+                            fontSize: 11,
+                            textTransform: 'capitalize'
+                          }}>
+                            {model.experienceLevel}
+                          </span>
+                          {model.aiScore && (
+                            <span style={{ background: getScoreColor(model.aiScore) + '20', color: getScoreColor(model.aiScore), padding: '2px 8px', borderRadius: 4, fontSize: 12, fontWeight: 600 }}>
+                              Score: {model.aiScore}
+                            </span>
+                          )}
+                        </div>
+                        <div style={{ fontSize: 12, color: '#444', marginTop: 4 }}>{model.email} • {model.phone}</div>
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      {model.status === 'pending' && (
+                        <>
+                          <button
+                            onClick={async () => {
+                              try {
+                                const res = await fetch(`${API_URL}/models/${model.id}`, {
+                                  method: 'PATCH',
+                                  headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({ status: 'approved' })
+                                });
+                                if (res.ok) {
+                                  setModels(prev => prev.map(m => m.id === model.id ? { ...m, status: 'approved' } : m));
+                                  setModelStats(prev => ({ ...prev, pending: prev.pending - 1, approved: prev.approved + 1 }));
+                                  addToast(`${model.name} approved!`, 'success');
+                                }
+                              } catch (e) { addToast('Error updating model', 'error'); }
+                            }}
+                            className="btn-hover"
+                            style={{ background: '#22c55e', border: 'none', color: '#000', padding: '10px 16px', borderRadius: 8, fontSize: 14, fontWeight: 600, cursor: 'pointer' }}
+                          >
+                            Approve
+                          </button>
+                          <button
+                            onClick={async () => {
+                              try {
+                                const res = await fetch(`${API_URL}/models/${model.id}`, {
+                                  method: 'PATCH',
+                                  headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({ status: 'declined' })
+                                });
+                                if (res.ok) {
+                                  setModels(prev => prev.map(m => m.id === model.id ? { ...m, status: 'declined' } : m));
+                                  setModelStats(prev => ({ ...prev, pending: prev.pending - 1, declined: prev.declined + 1 }));
+                                  addToast(`${model.name} declined`, 'info');
+                                }
+                              } catch (e) { addToast('Error updating model', 'error'); }
+                            }}
+                            className="btn-hover"
+                            style={{ background: '#1a1a1a', border: '1px solid #333', color: '#fff', padding: '10px 16px', borderRadius: 8, fontSize: 14, cursor: 'pointer' }}
+                          >
+                            Decline
+                          </button>
+                        </>
+                      )}
+                      {model.status === 'approved' && (
+                        <button
+                          onClick={() => addToast('Event assignment coming soon!', 'info')}
+                          className="btn-hover"
+                          style={{ background: '#d4af37', border: 'none', color: '#000', padding: '10px 16px', borderRadius: 8, fontSize: 14, fontWeight: 600, cursor: 'pointer' }}
+                        >
+                          Assign to Event
+                        </button>
+                      )}
+                      {model.status === 'assigned' && model.eventsAssigned && (
+                        <div style={{ fontSize: 13, color: '#d4af37' }}>
+                          {model.eventsAssigned.length} event{model.eventsAssigned.length !== 1 ? 's' : ''}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              {models.filter(m => modelTab === 'all' || m.status === modelTab).length === 0 && (
+                <div style={{ padding: 40, textAlign: 'center' }}>
+                  <div style={{ color: '#333', fontSize: 48, marginBottom: 12 }}>★</div>
+                  <div style={{ color: '#666', fontSize: 15 }}>No {modelTab === 'all' ? '' : modelTab} applications yet</div>
+                  <div style={{ color: '#444', fontSize: 13, marginTop: 8 }}>Model applications will appear here</div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Tables Page */}
+        {activeView === 'tables' && (
+          <div className="page-content" style={{ padding: '32px', animation: 'fadeIn 0.3s ease' }}>
+            {/* Tables Stats */}
+            <div className="stats-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 32 }}>
+              <div className="stat-card" style={{ background: '#0a0a0a', border: '1px solid #1a1a1a', borderRadius: 12, padding: 20 }}>
+                <div style={{ fontSize: 13, color: '#666', marginBottom: 4 }}>Total Reservations</div>
+                <div style={{ fontSize: 32, fontWeight: 700 }}>{tableStats.total}</div>
+              </div>
+              <div className="stat-card" style={{ background: '#0a0a0a', border: '1px solid #fbbf2440', borderRadius: 12, padding: 20 }}>
+                <div style={{ fontSize: 13, color: '#fbbf24', marginBottom: 4 }}>Pending</div>
+                <div style={{ fontSize: 32, fontWeight: 700, color: '#fbbf24' }}>{tableStats.pending}</div>
+              </div>
+              <div className="stat-card" style={{ background: '#0a0a0a', border: '1px solid #22c55e40', borderRadius: 12, padding: 20 }}>
+                <div style={{ fontSize: 13, color: '#22c55e', marginBottom: 4 }}>Confirmed</div>
+                <div style={{ fontSize: 32, fontWeight: 700, color: '#22c55e' }}>{tableStats.confirmed}</div>
+              </div>
+              <div className="stat-card" style={{ background: '#0a0a0a', border: '1px solid #d4af3740', borderRadius: 12, padding: 20 }}>
+                <div style={{ fontSize: 13, color: '#d4af37', marginBottom: 4 }}>Revenue</div>
+                <div style={{ fontSize: 32, fontWeight: 700, color: '#d4af37' }}>${tableStats.revenue.toLocaleString()}</div>
+              </div>
+            </div>
+
+            {/* Zone Tabs */}
+            <div style={{ display: 'flex', gap: 8, marginBottom: 24 }}>
+              {(['all', 'VIP', 'Premium', 'Standard', 'Lounge'] as const).map(zone => (
+                <button
+                  key={zone}
+                  onClick={() => setTableZone(zone)}
+                  style={{
+                    background: tableZone === zone ? '#d4af37' : '#1a1a1a',
+                    border: tableZone === zone ? 'none' : '1px solid #333',
+                    color: tableZone === zone ? '#000' : '#fff',
+                    padding: '10px 20px',
+                    borderRadius: 8,
+                    fontSize: 14,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    textTransform: zone === 'all' ? 'capitalize' : 'none'
+                  }}
+                >
+                  {zone === 'all' ? 'All Zones' : zone}
+                </button>
+              ))}
+            </div>
+
+            {/* Tables List */}
+            <div style={{ background: '#0a0a0a', borderRadius: 12, border: '1px solid #1a1a1a', overflow: 'hidden' }}>
+              <div style={{ padding: '16px 20px', borderBottom: '1px solid #1a1a1a', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: 15, fontWeight: 600 }}>Table Reservations</span>
+                <span style={{ fontSize: 14, color: '#666' }}>{tables.filter(t => tableZone === 'all' || t.zone === tableZone).length} reservations</span>
+              </div>
+              {tables
+                .filter(t => tableZone === 'all' || t.zone === tableZone)
+                .map((table, idx) => (
+                  <div
+                    key={table.id}
+                    style={{
+                      padding: '16px 20px',
+                      borderBottom: '1px solid #1a1a1a',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      animation: `fadeIn 0.2s ease ${idx * 0.02}s both`,
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                      <div style={{
+                        width: 48,
+                        height: 48,
+                        borderRadius: 12,
+                        background: table.zone === 'VIP' ? '#d4af3720' : '#1a1a1a',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontSize: 20,
+                        color: table.zone === 'VIP' ? '#d4af37' : '#666',
+                      }}>
+                        ▣
+                      </div>
+                      <div>
+                        <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 2 }}>{table.customerName}</div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                          <span style={{ fontSize: 14, color: '#888' }}>{table.tableName}</span>
+                          <span style={{
+                            background: table.zone === 'VIP' ? '#d4af3720' : table.zone === 'Premium' ? '#22c55e20' : '#66666620',
+                            color: table.zone === 'VIP' ? '#d4af37' : table.zone === 'Premium' ? '#22c55e' : '#888',
+                            padding: '2px 8px',
+                            borderRadius: 4,
+                            fontSize: 11,
+                          }}>
+                            {table.zone}
+                          </span>
+                          <span style={{ fontSize: 13, color: '#666' }}>Party of {table.partySize}</span>
+                        </div>
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                      <span style={{
+                        background: table.status === 'confirmed' ? '#22c55e20' : '#fbbf2420',
+                        color: table.status === 'confirmed' ? '#22c55e' : '#fbbf24',
+                        padding: '4px 12px',
+                        borderRadius: 6,
+                        fontSize: 12,
+                        textTransform: 'capitalize'
+                      }}>
+                        {table.status}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              {tables.filter(t => tableZone === 'all' || t.zone === tableZone).length === 0 && (
+                <div style={{ padding: 40, textAlign: 'center' }}>
+                  <div style={{ color: '#333', fontSize: 48, marginBottom: 12 }}>▣</div>
+                  <div style={{ color: '#666', fontSize: 15 }}>No {tableZone === 'all' ? '' : tableZone} reservations yet</div>
+                  <div style={{ color: '#444', fontSize: 13, marginTop: 8 }}>Table reservations will appear here</div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Tickets Page */}
+        {activeView === 'tickets' && (
+          <div className="page-content" style={{ padding: '32px', animation: 'fadeIn 0.3s ease' }}>
+            {/* Tickets Stats */}
+            <div className="stats-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 32 }}>
+              <div className="stat-card" style={{ background: '#0a0a0a', border: '1px solid #1a1a1a', borderRadius: 12, padding: 20 }}>
+                <div style={{ fontSize: 13, color: '#666', marginBottom: 4 }}>Total Tickets</div>
+                <div style={{ fontSize: 32, fontWeight: 700 }}>{ticketStats.total}</div>
+              </div>
+              <div className="stat-card" style={{ background: '#0a0a0a', border: '1px solid #22c55e40', borderRadius: 12, padding: 20 }}>
+                <div style={{ fontSize: 13, color: '#22c55e', marginBottom: 4 }}>Valid</div>
+                <div style={{ fontSize: 32, fontWeight: 700, color: '#22c55e' }}>{ticketStats.valid}</div>
+              </div>
+              <div className="stat-card" style={{ background: '#0a0a0a', border: '1px solid #fbbf2440', borderRadius: 12, padding: 20 }}>
+                <div style={{ fontSize: 13, color: '#fbbf24', marginBottom: 4 }}>Used</div>
+                <div style={{ fontSize: 32, fontWeight: 700, color: '#fbbf24' }}>{ticketStats.used}</div>
+              </div>
+              <div className="stat-card" style={{ background: '#0a0a0a', border: '1px solid #d4af3740', borderRadius: 12, padding: 20 }}>
+                <div style={{ fontSize: 13, color: '#d4af37', marginBottom: 4 }}>Revenue</div>
+                <div style={{ fontSize: 32, fontWeight: 700, color: '#d4af37' }}>${ticketStats.revenue.toLocaleString()}</div>
+              </div>
+            </div>
+
+            {/* Import Button */}
+            <div style={{ marginBottom: 24 }}>
+              <button
+                onClick={() => addToast('CSV import coming soon!', 'info')}
+                style={{
+                  background: '#d4af37',
+                  border: 'none',
+                  color: '#000',
+                  padding: '12px 24px',
+                  borderRadius: 8,
+                  fontSize: 14,
+                  fontWeight: 600,
+                  cursor: 'pointer'
+                }}
+              >
+                Import Tickets (CSV)
+              </button>
+            </div>
+
+            {/* Tickets List */}
+            <div style={{ background: '#0a0a0a', borderRadius: 12, border: '1px solid #1a1a1a', overflow: 'hidden' }}>
+              <div style={{ padding: '16px 20px', borderBottom: '1px solid #1a1a1a', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: 15, fontWeight: 600 }}>Tickets</span>
+                <span style={{ fontSize: 14, color: '#666' }}>{tickets.length} tickets</span>
+              </div>
+              {tickets.map((ticket, idx) => (
+                <div
+                  key={ticket.id}
+                  style={{
+                    padding: '16px 20px',
+                    borderBottom: '1px solid #1a1a1a',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    animation: `fadeIn 0.2s ease ${idx * 0.02}s both`,
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                    <div style={{
+                      width: 48,
+                      height: 48,
+                      borderRadius: 12,
+                      background: ticket.status === 'used' ? '#22c55e20' : '#1a1a1a',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: 20,
+                      color: ticket.status === 'used' ? '#22c55e' : '#666',
+                    }}>
+                      🎫
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 2 }}>{ticket.holderName || 'No Name'}</div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                        <span style={{ fontSize: 14, color: '#888' }}>{ticket.ticketType}</span>
+                        <span style={{ fontSize: 13, color: '#666' }}>{ticket.holderEmail}</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <span style={{
+                      background: ticket.status === 'used' ? '#22c55e20' : ticket.status === 'valid' ? '#fbbf2420' : '#ef444420',
+                      color: ticket.status === 'used' ? '#22c55e' : ticket.status === 'valid' ? '#fbbf24' : '#ef4444',
+                      padding: '4px 12px',
+                      borderRadius: 6,
+                      fontSize: 12,
+                      textTransform: 'capitalize'
+                    }}>
+                      {ticket.status}
+                    </span>
+                  </div>
+                </div>
+              ))}
+              {tickets.length === 0 && (
+                <div style={{ padding: 40, textAlign: 'center' }}>
+                  <div style={{ color: '#333', fontSize: 48, marginBottom: 12 }}>🎫</div>
+                  <div style={{ color: '#666', fontSize: 15 }}>No tickets imported yet</div>
+                  <div style={{ color: '#444', fontSize: 13, marginTop: 8 }}>Import tickets from Eventbrite, DICE, or CSV to track check-ins</div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Sponsors Page */}
+        {activeView === 'sponsors' && (
+          <div className="page-content" style={{ padding: '32px', animation: 'fadeIn 0.3s ease' }}>
+            {/* Sponsors Stats */}
+            <div className="stats-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 32 }}>
+              <div className="stat-card" style={{ background: '#0a0a0a', border: '1px solid #1a1a1a', borderRadius: 12, padding: 20 }}>
+                <div style={{ fontSize: 13, color: '#666', marginBottom: 4 }}>Total Sponsors</div>
+                <div style={{ fontSize: 32, fontWeight: 700 }}>{sponsorStats.total}</div>
+              </div>
+              <div className="stat-card" style={{ background: '#0a0a0a', border: '1px solid #fbbf2440', borderRadius: 12, padding: 20 }}>
+                <div style={{ fontSize: 13, color: '#fbbf24', marginBottom: 4 }}>Pending</div>
+                <div style={{ fontSize: 32, fontWeight: 700, color: '#fbbf24' }}>{sponsorStats.pending}</div>
+              </div>
+              <div className="stat-card" style={{ background: '#0a0a0a', border: '1px solid #22c55e40', borderRadius: 12, padding: 20 }}>
+                <div style={{ fontSize: 13, color: '#22c55e', marginBottom: 4 }}>Active</div>
+                <div style={{ fontSize: 32, fontWeight: 700, color: '#22c55e' }}>{sponsorStats.active}</div>
+              </div>
+              <div className="stat-card" style={{ background: '#0a0a0a', border: '1px solid #d4af3740', borderRadius: 12, padding: 20 }}>
+                <div style={{ fontSize: 13, color: '#d4af37', marginBottom: 4 }}>Revenue</div>
+                <div style={{ fontSize: 32, fontWeight: 700, color: '#d4af37' }}>${sponsorStats.revenue.toLocaleString()}</div>
+              </div>
+            </div>
+
+            {/* Sponsor Tiers */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 24 }}>
+              {[
+                { tier: 'Platinum', price: 10000, color: '#e5e4e2' },
+                { tier: 'Gold', price: 5000, color: '#d4af37' },
+                { tier: 'Silver', price: 2500, color: '#c0c0c0' },
+                { tier: 'Bronze', price: 1000, color: '#cd7f32' }
+              ].map(t => (
+                <div key={t.tier} style={{ background: '#0a0a0a', border: `1px solid ${t.color}40`, borderRadius: 12, padding: 20, textAlign: 'center' }}>
+                  <div style={{ fontSize: 28, marginBottom: 8, color: t.color }}>◆</div>
+                  <div style={{ fontSize: 16, fontWeight: 600, color: t.color }}>{t.tier}</div>
+                  <div style={{ fontSize: 24, fontWeight: 700, marginTop: 8 }}>${t.price.toLocaleString()}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* Sponsors List */}
+            <div style={{ background: '#0a0a0a', borderRadius: 12, border: '1px solid #1a1a1a', overflow: 'hidden' }}>
+              <div style={{ padding: '16px 20px', borderBottom: '1px solid #1a1a1a', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: 15, fontWeight: 600 }}>Sponsors</span>
+                <button
+                  onClick={() => addToast('Sponsor portal link copied!', 'success')}
+                  style={{
+                    background: '#d4af37',
+                    border: 'none',
+                    color: '#000',
+                    padding: '8px 16px',
+                    borderRadius: 6,
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: 'pointer'
+                  }}
+                >
+                  Copy Application Link
+                </button>
+              </div>
+              {sponsors.map((sponsor, idx) => (
+                <div
+                  key={sponsor.id}
+                  style={{
+                    padding: '16px 20px',
+                    borderBottom: '1px solid #1a1a1a',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    animation: `fadeIn 0.2s ease ${idx * 0.02}s both`,
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                    <div style={{
+                      width: 48,
+                      height: 48,
+                      borderRadius: 12,
+                      background: sponsor.logoUrl ? `url(${sponsor.logoUrl}) center/cover` : '#1a1a1a',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: 20,
+                      color: sponsor.tier === 'platinum' ? '#e5e4e2' : sponsor.tier === 'gold' ? '#d4af37' : '#666',
+                    }}>
+                      {!sponsor.logoUrl && '◆'}
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 2 }}>{sponsor.companyName}</div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                        <span style={{ fontSize: 14, color: '#888' }}>{sponsor.contactName}</span>
+                        <span style={{
+                          background: sponsor.tier === 'platinum' ? '#e5e4e220' : sponsor.tier === 'gold' ? '#d4af3720' : sponsor.tier === 'silver' ? '#c0c0c020' : '#cd7f3220',
+                          color: sponsor.tier === 'platinum' ? '#e5e4e2' : sponsor.tier === 'gold' ? '#d4af37' : sponsor.tier === 'silver' ? '#c0c0c0' : '#cd7f32',
+                          padding: '2px 8px',
+                          borderRadius: 4,
+                          fontSize: 11,
+                        }}>
+                          {sponsor.tier}
+                        </span>
+                        <span style={{ fontSize: 13, color: '#d4af37' }}>${sponsor.tierPrice.toLocaleString()}</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <span style={{
+                      background: sponsor.status === 'active' ? '#22c55e20' : sponsor.status === 'pending' ? '#fbbf2420' : '#66666620',
+                      color: sponsor.status === 'active' ? '#22c55e' : sponsor.status === 'pending' ? '#fbbf24' : '#888',
+                      padding: '4px 12px',
+                      borderRadius: 6,
+                      fontSize: 12,
+                      textTransform: 'capitalize'
+                    }}>
+                      {sponsor.status}
+                    </span>
+                  </div>
+                </div>
+              ))}
+              {sponsors.length === 0 && (
+                <div style={{ padding: 40, textAlign: 'center' }}>
+                  <div style={{ color: '#333', fontSize: 48, marginBottom: 12 }}>◆</div>
+                  <div style={{ color: '#666', fontSize: 15 }}>No sponsors yet</div>
+                  <div style={{ color: '#444', fontSize: 13, marginTop: 8 }}>Sponsor applications will appear here</div>
                 </div>
               )}
             </div>
