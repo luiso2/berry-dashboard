@@ -79,16 +79,21 @@ const EMAIL_CONFIG = {
   adminEmail: process.env.ADMIN_EMAIL || 'berrybly@gmail.com',
 };
 
-// CORS configuration - Allow dashboard domains
+// CORS configuration - Allow dashboard and landing domains
 const allowedOrigins = [
   'https://berrydashboard.merktop.com',
   'https://berry-dashboard.up.railway.app',
+  'https://berry.merktop.com',
+  'https://berrybly.com',
+  'https://www.berrybly.com',
+  'https://berry-bly-productions.up.railway.app',
   'http://localhost:5173',
   'http://localhost:3000',
+  'http://localhost:5174',
 ];
 
-// Backend API del monorepo (source of truth para guest data)
-const MONOREPO_API_URL = 'https://backend-production-b84e.up.railway.app/api/v1';
+// REMOVED: No longer depends on monorepo - all data is local now
+// const MONOREPO_API_URL = 'https://backend-production-b84e.up.railway.app/api/v1';
 
 // Send confirmation email to admin
 const sendAdminConfirmation = async (sentGuests, category) => {
@@ -292,25 +297,71 @@ app.get('/api/guests', async (req, res) => {
   }
 });
 
-// POST /api/guests - Add new guest (from landing page)
+// POST /api/guests - Add new guest (from landing page or dashboard)
+// Accepts both formats: landing (numberOfGuests, vipPreferences) and dashboard (partySize, notes)
 app.post('/api/guests', async (req, res) => {
-  const { name, email, phone, instagram, partySize, eventDate, notes } = req.body;
+  const {
+    name,
+    email,
+    phone,
+    instagram,
+    // Dashboard format
+    partySize,
+    eventDate,
+    notes,
+    // Landing page format
+    eventId,
+    numberOfGuests,
+    vipPreferences
+  } = req.body;
 
   if (!name || !email) {
     return res.status(400).json({ error: 'Name and email are required' });
   }
+
+  // Normalize data - accept both formats
+  const normalizedPartySize = partySize || numberOfGuests || 1;
+  const normalizedNotes = notes || (vipPreferences ? `VIP: ${vipPreferences}` : '') || '';
+  const normalizedEventDate = eventDate || null;
+  const normalizedEventId = eventId || null;
 
   try {
     const result = await pool.query(
       `INSERT INTO guests (name, email, phone, instagram, party_size, event_date, notes, category, email_sent, created_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', false, CURRENT_TIMESTAMP)
        RETURNING *`,
-      [name, email, phone || '', instagram || '', partySize || 1, eventDate || null, notes || '']
+      [name, email, phone || '', instagram || '', normalizedPartySize, normalizedEventDate,
+       normalizedEventId ? `Event: ${normalizedEventId}\n${normalizedNotes}` : normalizedNotes]
     );
 
     const newGuest = transformGuest(result.rows[0]);
-    console.log(`New guest added: ${name} (@${instagram || 'no instagram'})`);
-    res.status(201).json(newGuest);
+    console.log(`✅ New guest added: ${name} (@${instagram || 'no instagram'}) - Party: ${normalizedPartySize}`);
+
+    // Send welcome email asynchronously
+    const welcomeHtml = generateInvitationEmail(newGuest, 'pending', '');
+    resend.emails.send({
+      from: EMAIL_CONFIG.from,
+      to: email,
+      subject: "You're on the List! - Berry Bly Events",
+      html: welcomeHtml.html,
+    }).then(() => {
+      console.log(`📧 Welcome email sent to ${email}`);
+    }).catch((err) => {
+      console.error(`❌ Failed to send welcome email to ${email}:`, err);
+    });
+
+    // Response compatible with landing page expectations
+    res.status(201).json({
+      success: true,
+      message: 'You have been added to the guest list! Check your email for confirmation.',
+      entry: {
+        id: newGuest.id,
+        name: newGuest.name,
+        email: newGuest.email,
+        status: 'pending',
+      },
+      guest: newGuest, // Also include full guest for dashboard
+    });
   } catch (error) {
     console.error('Error adding guest:', error);
     res.status(500).json({ error: 'Failed to add guest' });
@@ -743,21 +794,49 @@ app.get('/api/v1/guests', async (req, res) => {
   }
 });
 
+// POST /api/v1/guests - Alias for /api/guests (accepts both formats)
 app.post('/api/v1/guests', async (req, res) => {
-  const { name, email, phone, instagram, partySize, eventDate, notes } = req.body;
+  const {
+    name, email, phone, instagram,
+    partySize, eventDate, notes,
+    eventId, numberOfGuests, vipPreferences
+  } = req.body;
+
   if (!name || !email) {
     return res.status(400).json({ error: 'Name and email are required' });
   }
+
+  const normalizedPartySize = partySize || numberOfGuests || 1;
+  const normalizedNotes = notes || (vipPreferences ? `VIP: ${vipPreferences}` : '') || '';
+  const normalizedEventId = eventId || null;
+
   try {
     const result = await pool.query(
       `INSERT INTO guests (name, email, phone, instagram, party_size, event_date, notes, category, email_sent, created_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', false, CURRENT_TIMESTAMP)
        RETURNING *`,
-      [name, email, phone || '', instagram || '', partySize || 1, eventDate || null, notes || '']
+      [name, email, phone || '', instagram || '', normalizedPartySize, eventDate || null,
+       normalizedEventId ? `Event: ${normalizedEventId}\n${normalizedNotes}` : normalizedNotes]
     );
+
     const newGuest = transformGuest(result.rows[0]);
-    console.log(`New guest added: ${name}`);
-    res.status(201).json(newGuest);
+    console.log(`✅ New guest (v1): ${name} - Party: ${normalizedPartySize}`);
+
+    // Send welcome email
+    const welcomeHtml = generateInvitationEmail(newGuest, 'pending', '');
+    resend.emails.send({
+      from: EMAIL_CONFIG.from,
+      to: email,
+      subject: "You're on the List! - Berry Bly Events",
+      html: welcomeHtml.html,
+    }).catch((err) => console.error(`Failed to send welcome email:`, err));
+
+    res.status(201).json({
+      success: true,
+      message: 'You have been added to the guest list!',
+      entry: { id: newGuest.id, name: newGuest.name, email: newGuest.email, status: 'pending' },
+      guest: newGuest,
+    });
   } catch (error) {
     console.error('Error adding guest:', error);
     res.status(500).json({ error: 'Failed to add guest' });
@@ -850,120 +929,240 @@ app.get('/api/health', async (req, res) => {
 });
 
 // ============================================
-// PROXY ROUTES TO MONOREPO BACKEND
-// These routes fetch data from the monorepo backend
-// and handle email sending via Resend
+// LOCAL GUEST-LISTS ENDPOINTS (INDEPENDENT)
+// No longer depends on monorepo - uses local guests table
 // ============================================
 
-// GET /api/v1/guest-lists - Proxy to monorepo backend
+// Helper to transform guest to guest-list format (for frontend compatibility)
+const transformToGuestList = (row) => ({
+  id: String(row.id),
+  eventId: (row.notes && row.notes.match(/Event: (\S+)/)?.[1]) || 'default',
+  name: row.name,
+  email: row.email,
+  phone: row.phone || '',
+  instagram: row.instagram || '',
+  numberOfGuests: row.party_size,
+  vipPreferences: row.notes?.includes('VIP:') ? row.notes.split('VIP:')[1]?.split('\n')[0]?.trim() : '',
+  status: row.category === 'pending' ? 'pending' : row.category === 'A' || row.category === 'B' ? 'approved' : 'declined',
+  notes: row.notes || '',
+  emailSent: row.email_sent,
+  emailSentAt: row.email_sent_at ? row.email_sent_at.toISOString() : null,
+  createdAt: row.created_at.toISOString(),
+  updatedAt: row.created_at.toISOString(),
+});
+
+// GET /api/v1/guest-lists - List all guests (LOCAL)
 app.get('/api/v1/guest-lists', async (req, res) => {
   try {
-    const queryParams = new URLSearchParams(req.query).toString();
-    const url = `${MONOREPO_API_URL}/guest-lists${queryParams ? '?' + queryParams : ''}`;
-    const response = await fetch(url);
-    const data = await response.json();
-    res.status(response.status).json(data);
+    const { status, limit = '50', offset = '0' } = req.query;
+
+    let queryText = 'SELECT * FROM guests WHERE 1=1';
+    const params = [];
+    let paramIndex = 1;
+
+    // Map status to category
+    if (status) {
+      if (status === 'pending') {
+        queryText += ` AND category = $${paramIndex++}`;
+        params.push('pending');
+      } else if (status === 'approved') {
+        queryText += ` AND category IN ('A', 'B')`;
+      } else if (status === 'declined') {
+        queryText += ` AND category = $${paramIndex++}`;
+        params.push('C');
+      }
+    }
+
+    queryText += ' ORDER BY created_at DESC';
+    queryText += ` LIMIT $${paramIndex++} OFFSET $${paramIndex++}`;
+    params.push(parseInt(limit), parseInt(offset));
+
+    const result = await pool.query(queryText, params);
+    const entries = result.rows.map(transformToGuestList);
+
+    // Get total count
+    const countResult = await pool.query('SELECT COUNT(*) as total FROM guests');
+    const total = parseInt(countResult.rows[0].total);
+
+    res.json({
+      entries,
+      total,
+      limit: parseInt(limit),
+      offset: parseInt(offset),
+    });
   } catch (error) {
-    console.error('Error proxying guest-lists:', error);
+    console.error('Error fetching guest-lists:', error);
     res.status(500).json({ error: 'Failed to fetch guest lists' });
   }
 });
 
-// GET /api/v1/guest-lists/stats - Proxy stats
+// GET /api/v1/guest-lists/stats - Get statistics (LOCAL)
 app.get('/api/v1/guest-lists/stats', async (req, res) => {
   try {
-    const queryParams = new URLSearchParams(req.query).toString();
-    const url = `${MONOREPO_API_URL}/guest-lists/stats${queryParams ? '?' + queryParams : ''}`;
-    const response = await fetch(url);
-    const data = await response.json();
-    res.status(response.status).json(data);
+    const stats = await pool.query(`
+      SELECT
+        COUNT(*) as total,
+        COUNT(*) FILTER (WHERE category = 'pending') as pending,
+        COUNT(*) FILTER (WHERE category IN ('A', 'B')) as approved,
+        COUNT(*) FILTER (WHERE category = 'C') as declined,
+        COALESCE(SUM(party_size), 0) as total_guests
+      FROM guests
+    `);
+
+    const row = stats.rows[0];
+    res.json({
+      total: parseInt(row.total),
+      pending: parseInt(row.pending),
+      approved: parseInt(row.approved),
+      declined: parseInt(row.declined),
+      totalGuests: parseInt(row.total_guests),
+    });
   } catch (error) {
-    console.error('Error proxying stats:', error);
+    console.error('Error fetching stats:', error);
     res.status(500).json({ error: 'Failed to fetch stats' });
   }
 });
 
-// GET /api/v1/guest-lists/:id - Get single guest from monorepo
+// GET /api/v1/guest-lists/:id - Get single guest (LOCAL)
 app.get('/api/v1/guest-lists/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const response = await fetch(`${MONOREPO_API_URL}/guest-lists/${id}`);
-    const data = await response.json();
-    res.status(response.status).json(data);
+    const result = await pool.query('SELECT * FROM guests WHERE id = $1', [id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Not Found', message: 'Guest not found' });
+    }
+
+    res.json(transformToGuestList(result.rows[0]));
   } catch (error) {
-    console.error('Error proxying guest:', error);
+    console.error('Error fetching guest:', error);
     res.status(500).json({ error: 'Failed to fetch guest' });
   }
 });
 
-// POST /api/v1/guest-lists - Create guest in monorepo
+// POST /api/v1/guest-lists - Create guest (LOCAL)
 app.post('/api/v1/guest-lists', async (req, res) => {
+  const { name, email, phone, instagram, numberOfGuests, vipPreferences, eventId } = req.body;
+
+  if (!name || !email) {
+    return res.status(400).json({ error: 'Name and email are required' });
+  }
+
   try {
-    const response = await fetch(`${MONOREPO_API_URL}/guest-lists`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(req.body),
+    const notes = [
+      eventId ? `Event: ${eventId}` : '',
+      vipPreferences ? `VIP: ${vipPreferences}` : ''
+    ].filter(Boolean).join('\n');
+
+    const result = await pool.query(
+      `INSERT INTO guests (name, email, phone, instagram, party_size, notes, category, email_sent, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, 'pending', false, CURRENT_TIMESTAMP)
+       RETURNING *`,
+      [name, email, phone || '', instagram || '', numberOfGuests || 1, notes]
+    );
+
+    const newGuest = transformToGuestList(result.rows[0]);
+    console.log(`✅ New guest-list entry: ${name} - ${email}`);
+
+    // Send welcome email
+    const welcomeHtml = generateInvitationEmail({ name, partySize: numberOfGuests || 1 }, 'pending', '');
+    resend.emails.send({
+      from: EMAIL_CONFIG.from,
+      to: email,
+      subject: "You're on the List! - Berry Bly Events",
+      html: welcomeHtml.html,
+    }).catch((err) => console.error('Failed to send welcome email:', err));
+
+    res.status(201).json({
+      success: true,
+      message: 'You have been added to the guest list!',
+      entry: newGuest,
     });
-    const data = await response.json();
-    res.status(response.status).json(data);
   } catch (error) {
     console.error('Error creating guest:', error);
     res.status(500).json({ error: 'Failed to create guest' });
   }
 });
 
-// PATCH /api/v1/guest-lists/:id - Update guest in monorepo
+// PATCH /api/v1/guest-lists/:id - Update guest (LOCAL)
 app.patch('/api/v1/guest-lists/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const response = await fetch(`${MONOREPO_API_URL}/guest-lists/${id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(req.body),
-    });
-    const data = await response.json();
-    res.status(response.status).json(data);
+    const { status, notes } = req.body;
+
+    // Map status to category
+    let category = null;
+    if (status === 'approved') category = 'A';
+    else if (status === 'pending') category = 'pending';
+    else if (status === 'declined' || status === 'rejected') category = 'C';
+
+    const updates = [];
+    const params = [];
+    let paramIndex = 1;
+
+    if (category) {
+      updates.push(`category = $${paramIndex++}`);
+      params.push(category);
+    }
+    if (notes !== undefined) {
+      updates.push(`notes = COALESCE(notes, '') || $${paramIndex++}`);
+      params.push('\n' + notes);
+    }
+
+    if (updates.length === 0) {
+      return res.status(400).json({ error: 'No valid updates provided' });
+    }
+
+    params.push(id);
+    const result = await pool.query(
+      `UPDATE guests SET ${updates.join(', ')} WHERE id = $${paramIndex} RETURNING *`,
+      params
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Not Found', message: 'Guest not found' });
+    }
+
+    res.json(transformToGuestList(result.rows[0]));
   } catch (error) {
     console.error('Error updating guest:', error);
     res.status(500).json({ error: 'Failed to update guest' });
   }
 });
 
-// DELETE /api/v1/guest-lists/:id - Delete guest in monorepo
+// DELETE /api/v1/guest-lists/:id - Delete guest (LOCAL)
 app.delete('/api/v1/guest-lists/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const response = await fetch(`${MONOREPO_API_URL}/guest-lists/${id}`, {
-      method: 'DELETE',
-    });
-    if (response.status === 204) {
-      return res.status(204).send();
+    const result = await pool.query('DELETE FROM guests WHERE id = $1 RETURNING *', [id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Not Found', message: 'Guest not found' });
     }
-    const data = await response.json();
-    res.status(response.status).json(data);
+
+    res.status(204).send();
   } catch (error) {
     console.error('Error deleting guest:', error);
     res.status(500).json({ error: 'Failed to delete guest' });
   }
 });
 
-// POST /api/v1/guest-lists/:id/send-invitation - Send invitation email
-// This is the main endpoint that fetches guest from monorepo and sends email via Resend
+// POST /api/v1/guest-lists/:id/send-invitation - Send invitation email (LOCAL)
 app.post('/api/v1/guest-lists/:id/send-invitation', async (req, res) => {
   const { id } = req.params;
   const { category, customMessage, emailOnly } = req.body;
 
   try {
-    // 1. Fetch guest data from monorepo backend
-    const guestResponse = await fetch(`${MONOREPO_API_URL}/guest-lists/${id}`);
+    // 1. Fetch guest from LOCAL database
+    const result = await pool.query('SELECT * FROM guests WHERE id = $1', [id]);
 
-    if (!guestResponse.ok) {
-      const errorData = await guestResponse.json();
-      return res.status(guestResponse.status).json(errorData);
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Not Found', message: 'Guest not found' });
     }
 
-    const guest = await guestResponse.json();
-    console.log(`Sending invitation to: ${guest.name} (${guest.email})`);
+    const guestRow = result.rows[0];
+    const guest = transformGuest(guestRow);
+    console.log(`📧 Sending invitation to: ${guest.name} (${guest.email})`);
 
     // 2. Generate email content
     const categoryNames = { A: 'VIP', B: 'Priority', C: 'Standard' };
@@ -1001,7 +1200,7 @@ app.post('/api/v1/guest-lists/:id/send-invitation', async (req, res) => {
                 </tr>
                 <tr>
                   <td style="padding: 8px 0; color: #666;">Party Size</td>
-                  <td style="padding: 8px 0; color: #ffffff; text-align: right;">${guest.numberOfGuests || 1} ${(guest.numberOfGuests || 1) > 1 ? 'guests' : 'guest'}</td>
+                  <td style="padding: 8px 0; color: #ffffff; text-align: right;">${guest.partySize || 1} ${(guest.partySize || 1) > 1 ? 'guests' : 'guest'}</td>
                 </tr>
               </table>
             </div>
@@ -1029,27 +1228,18 @@ app.post('/api/v1/guest-lists/:id/send-invitation', async (req, res) => {
       return res.status(500).json({
         error: 'Failed to send email',
         details: emailError.message || emailError,
-        hint: 'If using onboarding@resend.dev, you can only send to verified emails. Verify a domain at resend.com/domains'
       });
     }
 
     console.log(`✅ Email sent to ${guest.email} - Email ID: ${emailData?.id}`);
 
-    // 4. Update guest status in monorepo (optional, if not emailOnly)
-    if (!emailOnly) {
-      try {
-        await fetch(`${MONOREPO_API_URL}/guest-lists/${id}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            status: category === 'rejected' ? 'rejected' : 'approved',
-            notes: `Email sent: ${new Date().toISOString()}`
-          }),
-        });
-      } catch (updateError) {
-        console.error('Failed to update guest status:', updateError);
-      }
-    }
+    // 4. Update guest status in LOCAL database
+    const newCategory = category === 'C' || category === 'rejected' ? 'C' : guestCategory;
+    await pool.query(
+      `UPDATE guests SET category = $1, email_sent = true, email_sent_at = CURRENT_TIMESTAMP,
+       notes = COALESCE(notes, '') || $2 WHERE id = $3`,
+      [emailOnly ? guestRow.category : newCategory, `\n📧 Email sent: ${new Date().toISOString()}`, id]
+    );
 
     // 5. Send admin confirmation
     await sendAdminConfirmation([{ name: guest.name, email: guest.email }], guestCategory);
@@ -1061,7 +1251,9 @@ app.post('/api/v1/guest-lists/:id/send-invitation', async (req, res) => {
         id: guest.id,
         name: guest.name,
         email: guest.email,
-        status: emailOnly ? guest.status : 'approved',
+        status: emailOnly ? guest.category : 'approved',
+        emailSent: true,
+        emailSentAt: new Date().toISOString(),
       }
     });
 
@@ -1071,7 +1263,7 @@ app.post('/api/v1/guest-lists/:id/send-invitation', async (req, res) => {
   }
 });
 
-// POST /api/v1/guest-lists/bulk-send - Send invitations to multiple guests
+// POST /api/v1/guest-lists/bulk-send - Send invitations to multiple guests (LOCAL)
 app.post('/api/v1/guest-lists/bulk-send', async (req, res) => {
   const { guestIds, category, customMessages } = req.body;
 
@@ -1081,20 +1273,20 @@ app.post('/api/v1/guest-lists/bulk-send', async (req, res) => {
 
   const results = [];
   const errors = [];
+  const categoryNames = { A: 'VIP', B: 'Priority', C: 'Standard' };
+  const guestCategory = category || 'A';
 
   for (const id of guestIds) {
     try {
-      // Fetch guest from monorepo
-      const guestResponse = await fetch(`${MONOREPO_API_URL}/guest-lists/${id}`);
-      if (!guestResponse.ok) {
+      // Fetch guest from LOCAL database
+      const result = await pool.query('SELECT * FROM guests WHERE id = $1', [id]);
+      if (result.rows.length === 0) {
         errors.push({ id, error: 'Guest not found' });
         continue;
       }
 
-      const guest = await guestResponse.json();
+      const guest = transformGuest(result.rows[0]);
       const customMessage = customMessages?.[id] || '';
-      const guestCategory = category || 'A';
-      const categoryNames = { A: 'VIP', B: 'Priority', C: 'Standard' };
 
       // Generate and send email
       const emailHtml = `
@@ -1130,15 +1322,14 @@ app.post('/api/v1/guest-lists/bulk-send', async (req, res) => {
         continue;
       }
 
-      // Update guest status
-      await fetch(`${MONOREPO_API_URL}/guest-lists/${id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'approved' }),
-      });
+      // Update guest status in LOCAL database
+      await pool.query(
+        `UPDATE guests SET category = $1, email_sent = true, email_sent_at = CURRENT_TIMESTAMP WHERE id = $2`,
+        [guestCategory, id]
+      );
 
       results.push({ id, email: guest.email, emailId: data?.id, name: guest.name });
-      console.log(`Bulk send: ${guest.name} (${guest.email})`);
+      console.log(`📧 Bulk send: ${guest.name} (${guest.email})`);
     } catch (error) {
       errors.push({ id, error: error.message });
     }
@@ -1146,7 +1337,7 @@ app.post('/api/v1/guest-lists/bulk-send', async (req, res) => {
 
   // Send admin confirmation
   if (results.length > 0) {
-    await sendAdminConfirmation(results.map(r => ({ name: r.name, email: r.email })), category || 'A');
+    await sendAdminConfirmation(results.map(r => ({ name: r.name, email: r.email })), guestCategory);
   }
 
   res.json({
