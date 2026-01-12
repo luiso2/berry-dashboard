@@ -529,7 +529,29 @@ const initDatabase = async () => {
       CREATE INDEX IF NOT EXISTS idx_history_vendor ON vendor_history(vendor_id);
     `);
 
-    console.log('Database tables initialized successfully (guests, email_events, tickets, activity_log, sponsors, events, budgets, vendors, staff, contracts)');
+    // ============================================
+    // PRIORITY LOW: CLIENT PORTAL
+    // ============================================
+
+    // Create client_access table - Client portal access tokens
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS client_access (
+        id SERIAL PRIMARY KEY,
+        event_id INTEGER REFERENCES events(id) ON DELETE CASCADE,
+        client_name VARCHAR(255) NOT NULL,
+        client_email VARCHAR(255) NOT NULL,
+        access_token VARCHAR(100) UNIQUE NOT NULL,
+        permissions JSONB DEFAULT '{"viewBudget": true, "viewTimeline": true, "viewStaff": false, "viewVendors": false}',
+        last_accessed TIMESTAMP,
+        expires_at TIMESTAMP,
+        is_active BOOLEAN DEFAULT true,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_client_token ON client_access(access_token);
+      CREATE INDEX IF NOT EXISTS idx_client_event ON client_access(event_id);
+    `);
+
+    console.log('Database tables initialized successfully (guests, email_events, tickets, activity_log, sponsors, events, budgets, vendors, staff, contracts, client_access)');
   } catch (error) {
     console.error('Error initializing database:', error);
   } finally {
@@ -4090,6 +4112,228 @@ app.post('/api/v1/vendor-history', async (req, res) => {
   } catch (error) {
     console.error('Error adding vendor history:', error);
     res.status(500).json({ error: 'Failed to add vendor history' });
+  }
+});
+
+// ============================================================
+// CLIENT PORTAL ENDPOINTS
+// ============================================================
+
+// Helper function to generate access token
+const generateAccessToken = () => {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  let token = '';
+  for (let i = 0; i < 32; i++) {
+    token += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return token;
+};
+
+// POST /api/v1/events/:eventId/client-access - Create client access for event
+app.post('/api/v1/events/:eventId/client-access', async (req, res) => {
+  try {
+    const { eventId } = req.params;
+    const { clientName, clientEmail, permissions, expiresInDays } = req.body;
+
+    if (!clientName || !clientEmail) {
+      return res.status(400).json({ error: 'Client name and email are required' });
+    }
+
+    const accessToken = generateAccessToken();
+    const expiresAt = expiresInDays
+      ? new Date(Date.now() + expiresInDays * 24 * 60 * 60 * 1000)
+      : null;
+
+    const result = await pool.query(`
+      INSERT INTO client_access (event_id, client_name, client_email, access_token, permissions, expires_at)
+      VALUES ($1, $2, $3, $4, $5, $6)
+      RETURNING *
+    `, [eventId, clientName, clientEmail, accessToken, permissions || { viewBudget: true, viewTimeline: true, viewStaff: false, viewVendors: false }, expiresAt]);
+
+    // Generate portal URL
+    const portalUrl = `${process.env.FRONTEND_URL || 'https://berry-dashboard.vercel.app'}/client/${accessToken}`;
+
+    res.status(201).json({
+      ...result.rows[0],
+      portalUrl
+    });
+  } catch (error) {
+    console.error('Error creating client access:', error);
+    res.status(500).json({ error: 'Failed to create client access' });
+  }
+});
+
+// GET /api/v1/events/:eventId/client-access - Get all client access for event
+app.get('/api/v1/events/:eventId/client-access', async (req, res) => {
+  try {
+    const { eventId } = req.params;
+    const result = await pool.query(`
+      SELECT id, client_name, client_email, permissions, last_accessed, expires_at, is_active, created_at
+      FROM client_access
+      WHERE event_id = $1
+      ORDER BY created_at DESC
+    `, [eventId]);
+    res.json({ clients: result.rows });
+  } catch (error) {
+    console.error('Error fetching client access:', error);
+    res.status(500).json({ error: 'Failed to fetch client access' });
+  }
+});
+
+// DELETE /api/v1/client-access/:id - Revoke client access
+app.delete('/api/v1/client-access/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    await pool.query('UPDATE client_access SET is_active = false WHERE id = $1', [id]);
+    res.status(204).send();
+  } catch (error) {
+    console.error('Error revoking client access:', error);
+    res.status(500).json({ error: 'Failed to revoke client access' });
+  }
+});
+
+// GET /api/v1/client-portal/:token - Validate token and get client portal data
+app.get('/api/v1/client-portal/:token', async (req, res) => {
+  try {
+    const { token } = req.params;
+
+    // Validate token
+    const accessResult = await pool.query(`
+      SELECT ca.*, e.name as event_name, e.event_date, e.venue_name, e.venue_city,
+             e.status as event_status, e.expected_attendance, e.theme, e.dress_code
+      FROM client_access ca
+      JOIN events e ON ca.event_id = e.id
+      WHERE ca.access_token = $1
+    `, [token]);
+
+    if (accessResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Invalid access token' });
+    }
+
+    const access = accessResult.rows[0];
+
+    // Check if active and not expired
+    if (!access.is_active) {
+      return res.status(403).json({ error: 'Access has been revoked' });
+    }
+    if (access.expires_at && new Date(access.expires_at) < new Date()) {
+      return res.status(403).json({ error: 'Access has expired' });
+    }
+
+    // Update last accessed
+    await pool.query('UPDATE client_access SET last_accessed = CURRENT_TIMESTAMP WHERE id = $1', [access.id]);
+
+    // Build response based on permissions
+    const response = {
+      client: {
+        name: access.client_name,
+        email: access.client_email
+      },
+      event: {
+        id: access.event_id,
+        name: access.event_name,
+        date: access.event_date,
+        venue: access.venue_name,
+        city: access.venue_city,
+        status: access.event_status,
+        expectedAttendance: access.expected_attendance,
+        theme: access.theme,
+        dressCode: access.dress_code
+      },
+      permissions: access.permissions
+    };
+
+    // Fetch budget if permitted
+    if (access.permissions?.viewBudget) {
+      const budgetResult = await pool.query(`
+        SELECT b.*, bc.name as category_name, bc.icon, bc.is_income
+        FROM budget_items b
+        JOIN budgets bu ON b.budget_id = bu.id
+        LEFT JOIN budget_categories bc ON b.category_id = bc.id
+        WHERE bu.event_id = $1
+        ORDER BY bc.sort_order, b.created_at
+      `, [access.event_id]);
+
+      const budgetSummary = await pool.query(`
+        SELECT
+          COALESCE(SUM(estimated_amount) FILTER (WHERE NOT bc.is_income), 0) as total_estimated_expenses,
+          COALESCE(SUM(actual_amount) FILTER (WHERE NOT bc.is_income), 0) as total_actual_expenses,
+          COALESCE(SUM(estimated_amount) FILTER (WHERE bc.is_income), 0) as total_estimated_income,
+          COALESCE(SUM(actual_amount) FILTER (WHERE bc.is_income), 0) as total_actual_income,
+          COUNT(*) FILTER (WHERE b.is_paid) as paid_count,
+          COUNT(*) FILTER (WHERE NOT b.is_paid) as pending_count
+        FROM budget_items b
+        JOIN budgets bu ON b.budget_id = bu.id
+        LEFT JOIN budget_categories bc ON b.category_id = bc.id
+        WHERE bu.event_id = $1
+      `, [access.event_id]);
+
+      response.budget = {
+        items: budgetResult.rows.map(item => ({
+          category: item.category_name,
+          icon: item.icon,
+          description: item.description,
+          estimatedAmount: parseFloat(item.estimated_amount) || 0,
+          actualAmount: parseFloat(item.actual_amount) || 0,
+          isPaid: item.is_paid,
+          isIncome: item.is_income
+        })),
+        summary: budgetSummary.rows[0]
+      };
+    }
+
+    // Fetch timeline if permitted
+    if (access.permissions?.viewTimeline) {
+      const timelineResult = await pool.query(`
+        SELECT time, title, description, location, is_critical, status
+        FROM event_timeline
+        WHERE event_id = $1
+        ORDER BY sort_order, time
+      `, [access.event_id]);
+
+      const checklistResult = await pool.query(`
+        SELECT category, item, is_completed, priority
+        FROM event_checklist
+        WHERE event_id = $1
+        ORDER BY priority DESC, category
+      `, [access.event_id]);
+
+      response.timeline = timelineResult.rows;
+      response.checklist = {
+        items: checklistResult.rows,
+        completed: checklistResult.rows.filter(c => c.is_completed).length,
+        total: checklistResult.rows.length
+      };
+    }
+
+    // Fetch staff if permitted
+    if (access.permissions?.viewStaff) {
+      const staffResult = await pool.query(`
+        SELECT s.name, s.role, s.photo_url, sa.shift_start, sa.shift_end, sa.status
+        FROM staff_assignments sa
+        JOIN staff s ON sa.staff_id = s.id
+        WHERE sa.event_id = $1
+        ORDER BY sa.shift_start
+      `, [access.event_id]);
+      response.staff = staffResult.rows;
+    }
+
+    // Fetch vendors if permitted
+    if (access.permissions?.viewVendors) {
+      const vendorResult = await pool.query(`
+        SELECT v.name, v.category, vc.title as contract_title, vc.status
+        FROM vendor_contracts vc
+        JOIN vendors v ON vc.vendor_id = v.id
+        WHERE vc.event_id = $1
+        ORDER BY v.category
+      `, [access.event_id]);
+      response.vendors = vendorResult.rows;
+    }
+
+    res.json(response);
+  } catch (error) {
+    console.error('Error fetching client portal:', error);
+    res.status(500).json({ error: 'Failed to fetch client portal data' });
   }
 });
 

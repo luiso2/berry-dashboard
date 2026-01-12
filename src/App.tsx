@@ -36,7 +36,7 @@ const categoryToStatus = (category: GuestCategory): string => {
 
 type GuestCategory = 'pending' | 'A' | 'B' | 'C' | 'rejected';
 type GuestStatus = 'pending' | 'approved' | 'declined' | 'rejected';
-type ViewType = 'overview' | 'guests' | 'emails' | 'vip' | 'priority' | 'standard' | 'analytics' | 'activity' | 'automation' | 'checkin' | 'models' | 'tables' | 'tickets' | 'sponsors' | 'events' | 'budget' | 'vendors' | 'staff';
+type ViewType = 'overview' | 'guests' | 'emails' | 'vip' | 'priority' | 'standard' | 'analytics' | 'activity' | 'automation' | 'checkin' | 'models' | 'tables' | 'tickets' | 'sponsors' | 'events' | 'budget' | 'vendors' | 'staff' | 'client-portal';
 type ThemeMode = 'dark' | 'light';
 
 interface Purchase {
@@ -246,18 +246,6 @@ interface BudgetCategory {
   sortOrder: number;
 }
 
-interface Budget {
-  id: number;
-  eventId: number;
-  name: string;
-  totalBudget: number;
-  totalSpent: number;
-  totalIncome: number;
-  currency: string;
-  status: string;
-  notes?: string;
-}
-
 interface BudgetItem {
   id: number;
   budgetId: number;
@@ -322,6 +310,26 @@ interface Staff {
   createdAt: string;
   assignmentsCount?: number;
   upcomingEvents?: number;
+}
+
+// Client Access Interface
+interface ClientAccess {
+  id: number;
+  eventId: number;
+  clientName: string;
+  clientEmail: string;
+  accessToken?: string;
+  permissions: {
+    viewBudget: boolean;
+    viewTimeline: boolean;
+    viewStaff: boolean;
+    viewVendors: boolean;
+  };
+  lastAccessed?: string;
+  expiresAt?: string;
+  isActive: boolean;
+  createdAt: string;
+  portalUrl?: string;
 }
 
 // Instagram-based AI Score Calculator
@@ -699,15 +707,9 @@ function App() {
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
   const [showEventForm, setShowEventForm] = useState(false);
   const [eventFormData, setEventFormData] = useState({ name: '', eventDate: '', eventType: 'party', venueName: '', venueCity: '', expectedAttendance: '', dressCode: '', theme: '', notes: '' });
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [_calendarMonth, _setCalendarMonth] = useState(new Date().getMonth() + 1);
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [_calendarYear, _setCalendarYear] = useState(new Date().getFullYear());
 
   // Budget state
   const [budgetCategories, setBudgetCategories] = useState<BudgetCategory[]>([]);
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [_currentBudget, setCurrentBudget] = useState<Budget | null>(null);
   const [budgetItems, setBudgetItems] = useState<BudgetItem[]>([]);
   const [budgetSummary, setBudgetSummary] = useState({ totalBudget: 0, totalEstimatedExpenses: 0, totalActualExpenses: 0, totalEstimatedIncome: 0, totalActualIncome: 0, estimatedProfit: 0, actualProfit: 0, budgetRemaining: 0, paidCount: 0, pendingCount: 0 });
   const [showBudgetItemForm, setShowBudgetItemForm] = useState(false);
@@ -728,6 +730,14 @@ function App() {
     emergencyContact: '', emergencyPhone: ''
   });
   const [selectedStaff, setSelectedStaff] = useState<Staff | null>(null);
+
+  // Client Portal state
+  const [clientAccesses, setClientAccesses] = useState<ClientAccess[]>([]);
+  const [showClientAccessForm, setShowClientAccessForm] = useState(false);
+  const [clientAccessFormData, setClientAccessFormData] = useState({
+    clientName: '', clientEmail: '', expiresInDays: '30',
+    viewBudget: true, viewTimeline: true, viewStaff: false, viewVendors: false
+  });
 
   // Collapsible menu state
   const [expandedMenus, setExpandedMenus] = useState<Set<string>>(new Set(['main', 'intelligence']));
@@ -1030,7 +1040,6 @@ function App() {
       ]);
       const budgetData = await budgetRes.json();
       const categoriesData = await categoriesRes.json();
-      setCurrentBudget(budgetData.budget);
       setBudgetItems(budgetData.items || []);
       setBudgetSummary(budgetData.summary);
       setBudgetCategories(categoriesData.categories || []);
@@ -1186,6 +1195,76 @@ function App() {
       addToast('Failed to delete staff member', 'error');
     }
   }, [fetchStaff]);
+
+  // Fetch Client Accesses for an event
+  const fetchClientAccesses = useCallback(async (eventId: number) => {
+    try {
+      const res = await fetch(`${API_URL}/events/${eventId}/client-access`);
+      const data = await res.json();
+      setClientAccesses(data.clients || []);
+    } catch (error) {
+      console.error('Error fetching client accesses:', error);
+    }
+  }, []);
+
+  // Create Client Access
+  const createClientAccess = useCallback(async () => {
+    if (!selectedEvent || !clientAccessFormData.clientName || !clientAccessFormData.clientEmail) {
+      addToast('Client name and email are required', 'error');
+      return;
+    }
+    try {
+      const res = await fetch(`${API_URL}/events/${selectedEvent.id}/client-access`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          clientName: clientAccessFormData.clientName,
+          clientEmail: clientAccessFormData.clientEmail,
+          expiresInDays: parseInt(clientAccessFormData.expiresInDays) || null,
+          permissions: {
+            viewBudget: clientAccessFormData.viewBudget,
+            viewTimeline: clientAccessFormData.viewTimeline,
+            viewStaff: clientAccessFormData.viewStaff,
+            viewVendors: clientAccessFormData.viewVendors
+          }
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        fetchClientAccesses(selectedEvent.id);
+        setShowClientAccessForm(false);
+        setClientAccessFormData({
+          clientName: '', clientEmail: '', expiresInDays: '30',
+          viewBudget: true, viewTimeline: true, viewStaff: false, viewVendors: false
+        });
+        // Copy URL to clipboard
+        if (data.portalUrl) {
+          navigator.clipboard.writeText(data.portalUrl);
+          addToast('Client portal created! URL copied to clipboard', 'success');
+        } else {
+          addToast('Client portal access created!', 'success');
+        }
+      }
+    } catch (error) {
+      console.error('Error creating client access:', error);
+      addToast('Failed to create client access', 'error');
+    }
+  }, [selectedEvent, clientAccessFormData, fetchClientAccesses]);
+
+  // Revoke Client Access
+  const revokeClientAccess = useCallback(async (id: number) => {
+    if (!confirm('Are you sure you want to revoke this client access?')) return;
+    try {
+      const res = await fetch(`${API_URL}/client-access/${id}`, { method: 'DELETE' });
+      if (res.ok && selectedEvent) {
+        fetchClientAccesses(selectedEvent.id);
+        addToast('Client access revoked', 'success');
+      }
+    } catch (error) {
+      console.error('Error revoking client access:', error);
+      addToast('Failed to revoke access', 'error');
+    }
+  }, [selectedEvent, fetchClientAccesses]);
 
   // Flyer ref for html-to-image
   const flyerRef = useRef<HTMLDivElement>(null);
@@ -3598,6 +3677,12 @@ function App() {
                     >
                       Budget
                     </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setSelectedEvent(event); fetchClientAccesses(event.id); setShowClientAccessForm(true); }}
+                      style={{ flex: 1, padding: '8px', background: '#3b82f620', border: 'none', borderRadius: 6, color: '#3b82f6', fontSize: 12, cursor: 'pointer' }}
+                    >
+                      Share
+                    </button>
                   </div>
                 </div>
               ))}
@@ -3640,6 +3725,143 @@ function App() {
                     <div style={{ display: 'flex', gap: 12 }}>
                       <button onClick={() => setShowEventForm(false)} style={{ flex: 1, padding: '12px', background: '#1a1a1a', border: 'none', borderRadius: 8, color: '#fff', cursor: 'pointer' }}>Cancel</button>
                       <button onClick={createEvent} style={{ flex: 1, padding: '12px', background: '#d4af37', border: 'none', borderRadius: 8, color: '#000', fontWeight: 600, cursor: 'pointer' }}>Create Event</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Client Access Modal */}
+            {showClientAccessForm && selectedEvent && (
+              <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.9)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200, padding: 16 }} onClick={() => setShowClientAccessForm(false)}>
+                <div style={{ background: '#0a0a0a', border: '1px solid #1a1a1a', borderRadius: 16, padding: 32, width: '100%', maxWidth: 600, maxHeight: '90vh', overflow: 'auto', animation: 'slideUp 0.3s ease' }} onClick={e => e.stopPropagation()}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+                    <div>
+                      <h2 style={{ fontSize: 20, fontWeight: 600, margin: 0 }}>Share with Client</h2>
+                      <div style={{ fontSize: 13, color: '#666', marginTop: 4 }}>{selectedEvent.name}</div>
+                    </div>
+                    <button onClick={() => setShowClientAccessForm(false)} style={{ background: 'none', border: 'none', color: '#666', fontSize: 24, cursor: 'pointer' }}>×</button>
+                  </div>
+
+                  {/* Existing Client Accesses */}
+                  {clientAccesses.length > 0 && (
+                    <div style={{ marginBottom: 24 }}>
+                      <h3 style={{ fontSize: 14, color: '#888', marginBottom: 12, textTransform: 'uppercase', letterSpacing: 1 }}>Active Portal Links</h3>
+                      <div style={{ display: 'grid', gap: 8 }}>
+                        {clientAccesses.map(access => (
+                          <div key={access.id} style={{ background: '#111', border: '1px solid #222', borderRadius: 8, padding: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <div>
+                              <div style={{ fontWeight: 500 }}>{access.clientName}</div>
+                              <div style={{ fontSize: 12, color: '#666' }}>{access.clientEmail}</div>
+                              <div style={{ fontSize: 11, color: '#444', marginTop: 4 }}>
+                                {access.permissions.viewBudget && <span style={{ marginRight: 8 }}>💰 Budget</span>}
+                                {access.permissions.viewTimeline && <span style={{ marginRight: 8 }}>📅 Timeline</span>}
+                                {access.permissions.viewStaff && <span style={{ marginRight: 8 }}>👥 Staff</span>}
+                                {access.permissions.viewVendors && <span>🏢 Vendors</span>}
+                              </div>
+                            </div>
+                            <div style={{ display: 'flex', gap: 8 }}>
+                              {access.portalUrl && (
+                                <button
+                                  onClick={() => { navigator.clipboard.writeText(access.portalUrl || ''); }}
+                                  style={{ padding: '6px 12px', background: '#3b82f620', border: 'none', borderRadius: 6, color: '#3b82f6', fontSize: 12, cursor: 'pointer' }}
+                                >
+                                  Copy Link
+                                </button>
+                              )}
+                              <button
+                                onClick={() => revokeClientAccess(access.id)}
+                                style={{ padding: '6px 12px', background: '#ef444420', border: 'none', borderRadius: 6, color: '#ef4444', fontSize: 12, cursor: 'pointer' }}
+                              >
+                                Revoke
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Create New Access Form */}
+                  <div>
+                    <h3 style={{ fontSize: 14, color: '#888', marginBottom: 12, textTransform: 'uppercase', letterSpacing: 1 }}>Create New Portal Link</h3>
+                    <div style={{ display: 'grid', gap: 16 }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                        <input
+                          placeholder="Client Name *"
+                          value={clientAccessFormData.clientName}
+                          onChange={e => setClientAccessFormData(p => ({ ...p, clientName: e.target.value }))}
+                          style={{ background: '#111', border: '1px solid #222', borderRadius: 8, padding: '12px 16px', color: '#fff', fontSize: 14 }}
+                        />
+                        <input
+                          placeholder="Client Email *"
+                          type="email"
+                          value={clientAccessFormData.clientEmail}
+                          onChange={e => setClientAccessFormData(p => ({ ...p, clientEmail: e.target.value }))}
+                          style={{ background: '#111', border: '1px solid #222', borderRadius: 8, padding: '12px 16px', color: '#fff', fontSize: 14 }}
+                        />
+                      </div>
+                      <div>
+                        <label style={{ fontSize: 12, color: '#666', marginBottom: 8, display: 'block' }}>Link expires in (days, leave empty for no expiration)</label>
+                        <input
+                          placeholder="30"
+                          type="number"
+                          value={clientAccessFormData.expiresInDays}
+                          onChange={e => setClientAccessFormData(p => ({ ...p, expiresInDays: e.target.value }))}
+                          style={{ background: '#111', border: '1px solid #222', borderRadius: 8, padding: '12px 16px', color: '#fff', fontSize: 14, width: 100 }}
+                        />
+                      </div>
+                      <div>
+                        <label style={{ fontSize: 12, color: '#666', marginBottom: 8, display: 'block' }}>Client can view:</label>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
+                          <label style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#fff', cursor: 'pointer' }}>
+                            <input
+                              type="checkbox"
+                              checked={clientAccessFormData.viewBudget}
+                              onChange={e => setClientAccessFormData(p => ({ ...p, viewBudget: e.target.checked }))}
+                            />
+                            💰 Budget
+                          </label>
+                          <label style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#fff', cursor: 'pointer' }}>
+                            <input
+                              type="checkbox"
+                              checked={clientAccessFormData.viewTimeline}
+                              onChange={e => setClientAccessFormData(p => ({ ...p, viewTimeline: e.target.checked }))}
+                            />
+                            📅 Timeline
+                          </label>
+                          <label style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#fff', cursor: 'pointer' }}>
+                            <input
+                              type="checkbox"
+                              checked={clientAccessFormData.viewStaff}
+                              onChange={e => setClientAccessFormData(p => ({ ...p, viewStaff: e.target.checked }))}
+                            />
+                            👥 Staff
+                          </label>
+                          <label style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#fff', cursor: 'pointer' }}>
+                            <input
+                              type="checkbox"
+                              checked={clientAccessFormData.viewVendors}
+                              onChange={e => setClientAccessFormData(p => ({ ...p, viewVendors: e.target.checked }))}
+                            />
+                            🏢 Vendors
+                          </label>
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', gap: 12 }}>
+                        <button
+                          onClick={() => setShowClientAccessForm(false)}
+                          style={{ flex: 1, padding: '12px', background: '#1a1a1a', border: 'none', borderRadius: 8, color: '#fff', cursor: 'pointer' }}
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          onClick={createClientAccess}
+                          style={{ flex: 1, padding: '12px', background: '#3b82f6', border: 'none', borderRadius: 8, color: '#fff', fontWeight: 600, cursor: 'pointer' }}
+                        >
+                          Create Portal Link
+                        </button>
+                      </div>
                     </div>
                   </div>
                 </div>
