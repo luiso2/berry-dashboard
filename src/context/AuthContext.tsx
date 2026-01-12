@@ -1,4 +1,5 @@
-import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect } from 'react';
+import type { ReactNode } from 'react';
 
 const API_URL = import.meta.env.VITE_API_URL || 'https://berry-dashboard-api-production.up.railway.app';
 
