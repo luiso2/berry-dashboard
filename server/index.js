@@ -3549,6 +3549,55 @@ app.post('/api/v1/gpt/sponsors', async (req, res) => {
 });
 
 // ============================================
+// UNIFIED GPT SESSION ENDPOINT
+// Single endpoint that routes to all GPT handlers
+// ============================================
+app.post('/api/v1/gpt/session', async (req, res) => {
+  const { endpoint, action, ...rest } = req.body;
+
+  if (!endpoint) {
+    return res.status(400).json({
+      error: 'Missing endpoint parameter',
+      validEndpoints: ['manageEvents', 'manageGuests', 'manageBudget', 'manageStaff', 'manageVendors', 'manageModels', 'manageTables', 'manageTickets', 'manageSponsors', 'getDashboard']
+    });
+  }
+
+  // Map endpoint names to internal routes
+  const endpointMap = {
+    'manageEvents': '/api/v1/gpt/events',
+    'manageGuests': '/api/v1/gpt/guests',
+    'manageBudget': '/api/v1/gpt/budget',
+    'manageStaff': '/api/v1/gpt/staff',
+    'manageVendors': '/api/v1/gpt/vendors',
+    'manageModels': '/api/v1/gpt/models',
+    'manageTables': '/api/v1/gpt/tables',
+    'manageTickets': '/api/v1/gpt/tickets',
+    'manageSponsors': '/api/v1/gpt/sponsors',
+    'getDashboard': '/api/v1/dashboard'
+  };
+
+  const targetPath = endpointMap[endpoint];
+  if (!targetPath) {
+    return res.status(400).json({
+      error: `Invalid endpoint: ${endpoint}`,
+      validEndpoints: Object.keys(endpointMap)
+    });
+  }
+
+  // For getDashboard, redirect to GET endpoint
+  if (endpoint === 'getDashboard') {
+    req.url = targetPath;
+    req.method = 'GET';
+    return app._router.handle(req, res, () => {});
+  }
+
+  // For other endpoints, forward the request with action
+  req.url = targetPath;
+  req.body = { action, ...rest };
+  return app._router.handle(req, res, () => {});
+});
+
+// ============================================
 // EVENTS ENDPOINTS
 // ============================================
 

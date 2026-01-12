@@ -5,524 +5,256 @@ info:
     Unified API for GPT to control the Berry Bly Productions event dashboard.
 
     ## How to Use
-    Each endpoint handles multiple actions via the `action` parameter.
-    Use `getDashboard` first to see the current state, then use specific
-    session endpoints to make changes.
+    Use the single `gptSession` endpoint with:
+    - `endpoint`: Which manager to use (manageEvents, manageGuests, etc.)
+    - `action`: What operation to perform (list, add, update, delete, etc.)
+    - Additional parameters based on the action
 
-    ## Available Sessions (10 total operations)
-    1. **getDashboard** - Get complete overview
-    2. **manageEvents** - Create, update, delete events + timeline/checklist
-    3. **manageGuests** - Add, approve, reject, check-in guests
-    4. **manageBudget** - Track income and expenses
-    5. **manageStaff** - Staff roster and event assignments
-    6. **manageVendors** - Vendor database
-    7. **manageModels** - Talent/model applications
-    8. **manageTables** - VIP table reservations
-    9. **manageTickets** - Ticket sales and check-ins
-    10. **manageSponsors** - Event sponsors
+    ## Available Endpoints
+    - **getDashboard** - Get complete overview (no action needed)
+    - **manageEvents** - Actions: list, get, getFull, create, update, delete, addTimeline, addChecklist
+    - **manageGuests** - Actions: list, get, add, update, delete, approve, reject, checkIn, stats
+    - **manageBudget** - Actions: getCategories, getSummary, getItems, addItem, updateItem, deleteItem, markPaid
+    - **manageStaff** - Actions: list, get, add, update, delete, assignToEvent, getEventStaff, removeAssignment
+    - **manageVendors** - Actions: list, get, add, update, delete
+    - **manageModels** - Actions: list, get, updateStatus, stats
+    - **manageTables** - Actions: list, create, confirm, cancel, stats
+    - **manageTickets** - Actions: list, create, checkIn, stats
+    - **manageSponsors** - Actions: list, get, add, updateStatus, stats
 
-  version: 3.0.0
+  version: 3.1.0
   contact:
     name: Berry Bly Productions
     email: concierge@berrybly.com
 
 servers:
-  - url: https://berry-dashboard-api-production.up.railway.app
+  - url: https://berrydashboard.merktop.com
 
 paths:
-  /api/v1/dashboard:
-    get:
-      operationId: getDashboard
-      summary: Get complete dashboard overview
+  /api/v1/gpt/session:
+    post:
+      operationId: gptSession
+      summary: Unified GPT session endpoint for all operations
       description: |
-        Returns overview of all events, guests, budget, staff, and vendors.
-        Always call this first to understand the current state.
+        Single endpoint to manage all Berry Bly Productions data.
+
+        **Examples:**
+
+        Get Dashboard:
+        ```json
+        { "endpoint": "getDashboard" }
+        ```
+
+        List Events:
+        ```json
+        { "endpoint": "manageEvents", "action": "list" }
+        ```
+
+        Create Event:
+        ```json
+        { "endpoint": "manageEvents", "action": "create", "data": { "name": "NYE Gala", "eventDate": "2025-12-31" } }
+        ```
+
+        Add Guest:
+        ```json
+        { "endpoint": "manageGuests", "action": "add", "eventId": 1, "data": { "name": "John Doe", "email": "john@example.com" } }
+        ```
+
+        Add Sponsor:
+        ```json
+        { "endpoint": "manageSponsors", "action": "add", "data": { "companyName": "Moët & Chandon", "tier": "platinum", "amount": 50000 } }
+        ```
+
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [endpoint]
+              properties:
+                endpoint:
+                  type: string
+                  description: Which manager to use
+                  enum:
+                    - getDashboard
+                    - manageEvents
+                    - manageGuests
+                    - manageBudget
+                    - manageStaff
+                    - manageVendors
+                    - manageModels
+                    - manageTables
+                    - manageTickets
+                    - manageSponsors
+                action:
+                  type: string
+                  description: |
+                    Operation to perform. Required for all endpoints except getDashboard.
+
+                    **manageEvents:** list, get, getFull, create, update, delete, addTimeline, addChecklist
+                    **manageGuests:** list, get, add, update, delete, approve, reject, checkIn, stats
+                    **manageBudget:** getCategories, getSummary, getItems, addItem, updateItem, deleteItem, markPaid
+                    **manageStaff:** list, get, add, update, delete, assignToEvent, getEventStaff, removeAssignment
+                    **manageVendors:** list, get, add, update, delete
+                    **manageModels:** list, get, updateStatus, stats
+                    **manageTables:** list, create, confirm, cancel, stats
+                    **manageTickets:** list, create, checkIn, stats
+                    **manageSponsors:** list, get, add, updateStatus, stats
+                eventId:
+                  type: integer
+                  description: Event ID (for event-specific operations)
+                guestId:
+                  type: integer
+                  description: Guest ID (for guest operations)
+                staffId:
+                  type: integer
+                  description: Staff ID (for staff operations)
+                vendorId:
+                  type: integer
+                  description: Vendor ID (for vendor operations)
+                modelId:
+                  type: integer
+                  description: Model ID (for model operations)
+                sponsorId:
+                  type: integer
+                  description: Sponsor ID (for sponsor operations)
+                reservationId:
+                  type: integer
+                  description: Reservation ID (for table operations)
+                ticketId:
+                  type: integer
+                  description: Ticket ID (for ticket operations)
+                itemId:
+                  type: integer
+                  description: Budget item ID (for budget operations)
+                assignmentId:
+                  type: integer
+                  description: Staff assignment ID
+                filters:
+                  type: object
+                  description: Optional filters for list operations
+                  properties:
+                    status:
+                      type: string
+                    category:
+                      type: string
+                    search:
+                      type: string
+                    limit:
+                      type: integer
+                    isPreferred:
+                      type: boolean
+                data:
+                  type: object
+                  description: |
+                    Data for create/update operations. Fields depend on the endpoint:
+
+                    **Events:** name, eventDate, eventType, venueName, venueCity, expectedAttendance, dressCode, theme, notes, status
+                    **Guests:** name, email, phone, instagram, partySize, category, notes
+                    **Budget:** categoryId, description, vendorName, estimatedAmount, actualAmount, isPaid, dueDate, notes
+                    **Staff:** name, email, phone, role, hourlyRate, experienceLevel, shiftStart, shiftEnd
+                    **Vendors:** name, category, contactName, email, phone, website, city, notes, isPreferred
+                    **Models:** status (pending, approved, declined, assigned)
+                    **Tables:** tableId, tableName, zone, customerName, customerEmail, customerPhone, partySize, minimumSpend
+                    **Tickets:** ticketType, holderName, holderEmail, price
+                    **Sponsors:** companyName, contactName, email, phone, tier (platinum, gold, silver, bronze), amount, benefits, status
+                    **Timeline:** time, title, description, location, isCritical
+                    **Checklist:** item, category, priority (high, medium, low)
+
+            examples:
+              getDashboard:
+                summary: Get dashboard overview
+                value:
+                  endpoint: getDashboard
+              listEvents:
+                summary: List all events
+                value:
+                  endpoint: manageEvents
+                  action: list
+              createEvent:
+                summary: Create a new event
+                value:
+                  endpoint: manageEvents
+                  action: create
+                  data:
+                    name: "NYE Gala 2025"
+                    eventDate: "2025-12-31"
+                    venueName: "Grand Ballroom"
+                    venueCity: "Miami"
+              addGuest:
+                summary: Add a guest to event
+                value:
+                  endpoint: manageGuests
+                  action: add
+                  eventId: 1
+                  data:
+                    name: "John Smith"
+                    email: "john@example.com"
+                    instagram: "@johnsmith"
+              approveGuest:
+                summary: Approve a guest
+                value:
+                  endpoint: manageGuests
+                  action: approve
+                  guestId: 5
+              addSponsor:
+                summary: Add a sponsor
+                value:
+                  endpoint: manageSponsors
+                  action: add
+                  data:
+                    companyName: "Moët & Chandon"
+                    tier: platinum
+                    amount: 50000
+                    contactName: "Jane Doe"
+                    email: "jane@moet.com"
+              listSponsors:
+                summary: List all sponsors
+                value:
+                  endpoint: manageSponsors
+                  action: list
+              addBudgetItem:
+                summary: Add expense to event budget
+                value:
+                  endpoint: manageBudget
+                  action: addItem
+                  eventId: 1
+                  data:
+                    categoryId: 1
+                    description: "DJ Services"
+                    estimatedAmount: 5000
+                    vendorName: "DJ Khaled"
+
       responses:
         '200':
-          description: Dashboard overview
+          description: Success response (format varies by endpoint and action)
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  events:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                  data:
                     type: object
-                    properties:
-                      total: { type: integer }
-                      upcoming: { type: integer }
-                      thisMonth: { type: integer }
-                      list:
-                        type: array
-                        items:
-                          type: object
-                          properties:
-                            id: { type: integer }
-                            name: { type: string }
-                            eventDate: { type: string }
-                            status: { type: string }
-                            venue: { type: string }
-                  guests:
-                    type: object
-                    properties:
-                      total: { type: integer }
-                      pending: { type: integer }
-                      approved: { type: integer }
-                      checkedIn: { type: integer }
-                  budget:
-                    type: object
-                    properties:
-                      totalIncome: { type: number }
-                      totalExpenses: { type: number }
-                      profit: { type: number }
-                  staff:
-                    type: object
-                    properties:
-                      total: { type: integer }
-                      active: { type: integer }
-                  vendors:
-                    type: object
-                    properties:
-                      total: { type: integer }
-                      preferred: { type: integer }
-
-  /api/v1/gpt/events:
-    post:
-      operationId: manageEvents
-      summary: Manage events (list, create, update, delete, timeline, checklist)
-      description: |
-        Unified endpoint for all event operations.
-
-        **Actions:**
-        - `list` - Get all events (use filters.status to filter)
-        - `get` - Get single event (requires eventId)
-        - `getFull` - Get event with guests, budget, timeline (requires eventId)
-        - `create` - Create new event (requires data.name, data.eventDate)
-        - `update` - Update event (requires eventId, data with fields to update)
-        - `delete` - Delete event (requires eventId)
-        - `addTimeline` - Add timeline item (requires eventId, data.time, data.title)
-        - `addChecklist` - Add checklist item (requires eventId, data.item)
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [action]
-              properties:
-                action:
-                  type: string
-                  enum: [list, get, getFull, create, update, delete, addTimeline, addChecklist]
-                eventId:
-                  type: integer
-                  description: Required for get, getFull, update, delete, addTimeline, addChecklist
-                filters:
-                  type: object
-                  properties:
-                    status: { type: string, enum: [planning, confirmed, completed] }
-                    limit: { type: integer, default: 50 }
-                data:
-                  type: object
-                  description: Data for create/update operations
-                  properties:
-                    name: { type: string }
-                    eventDate: { type: string, format: date }
-                    eventType: { type: string }
-                    venueName: { type: string }
-                    venueCity: { type: string }
-                    expectedAttendance: { type: integer }
-                    dressCode: { type: string }
-                    theme: { type: string }
-                    notes: { type: string }
-                    status: { type: string }
-                    time: { type: string, description: For timeline }
-                    title: { type: string, description: For timeline }
-                    description: { type: string }
-                    location: { type: string }
-                    isCritical: { type: boolean }
-                    item: { type: string, description: For checklist }
-                    category: { type: string }
-                    priority: { type: string, enum: [high, medium, low] }
-            examples:
-              listEvents:
-                summary: List all events
-                value: { action: "list" }
-              getFullEvent:
-                summary: Get event with all details
-                value: { action: "getFull", eventId: 1 }
-              createEvent:
-                summary: Create new event
-                value: { action: "create", data: { name: "NYE Gala 2025", eventDate: "2025-12-31", venueName: "Grand Ballroom", venueCity: "Miami" } }
-              addTimeline:
-                summary: Add timeline item
-                value: { action: "addTimeline", eventId: 1, data: { time: "19:00", title: "Cocktail Hour" } }
-      responses:
-        '200':
-          description: Success response with action result
-
-  /api/v1/gpt/guests:
-    post:
-      operationId: manageGuests
-      summary: Manage guest lists (add, approve, reject, check-in)
-      description: |
-        Unified endpoint for guest list management.
-
-        **Actions:**
-        - `list` - Get guests (optional: eventId, filters.category, filters.search)
-        - `get` - Get single guest (requires guestId)
-        - `add` - Add guest (requires eventId, data.name, data.email)
-        - `update` - Update guest (requires guestId, data)
-        - `delete` - Remove guest (requires guestId)
-        - `approve` - Approve guest (requires guestId)
-        - `reject` - Reject guest (requires guestId)
-        - `checkIn` - Check-in guest (requires guestId)
-        - `stats` - Get guest statistics (optional: eventId)
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [action]
-              properties:
-                action:
-                  type: string
-                  enum: [list, get, add, update, delete, approve, reject, checkIn, stats]
-                guestId:
-                  type: integer
-                eventId:
-                  type: integer
-                filters:
-                  type: object
-                  properties:
-                    category: { type: string, enum: [pending, approved, rejected] }
-                    search: { type: string }
-                    limit: { type: integer }
-                data:
-                  type: object
-                  properties:
-                    name: { type: string }
-                    email: { type: string }
-                    phone: { type: string }
-                    instagram: { type: string }
-                    partySize: { type: integer }
-                    category: { type: string }
-                    notes: { type: string }
-            examples:
-              listGuests:
-                value: { action: "list", eventId: 1 }
-              addGuest:
-                value: { action: "add", eventId: 1, data: { name: "John Smith", email: "john@example.com", instagram: "@johnsmith" } }
-              approveGuest:
-                value: { action: "approve", guestId: 5 }
-      responses:
-        '200':
-          description: Success response
-
-  /api/v1/gpt/budget:
-    post:
-      operationId: manageBudget
-      summary: Manage event budgets (income, expenses)
-      description: |
-        Unified endpoint for budget management.
-
-        **Actions:**
-        - `getCategories` - Get available budget categories
-        - `getSummary` - Get budget summary (requires eventId)
-        - `getItems` - Get all budget items (requires eventId)
-        - `addItem` - Add expense/income (requires eventId, data.categoryId, data.description)
-        - `updateItem` - Update item (requires itemId, data)
-        - `deleteItem` - Delete item (requires itemId)
-        - `markPaid` - Mark item as paid (requires itemId)
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [action]
-              properties:
-                action:
-                  type: string
-                  enum: [getCategories, getSummary, getItems, addItem, updateItem, deleteItem, markPaid]
-                eventId:
-                  type: integer
-                itemId:
-                  type: integer
-                data:
-                  type: object
-                  properties:
-                    categoryId: { type: integer }
-                    description: { type: string }
-                    vendorName: { type: string }
-                    estimatedAmount: { type: number }
-                    actualAmount: { type: number }
-                    isPaid: { type: boolean }
-                    dueDate: { type: string, format: date }
-                    notes: { type: string }
-            examples:
-              getSummary:
-                value: { action: "getSummary", eventId: 1 }
-              addExpense:
-                value: { action: "addItem", eventId: 1, data: { categoryId: 1, description: "DJ Services", estimatedAmount: 2500 } }
-      responses:
-        '200':
-          description: Success response
-
-  /api/v1/gpt/staff:
-    post:
-      operationId: manageStaff
-      summary: Manage staff roster and event assignments
-      description: |
-        Unified endpoint for staff management.
-
-        **Actions:**
-        - `list` - Get all staff members
-        - `get` - Get single staff (requires staffId)
-        - `add` - Add staff member (requires data.name, data.email)
-        - `update` - Update staff (requires staffId, data)
-        - `delete` - Remove staff (requires staffId)
-        - `assignToEvent` - Assign staff to event (requires staffId, eventId)
-        - `getEventStaff` - Get staff assigned to event (requires eventId)
-        - `removeAssignment` - Remove assignment (requires assignmentId)
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [action]
-              properties:
-                action:
-                  type: string
-                  enum: [list, get, add, update, delete, assignToEvent, getEventStaff, removeAssignment]
-                staffId:
-                  type: integer
-                eventId:
-                  type: integer
-                assignmentId:
-                  type: integer
-                data:
-                  type: object
-                  properties:
-                    name: { type: string }
-                    email: { type: string }
-                    phone: { type: string }
-                    role: { type: string }
-                    hourlyRate: { type: number }
-                    experienceLevel: { type: string }
-                    shiftStart: { type: string }
-                    shiftEnd: { type: string }
-            examples:
-              listStaff:
-                value: { action: "list" }
-              assignToEvent:
-                value: { action: "assignToEvent", staffId: 3, eventId: 1, data: { role: "Security", shiftStart: "18:00", shiftEnd: "02:00" } }
-      responses:
-        '200':
-          description: Success response
-
-  /api/v1/gpt/vendors:
-    post:
-      operationId: manageVendors
-      summary: Manage vendor database
-      description: |
-        Unified endpoint for vendor management.
-
-        **Actions:**
-        - `list` - Get all vendors (optional: filters.category, filters.isPreferred)
-        - `get` - Get vendor details (requires vendorId)
-        - `add` - Add vendor (requires data.name)
-        - `update` - Update vendor (requires vendorId, data)
-        - `delete` - Delete vendor (requires vendorId)
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [action]
-              properties:
-                action:
-                  type: string
-                  enum: [list, get, add, update, delete]
-                vendorId:
-                  type: integer
-                filters:
-                  type: object
-                  properties:
-                    category: { type: string }
-                    isPreferred: { type: boolean }
-                data:
-                  type: object
-                  properties:
-                    name: { type: string }
-                    category: { type: string }
-                    contactName: { type: string }
-                    email: { type: string }
-                    phone: { type: string }
-                    website: { type: string }
-                    city: { type: string }
-                    notes: { type: string }
-                    isPreferred: { type: boolean }
-      responses:
-        '200':
-          description: Success response
-
-  /api/v1/gpt/models:
-    post:
-      operationId: manageModels
-      summary: Manage model/talent applications
-      description: |
-        Unified endpoint for talent management.
-
-        **Actions:**
-        - `list` - Get all models (optional: filters.status)
-        - `get` - Get model details (requires modelId)
-        - `updateStatus` - Approve/decline model (requires modelId, data.status)
-        - `stats` - Get model statistics
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [action]
-              properties:
-                action:
-                  type: string
-                  enum: [list, get, updateStatus, stats]
-                modelId:
-                  type: integer
-                filters:
-                  type: object
-                  properties:
-                    status: { type: string, enum: [pending, approved, declined, assigned] }
-                data:
-                  type: object
-                  properties:
-                    status: { type: string, enum: [pending, approved, declined, assigned] }
-      responses:
-        '200':
-          description: Success response
-
-  /api/v1/gpt/tables:
-    post:
-      operationId: manageTables
-      summary: Manage VIP table reservations
-      description: |
-        Unified endpoint for table reservation management.
-
-        **Actions:**
-        - `list` - Get reservations (optional: eventId)
-        - `create` - Create reservation (requires eventId, data.customerName)
-        - `confirm` - Confirm reservation (requires reservationId)
-        - `cancel` - Cancel reservation (requires reservationId)
-        - `stats` - Get reservation statistics (optional: eventId)
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [action]
-              properties:
-                action:
-                  type: string
-                  enum: [list, create, confirm, cancel, stats]
-                reservationId:
-                  type: integer
-                eventId:
-                  type: integer
-                data:
-                  type: object
-                  properties:
-                    tableId: { type: string }
-                    tableName: { type: string }
-                    zone: { type: string }
-                    customerName: { type: string }
-                    customerEmail: { type: string }
-                    customerPhone: { type: string }
-                    partySize: { type: integer }
-                    minimumSpend: { type: number }
-      responses:
-        '200':
-          description: Success response
-
-  /api/v1/gpt/tickets:
-    post:
-      operationId: manageTickets
-      summary: Manage ticket sales and check-ins
-      description: |
-        Unified endpoint for ticket management.
-
-        **Actions:**
-        - `list` - Get tickets (optional: eventId)
-        - `create` - Create ticket (requires eventId, data.ticketType)
-        - `checkIn` - Check-in ticket (requires ticketId)
-        - `stats` - Get ticket statistics (optional: eventId)
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [action]
-              properties:
-                action:
-                  type: string
-                  enum: [list, create, checkIn, stats]
-                ticketId:
-                  type: integer
-                eventId:
-                  type: integer
-                data:
-                  type: object
-                  properties:
-                    ticketType: { type: string }
-                    holderName: { type: string }
-                    holderEmail: { type: string }
-                    price: { type: number }
-      responses:
-        '200':
-          description: Success response
-
-  /api/v1/gpt/sponsors:
-    post:
-      operationId: manageSponsors
-      summary: Manage event sponsors
-      description: |
-        Unified endpoint for sponsor management.
-
-        **Actions:**
-        - `list` - Get all sponsors
-        - `get` - Get sponsor details (requires sponsorId)
-        - `add` - Add sponsor (requires data.companyName)
-        - `updateStatus` - Update sponsor status (requires sponsorId, data.status)
-        - `stats` - Get sponsor statistics
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [action]
-              properties:
-                action:
-                  type: string
-                  enum: [list, get, add, updateStatus, stats]
-                sponsorId:
-                  type: integer
-                data:
-                  type: object
-                  properties:
-                    companyName: { type: string }
-                    contactName: { type: string }
-                    email: { type: string }
-                    phone: { type: string }
-                    tier: { type: string, enum: [platinum, gold, silver, bronze] }
-                    amount: { type: number }
-                    benefits: { type: string }
-                    status: { type: string }
-      responses:
-        '200':
-          description: Success response
+                    description: Response data (events, guests, sponsors, etc.)
+        '400':
+          description: Bad request (missing or invalid parameters)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                  validEndpoints:
+                    type: array
+                    items:
+                      type: string
+        '404':
+          description: Resource not found
+        '500':
+          description: Server error
