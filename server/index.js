@@ -530,6 +530,58 @@ const initDatabase = async () => {
     `);
 
     // ============================================
+    // MODELS & TABLE RESERVATIONS
+    // ============================================
+
+    // Create models table - Promo models/brand ambassadors
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS models (
+        id SERIAL PRIMARY KEY,
+        event_id INTEGER REFERENCES events(id) ON DELETE SET NULL,
+        name VARCHAR(255) NOT NULL,
+        email VARCHAR(255),
+        phone VARCHAR(100),
+        instagram VARCHAR(255),
+        photos TEXT[],
+        height VARCHAR(20),
+        experience_level VARCHAR(50) DEFAULT 'intermediate',
+        availability JSONB DEFAULT '{}',
+        notes TEXT,
+        status VARCHAR(50) DEFAULT 'pending',
+        ai_score INTEGER DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_models_status ON models(status);
+      CREATE INDEX IF NOT EXISTS idx_models_event ON models(event_id);
+    `);
+
+    // Create table_reservations table - VIP table bookings
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS table_reservations (
+        id SERIAL PRIMARY KEY,
+        table_id VARCHAR(50) NOT NULL,
+        table_name VARCHAR(100) NOT NULL,
+        zone VARCHAR(50) DEFAULT 'Standard',
+        event_id INTEGER REFERENCES events(id) ON DELETE CASCADE,
+        customer_name VARCHAR(255) NOT NULL,
+        customer_email VARCHAR(255),
+        customer_phone VARCHAR(100),
+        party_size INTEGER DEFAULT 1,
+        special_requests TEXT,
+        status VARCHAR(50) DEFAULT 'pending',
+        deposit_paid BOOLEAN DEFAULT false,
+        deposit_amount DECIMAL(10,2) DEFAULT 0,
+        minimum_spend DECIMAL(10,2) DEFAULT 0,
+        capacity INTEGER DEFAULT 6,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_tables_event ON table_reservations(event_id);
+      CREATE INDEX IF NOT EXISTS idx_tables_status ON table_reservations(status);
+    `);
+
+    // ============================================
     // PRIORITY LOW: CLIENT PORTAL
     // ============================================
 
@@ -4338,6 +4390,334 @@ app.get('/api/v1/client-portal/:token', async (req, res) => {
 });
 
 // ============================================
+// MODELS ENDPOINTS
+// ============================================
+
+// Get all models
+app.get('/api/v1/models', async (req, res) => {
+  try {
+    const { status, event_id } = req.query;
+    let query = 'SELECT * FROM models WHERE 1=1';
+    const params = [];
+    let paramIndex = 1;
+
+    if (status) {
+      query += ` AND status = $${paramIndex++}`;
+      params.push(status);
+    }
+    if (event_id) {
+      query += ` AND event_id = $${paramIndex++}`;
+      params.push(event_id);
+    }
+
+    query += ' ORDER BY created_at DESC';
+    const result = await pool.query(query, params);
+
+    res.json({
+      models: result.rows.map(m => ({
+        id: m.id.toString(),
+        eventId: m.event_id?.toString(),
+        name: m.name,
+        email: m.email || '',
+        phone: m.phone || '',
+        instagram: m.instagram || '',
+        photos: m.photos || [],
+        height: m.height || '',
+        experienceLevel: m.experience_level,
+        availability: m.availability || {},
+        notes: m.notes || '',
+        status: m.status,
+        aiScore: m.ai_score,
+        createdAt: m.created_at.toISOString(),
+        updatedAt: m.updated_at?.toISOString()
+      }))
+    });
+  } catch (error) {
+    console.error('Error fetching models:', error);
+    res.status(500).json({ error: 'Failed to fetch models' });
+  }
+});
+
+// Get models stats
+app.get('/api/v1/models/stats', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT
+        COUNT(*) as total,
+        COUNT(*) FILTER (WHERE status = 'pending') as pending,
+        COUNT(*) FILTER (WHERE status = 'approved') as approved,
+        COUNT(*) FILTER (WHERE status = 'assigned') as assigned,
+        COUNT(*) FILTER (WHERE status = 'declined') as declined
+      FROM models
+    `);
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error fetching models stats:', error);
+    res.status(500).json({ error: 'Failed to fetch stats' });
+  }
+});
+
+// Get single model
+app.get('/api/v1/models/:id', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM models WHERE id = $1', [req.params.id]);
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Model not found' });
+    }
+    const m = result.rows[0];
+    res.json({
+      id: m.id.toString(),
+      eventId: m.event_id?.toString(),
+      name: m.name,
+      email: m.email || '',
+      phone: m.phone || '',
+      instagram: m.instagram || '',
+      photos: m.photos || [],
+      height: m.height || '',
+      experienceLevel: m.experience_level,
+      availability: m.availability || {},
+      notes: m.notes || '',
+      status: m.status,
+      aiScore: m.ai_score,
+      createdAt: m.created_at.toISOString()
+    });
+  } catch (error) {
+    console.error('Error fetching model:', error);
+    res.status(500).json({ error: 'Failed to fetch model' });
+  }
+});
+
+// Create model
+app.post('/api/v1/models', async (req, res) => {
+  try {
+    const { name, email, phone, instagram, photos, height, experienceLevel, availability, notes, eventId } = req.body;
+    const result = await pool.query(`
+      INSERT INTO models (name, email, phone, instagram, photos, height, experience_level, availability, notes, event_id, status)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending')
+      RETURNING *
+    `, [name, email, phone, instagram, photos || [], height, experienceLevel || 'intermediate', availability || {}, notes, eventId || null]);
+
+    const m = result.rows[0];
+    res.status(201).json({
+      id: m.id.toString(),
+      name: m.name,
+      status: m.status,
+      createdAt: m.created_at.toISOString()
+    });
+  } catch (error) {
+    console.error('Error creating model:', error);
+    res.status(500).json({ error: 'Failed to create model' });
+  }
+});
+
+// Update model status
+app.patch('/api/v1/models/:id', async (req, res) => {
+  try {
+    const { status, eventId } = req.body;
+    const updates = [];
+    const params = [];
+    let paramIndex = 1;
+
+    if (status) {
+      updates.push(`status = $${paramIndex++}`);
+      params.push(status);
+    }
+    if (eventId !== undefined) {
+      updates.push(`event_id = $${paramIndex++}`);
+      params.push(eventId);
+    }
+    updates.push(`updated_at = CURRENT_TIMESTAMP`);
+    params.push(req.params.id);
+
+    const result = await pool.query(
+      `UPDATE models SET ${updates.join(', ')} WHERE id = $${paramIndex} RETURNING *`,
+      params
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Model not found' });
+    }
+    res.json({ success: true, model: result.rows[0] });
+  } catch (error) {
+    console.error('Error updating model:', error);
+    res.status(500).json({ error: 'Failed to update model' });
+  }
+});
+
+// Delete model
+app.delete('/api/v1/models/:id', async (req, res) => {
+  try {
+    await pool.query('DELETE FROM models WHERE id = $1', [req.params.id]);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error deleting model:', error);
+    res.status(500).json({ error: 'Failed to delete model' });
+  }
+});
+
+// ============================================
+// TABLE RESERVATIONS ENDPOINTS
+// ============================================
+
+// Get all table reservations
+app.get('/api/v1/table-reservations', async (req, res) => {
+  try {
+    const { event_id, status } = req.query;
+    let query = 'SELECT * FROM table_reservations WHERE 1=1';
+    const params = [];
+    let paramIndex = 1;
+
+    if (event_id) {
+      query += ` AND event_id = $${paramIndex++}`;
+      params.push(event_id);
+    }
+    if (status) {
+      query += ` AND status = $${paramIndex++}`;
+      params.push(status);
+    }
+
+    query += ' ORDER BY created_at DESC';
+    const result = await pool.query(query, params);
+
+    res.json({
+      reservations: result.rows.map(t => ({
+        id: t.id.toString(),
+        tableId: t.table_id,
+        tableName: t.table_name,
+        zone: t.zone,
+        eventId: t.event_id?.toString(),
+        customerName: t.customer_name,
+        customerEmail: t.customer_email || '',
+        customerPhone: t.customer_phone || '',
+        partySize: t.party_size,
+        specialRequests: t.special_requests || '',
+        status: t.status,
+        depositPaid: t.deposit_paid,
+        depositAmount: parseFloat(t.deposit_amount) || 0,
+        minimumSpend: parseFloat(t.minimum_spend) || 0,
+        capacity: t.capacity,
+        createdAt: t.created_at.toISOString()
+      }))
+    });
+  } catch (error) {
+    console.error('Error fetching table reservations:', error);
+    res.status(500).json({ error: 'Failed to fetch reservations' });
+  }
+});
+
+// Get table reservations stats
+app.get('/api/v1/table-reservations/stats', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT
+        COUNT(*) as total,
+        COUNT(*) FILTER (WHERE status = 'pending') as pending,
+        COUNT(*) FILTER (WHERE status = 'confirmed') as confirmed,
+        COUNT(*) FILTER (WHERE status = 'cancelled') as cancelled,
+        COALESCE(SUM(deposit_amount) FILTER (WHERE deposit_paid = true), 0) as total_deposits,
+        COALESCE(SUM(minimum_spend), 0) as total_minimum_spend
+      FROM table_reservations
+    `);
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error fetching table stats:', error);
+    res.status(500).json({ error: 'Failed to fetch stats' });
+  }
+});
+
+// Create table reservation
+app.post('/api/v1/table-reservations', async (req, res) => {
+  try {
+    const {
+      tableId, tableName, zone, eventId, customerName, customerEmail,
+      customerPhone, partySize, specialRequests, minimumSpend, capacity
+    } = req.body;
+
+    const result = await pool.query(`
+      INSERT INTO table_reservations
+        (table_id, table_name, zone, event_id, customer_name, customer_email,
+         customer_phone, party_size, special_requests, minimum_spend, capacity, status)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'pending')
+      RETURNING *
+    `, [
+      tableId || `TBL-${Date.now()}`,
+      tableName || 'Table',
+      zone || 'Standard',
+      eventId || null,
+      customerName,
+      customerEmail,
+      customerPhone,
+      partySize || 1,
+      specialRequests,
+      minimumSpend || 0,
+      capacity || 6
+    ]);
+
+    const t = result.rows[0];
+    res.status(201).json({
+      id: t.id.toString(),
+      tableId: t.table_id,
+      tableName: t.table_name,
+      customerName: t.customer_name,
+      status: t.status,
+      createdAt: t.created_at.toISOString()
+    });
+  } catch (error) {
+    console.error('Error creating reservation:', error);
+    res.status(500).json({ error: 'Failed to create reservation' });
+  }
+});
+
+// Update table reservation
+app.patch('/api/v1/table-reservations/:id', async (req, res) => {
+  try {
+    const { status, depositPaid, depositAmount } = req.body;
+    const updates = [];
+    const params = [];
+    let paramIndex = 1;
+
+    if (status) {
+      updates.push(`status = $${paramIndex++}`);
+      params.push(status);
+    }
+    if (depositPaid !== undefined) {
+      updates.push(`deposit_paid = $${paramIndex++}`);
+      params.push(depositPaid);
+    }
+    if (depositAmount !== undefined) {
+      updates.push(`deposit_amount = $${paramIndex++}`);
+      params.push(depositAmount);
+    }
+    updates.push(`updated_at = CURRENT_TIMESTAMP`);
+    params.push(req.params.id);
+
+    const result = await pool.query(
+      `UPDATE table_reservations SET ${updates.join(', ')} WHERE id = $${paramIndex} RETURNING *`,
+      params
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Reservation not found' });
+    }
+    res.json({ success: true, reservation: result.rows[0] });
+  } catch (error) {
+    console.error('Error updating reservation:', error);
+    res.status(500).json({ error: 'Failed to update reservation' });
+  }
+});
+
+// Delete table reservation
+app.delete('/api/v1/table-reservations/:id', async (req, res) => {
+  try {
+    await pool.query('DELETE FROM table_reservations WHERE id = $1', [req.params.id]);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error deleting reservation:', error);
+    res.status(500).json({ error: 'Failed to delete reservation' });
+  }
+});
+
+// ============================================
 // HEALTH MONITORING SYSTEM
 // Comprehensive health checks with alerts
 // ============================================
@@ -4352,7 +4732,8 @@ const REQUIRED_TABLES = [
   'guests', 'email_events', 'tickets', 'activity_log', 'sponsors',
   'events', 'event_timeline', 'event_checklist', 'budgets', 'budget_categories',
   'budget_items', 'vendors', 'staff', 'staff_assignments', 'staff_payments',
-  'vendor_quotes', 'vendor_contracts', 'vendor_history', 'client_access'
+  'vendor_quotes', 'vendor_contracts', 'vendor_history', 'client_access',
+  'models', 'table_reservations'
 ];
 
 // Send alert email when health issues detected
