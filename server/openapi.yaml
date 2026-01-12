@@ -1,0 +1,902 @@
+openapi: 3.0.3
+info:
+  title: Berry Dashboard API
+  description: |
+    API backend for Berry Bly Productions Event Management Dashboard.
+
+    This API provides endpoints for managing:
+    - Events and event details
+    - Guest lists and invitations
+    - Tickets and check-ins
+    - Table reservations
+    - Models/talent management
+    - Sponsors
+    - Staff management
+    - Budget tracking
+    - Health monitoring
+
+    **Base URL:** `https://berry-dashboard-api-production.up.railway.app`
+  version: 1.0.0
+  contact:
+    name: Berry Bly Productions
+    email: concierge@berrybly.com
+
+servers:
+  - url: https://berry-dashboard-api-production.up.railway.app
+    description: Production Server (Railway)
+  - url: http://localhost:8080
+    description: Local Development
+
+tags:
+  - name: Health
+    description: System health monitoring endpoints
+  - name: Events
+    description: Event management
+  - name: Guests
+    description: Guest list management
+  - name: Tickets
+    description: Ticket management and check-ins
+  - name: Table Reservations
+    description: VIP table reservations
+  - name: Models
+    description: Talent/model management
+  - name: Sponsors
+    description: Sponsor management
+  - name: Staff
+    description: Staff management
+  - name: Budget
+    description: Budget tracking
+
+paths:
+  # Health Endpoints
+  /api/v1/health/deep:
+    get:
+      tags: [Health]
+      summary: Deep health check
+      description: Comprehensive health check of all system components including database, tables, memory, and email service.
+      responses:
+        '200':
+          description: Health status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthStatus'
+
+  /api/v1/health/live:
+    get:
+      tags: [Health]
+      summary: Liveness probe
+      description: Simple liveness check for load balancers and Kubernetes.
+      responses:
+        '200':
+          description: Server is alive
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: alive
+                  timestamp:
+                    type: string
+                    format: date-time
+
+  /api/v1/health/ready:
+    get:
+      tags: [Health]
+      summary: Readiness probe
+      description: Check if server is ready to accept requests (database connected).
+      responses:
+        '200':
+          description: Server is ready
+        '503':
+          description: Server not ready
+
+  /api/v1/health/status:
+    get:
+      tags: [Health]
+      summary: Server status
+      description: Detailed server status including memory usage and configuration.
+      responses:
+        '200':
+          description: Server status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServerStatus'
+
+  /api/v1/health/test-alert:
+    post:
+      tags: [Health]
+      summary: Send test alert
+      description: Send a test alert email to verify the alerting system.
+      responses:
+        '200':
+          description: Alert sent successfully
+        '500':
+          description: Failed to send alert
+
+  # Events Endpoints
+  /api/v1/events:
+    get:
+      tags: [Events]
+      summary: List all events
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [upcoming, ongoing, past]
+        - name: featured
+          in: query
+          schema:
+            type: string
+            enum: ['true', 'false']
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+      responses:
+        '200':
+          description: List of events
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  events:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Event'
+                  total:
+                    type: integer
+
+    post:
+      tags: [Events]
+      summary: Create new event
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EventInput'
+      responses:
+        '201':
+          description: Event created
+
+  /api/v1/events/stats:
+    get:
+      tags: [Events]
+      summary: Event statistics
+      responses:
+        '200':
+          description: Event statistics
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total:
+                    type: string
+                  upcoming:
+                    type: string
+                  ongoing:
+                    type: string
+                  past:
+                    type: string
+                  thisMonth:
+                    type: integer
+                  byCategory:
+                    type: object
+
+  /api/v1/events/{id}:
+    get:
+      tags: [Events]
+      summary: Get event by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Event details
+        '404':
+          description: Event not found
+
+    put:
+      tags: [Events]
+      summary: Update event
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EventInput'
+      responses:
+        '200':
+          description: Event updated
+
+    delete:
+      tags: [Events]
+      summary: Delete event
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Event deleted
+
+  # Guests Endpoints
+  /api/v1/guest-lists:
+    get:
+      tags: [Guests]
+      summary: List all guests
+      parameters:
+        - name: eventId
+          in: query
+          schema:
+            type: string
+        - name: category
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of guests
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Guest'
+
+    post:
+      tags: [Guests]
+      summary: Add guest to list
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GuestInput'
+      responses:
+        '201':
+          description: Guest added
+
+  /api/v1/guest-lists/stats:
+    get:
+      tags: [Guests]
+      summary: Guest list statistics
+      responses:
+        '200':
+          description: Statistics
+
+  /api/v1/guest-lists/{id}:
+    get:
+      tags: [Guests]
+      summary: Get guest by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Guest details
+
+    put:
+      tags: [Guests]
+      summary: Update guest
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Guest updated
+
+    delete:
+      tags: [Guests]
+      summary: Remove guest
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Guest removed
+
+  /api/v1/guest-lists/{id}/send-invitation:
+    post:
+      tags: [Guests]
+      summary: Send invitation email
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Invitation sent
+
+  # Tickets Endpoints
+  /api/v1/tickets:
+    get:
+      tags: [Tickets]
+      summary: List all tickets
+      responses:
+        '200':
+          description: List of tickets
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Ticket'
+
+    post:
+      tags: [Tickets]
+      summary: Create ticket
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TicketInput'
+      responses:
+        '201':
+          description: Ticket created
+
+  /api/v1/tickets/stats:
+    get:
+      tags: [Tickets]
+      summary: Ticket statistics
+      responses:
+        '200':
+          description: Statistics
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total:
+                    type: integer
+                  valid:
+                    type: integer
+                  used:
+                    type: integer
+                  revenue:
+                    type: number
+
+  /api/v1/tickets/{id}/check-in:
+    post:
+      tags: [Tickets]
+      summary: Check in ticket
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Ticket checked in
+
+  # Table Reservations Endpoints
+  /api/v1/table-reservations:
+    get:
+      tags: [Table Reservations]
+      summary: List all reservations
+      responses:
+        '200':
+          description: List of reservations
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reservations:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/TableReservation'
+
+    post:
+      tags: [Table Reservations]
+      summary: Create reservation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TableReservationInput'
+      responses:
+        '201':
+          description: Reservation created
+
+  /api/v1/table-reservations/stats:
+    get:
+      tags: [Table Reservations]
+      summary: Reservation statistics
+      responses:
+        '200':
+          description: Statistics
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total:
+                    type: string
+                  pending:
+                    type: string
+                  confirmed:
+                    type: string
+                  cancelled:
+                    type: string
+                  revenue:
+                    type: number
+
+  # Models Endpoints
+  /api/v1/models:
+    get:
+      tags: [Models]
+      summary: List all models
+      responses:
+        '200':
+          description: List of models
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  models:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Model'
+
+    post:
+      tags: [Models]
+      summary: Add model application
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ModelInput'
+      responses:
+        '201':
+          description: Application submitted
+
+  /api/v1/models/stats:
+    get:
+      tags: [Models]
+      summary: Model statistics
+      responses:
+        '200':
+          description: Statistics
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total:
+                    type: string
+                  pending:
+                    type: string
+                  approved:
+                    type: string
+                  assigned:
+                    type: string
+                  declined:
+                    type: string
+
+  /api/v1/models/{id}:
+    get:
+      tags: [Models]
+      summary: Get model by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Model details
+
+    patch:
+      tags: [Models]
+      summary: Update model status
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status:
+                  type: string
+                  enum: [pending, approved, declined, assigned]
+      responses:
+        '200':
+          description: Model updated
+
+  # Sponsors Endpoints
+  /api/v1/sponsors:
+    get:
+      tags: [Sponsors]
+      summary: List all sponsors
+      responses:
+        '200':
+          description: List of sponsors
+
+    post:
+      tags: [Sponsors]
+      summary: Add sponsor
+      responses:
+        '201':
+          description: Sponsor created
+
+  /api/v1/sponsors/stats:
+    get:
+      tags: [Sponsors]
+      summary: Sponsor statistics
+      responses:
+        '200':
+          description: Statistics
+
+  # Staff Endpoints
+  /api/v1/staff:
+    get:
+      tags: [Staff]
+      summary: List all staff
+      responses:
+        '200':
+          description: List of staff
+
+    post:
+      tags: [Staff]
+      summary: Add staff member
+      responses:
+        '201':
+          description: Staff added
+
+  # Budget Endpoints
+  /api/v1/budget-categories:
+    get:
+      tags: [Budget]
+      summary: Get budget categories
+      responses:
+        '200':
+          description: List of categories
+
+  /api/v1/events/{eventId}/budget:
+    get:
+      tags: [Budget]
+      summary: Get event budget
+      parameters:
+        - name: eventId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Budget details
+
+components:
+  schemas:
+    HealthStatus:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [healthy, degraded, critical]
+        timestamp:
+          type: string
+          format: date-time
+        uptime:
+          type: integer
+        responseTime:
+          type: integer
+        components:
+          type: object
+          properties:
+            database:
+              type: object
+            tables:
+              type: object
+            memory:
+              type: object
+            email:
+              type: object
+            environment:
+              type: object
+        issues:
+          type: array
+          items:
+            type: string
+
+    ServerStatus:
+      type: object
+      properties:
+        status:
+          type: string
+        lastCheck:
+          type: string
+        server:
+          type: object
+        memory:
+          type: object
+        database:
+          type: object
+        config:
+          type: object
+
+    Event:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        title:
+          type: string
+        slug:
+          type: string
+        description:
+          type: string
+        eventType:
+          type: string
+        category:
+          type: string
+        venueName:
+          type: string
+        venue:
+          type: string
+        eventDate:
+          type: string
+          format: date
+        date:
+          type: string
+          format: date
+        time:
+          type: string
+        status:
+          type: string
+          enum: [upcoming, ongoing, past]
+        flyerUrl:
+          type: string
+        guestListEnabled:
+          type: boolean
+        tableMapEnabled:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    EventInput:
+      type: object
+      required:
+        - title
+        - date
+        - venue
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        date:
+          type: string
+          format: date
+        time:
+          type: string
+        venue:
+          type: string
+        category:
+          type: string
+          enum: [nightlife, corporate, private, brand-activation]
+
+    Guest:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        email:
+          type: string
+        phone:
+          type: string
+        instagram:
+          type: string
+        partySize:
+          type: integer
+        category:
+          type: string
+        emailSent:
+          type: boolean
+        checkedInAt:
+          type: string
+          format: date-time
+
+    GuestInput:
+      type: object
+      required:
+        - name
+        - email
+      properties:
+        name:
+          type: string
+        email:
+          type: string
+        phone:
+          type: string
+        instagram:
+          type: string
+        partySize:
+          type: integer
+        category:
+          type: string
+
+    Ticket:
+      type: object
+      properties:
+        id:
+          type: string
+        eventId:
+          type: string
+        ticketType:
+          type: string
+        holderName:
+          type: string
+        holderEmail:
+          type: string
+        status:
+          type: string
+          enum: [valid, used, cancelled]
+        checkedInAt:
+          type: string
+          format: date-time
+
+    TicketInput:
+      type: object
+      required:
+        - eventId
+        - ticketType
+      properties:
+        eventId:
+          type: string
+        ticketType:
+          type: string
+        holderName:
+          type: string
+        holderEmail:
+          type: string
+
+    TableReservation:
+      type: object
+      properties:
+        id:
+          type: string
+        tableId:
+          type: string
+        tableName:
+          type: string
+        zone:
+          type: string
+        eventId:
+          type: string
+        customerName:
+          type: string
+        customerEmail:
+          type: string
+        customerPhone:
+          type: string
+        partySize:
+          type: integer
+        status:
+          type: string
+          enum: [pending, confirmed, cancelled]
+
+    TableReservationInput:
+      type: object
+      required:
+        - tableId
+        - customerName
+        - eventId
+      properties:
+        tableId:
+          type: string
+        tableName:
+          type: string
+        eventId:
+          type: string
+        customerName:
+          type: string
+        customerEmail:
+          type: string
+        customerPhone:
+          type: string
+        partySize:
+          type: integer
+
+    Model:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        email:
+          type: string
+        phone:
+          type: string
+        instagram:
+          type: string
+        photos:
+          type: array
+          items:
+            type: string
+        height:
+          type: string
+        experienceLevel:
+          type: string
+          enum: [beginner, intermediate, professional]
+        status:
+          type: string
+          enum: [pending, approved, declined, assigned]
+        aiScore:
+          type: integer
+
+    ModelInput:
+      type: object
+      required:
+        - name
+        - email
+        - instagram
+      properties:
+        name:
+          type: string
+        email:
+          type: string
+        phone:
+          type: string
+        instagram:
+          type: string
+        photos:
+          type: array
+          items:
+            type: string
+        height:
+          type: string
+        experienceLevel:
+          type: string

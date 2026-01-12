@@ -2541,28 +2541,41 @@ app.delete('/api/v1/sponsors/:id', async (req, res) => {
 // ============================================
 
 // Helper to transform event row
+// Transform event from berry-bly-productions schema
 const transformEvent = (row) => ({
   id: row.id,
-  name: row.name,
+  name: row.title || row.name,
+  title: row.title,
   slug: row.slug,
   description: row.description,
-  eventType: row.event_type,
-  venueName: row.venue_name,
+  eventType: row.category || row.event_type,
+  category: row.category,
+  venueName: row.venue || row.venue_name,
+  venue: row.venue,
+  venueId: row.venue_id,
   venueAddress: row.venue_address,
   venueCity: row.venue_city,
   venueCapacity: row.venue_capacity,
-  eventDate: row.event_date,
-  startTime: row.start_time,
+  eventDate: row.date || row.event_date,
+  date: row.date,
+  time: row.time,
+  startTime: row.time || row.start_time,
   endTime: row.end_time,
   doorsOpen: row.doors_open,
   status: row.status,
-  coverImage: row.cover_image,
+  coverImage: row.flyer_url || row.cover_image,
+  flyerUrl: row.flyer_url,
+  eventbriteUrl: row.eventbrite_url,
   theme: row.theme,
   dressCode: row.dress_code,
   ageRestriction: row.age_restriction,
-  ticketLink: row.ticket_link,
+  ticketLink: row.eventbrite_url || row.ticket_link,
   isPublic: row.is_public,
-  isFeatured: row.is_featured,
+  isFeatured: row.featured || row.is_featured,
+  featured: row.featured,
+  guestListEnabled: row.guest_list_enabled,
+  tableMapEnabled: row.table_map_enabled,
+  sortOrder: row.sort_order,
   expectedAttendance: row.expected_attendance,
   actualAttendance: row.actual_attendance,
   notes: row.notes,
@@ -2585,16 +2598,16 @@ app.get('/api/v1/events', async (req, res) => {
       paramCount++;
     }
     if (upcoming === 'true') {
-      conditions.push(`event_date >= CURRENT_DATE`);
+      conditions.push(`date >= CURRENT_DATE`);
     }
     if (featured === 'true') {
-      conditions.push(`is_featured = true`);
+      conditions.push(`featured = true`);
     }
 
     if (conditions.length > 0) {
       query += ' WHERE ' + conditions.join(' AND ');
     }
-    query += ' ORDER BY event_date DESC';
+    query += ' ORDER BY date ASC';
     query += ` LIMIT $${paramCount}`;
     values.push(parseInt(limit));
 
@@ -2605,7 +2618,11 @@ app.get('/api/v1/events', async (req, res) => {
     });
   } catch (error) {
     console.error('Error fetching events:', error);
-    res.status(500).json({ error: 'Failed to fetch events' });
+    res.status(500).json({
+      error: 'Failed to fetch events',
+      details: error.message,
+      hint: error.hint || null
+    });
   }
 });
 
@@ -2650,31 +2667,39 @@ app.get('/api/v1/events/stats', async (req, res) => {
     const stats = await pool.query(`
       SELECT
         COUNT(*) as total,
-        COUNT(*) FILTER (WHERE status = 'planning') as planning,
-        COUNT(*) FILTER (WHERE status = 'confirmed') as confirmed,
-        COUNT(*) FILTER (WHERE status = 'in_progress') as in_progress,
-        COUNT(*) FILTER (WHERE status = 'completed') as completed,
-        COUNT(*) FILTER (WHERE status = 'cancelled') as cancelled,
-        COUNT(*) FILTER (WHERE event_date >= CURRENT_DATE) as upcoming,
-        COUNT(*) FILTER (WHERE event_date < CURRENT_DATE) as past,
-        COALESCE(SUM(expected_attendance), 0) as total_expected,
-        COALESCE(SUM(actual_attendance), 0) as total_actual
+        COUNT(*) FILTER (WHERE status = 'upcoming') as upcoming,
+        COUNT(*) FILTER (WHERE status = 'ongoing') as ongoing,
+        COUNT(*) FILTER (WHERE status = 'past') as past,
+        COUNT(*) FILTER (WHERE date >= CURRENT_DATE) as upcoming_by_date,
+        COUNT(*) FILTER (WHERE date < CURRENT_DATE) as past_by_date
       FROM events
     `);
 
     const thisMonth = await pool.query(`
       SELECT COUNT(*) as count FROM events
-      WHERE EXTRACT(YEAR FROM event_date) = EXTRACT(YEAR FROM CURRENT_DATE)
-      AND EXTRACT(MONTH FROM event_date) = EXTRACT(MONTH FROM CURRENT_DATE)
+      WHERE EXTRACT(YEAR FROM date) = EXTRACT(YEAR FROM CURRENT_DATE)
+      AND EXTRACT(MONTH FROM date) = EXTRACT(MONTH FROM CURRENT_DATE)
     `);
+
+    // Try to get category stats if column exists
+    let categoryStats = {};
+    try {
+      const byCategory = await pool.query(`
+        SELECT category, COUNT(*) as count FROM events WHERE category IS NOT NULL GROUP BY category
+      `);
+      byCategory.rows.forEach(r => { categoryStats[r.category] = parseInt(r.count); });
+    } catch {
+      categoryStats = {};
+    }
 
     res.json({
       ...stats.rows[0],
       thisMonth: parseInt(thisMonth.rows[0].count),
+      byCategory: categoryStats
     });
   } catch (error) {
     console.error('Error fetching event stats:', error);
-    res.status(500).json({ error: 'Failed to fetch event stats' });
+    res.status(500).json({ error: 'Failed to fetch event stats', details: error.message });
   }
 });
 
@@ -4608,20 +4633,33 @@ app.get('/api/v1/table-reservations', async (req, res) => {
 // Get table reservations stats
 app.get('/api/v1/table-reservations/stats', async (req, res) => {
   try {
+    // Check if table exists first
+    const tableCheck = await pool.query(`
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables
+        WHERE table_schema = 'public' AND table_name = 'table_reservations'
+      )
+    `);
+
+    if (!tableCheck.rows[0].exists) {
+      return res.json({ total: 0, pending: 0, confirmed: 0, cancelled: 0, revenue: 0 });
+    }
+
     const result = await pool.query(`
       SELECT
         COUNT(*) as total,
         COUNT(*) FILTER (WHERE status = 'pending') as pending,
         COUNT(*) FILTER (WHERE status = 'confirmed') as confirmed,
-        COUNT(*) FILTER (WHERE status = 'cancelled') as cancelled,
-        COALESCE(SUM(deposit_amount) FILTER (WHERE deposit_paid = true), 0) as total_deposits,
-        COALESCE(SUM(minimum_spend), 0) as total_minimum_spend
+        COUNT(*) FILTER (WHERE status = 'cancelled') as cancelled
       FROM table_reservations
     `);
-    res.json(result.rows[0]);
+    res.json({
+      ...result.rows[0],
+      revenue: 0 // Calculated separately if needed
+    });
   } catch (error) {
     console.error('Error fetching table stats:', error);
-    res.status(500).json({ error: 'Failed to fetch stats' });
+    res.status(500).json({ error: 'Failed to fetch stats', details: error.message });
   }
 });
 
