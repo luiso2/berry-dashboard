@@ -2,6 +2,8 @@ import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import crypto from 'crypto';
+import http from 'http';
+import { WebSocketServer } from 'ws';
 import { Resend } from 'resend';
 import pg from 'pg';
 import fs from 'fs';
@@ -10,7 +12,7 @@ import { fileURLToPath } from 'url';
 import yaml from 'js-yaml';
 
 // API Version - for tracking deployments
-const API_VERSION = '3.0.1-gpt';
+const API_VERSION = '3.1.0-websocket';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -3202,14 +3204,17 @@ app.post('/api/v1/gpt/events', async (req, res) => {
           INSERT INTO events (id, title, date, category, venue, status, user_id)
           VALUES ($1, $2, $3, $4, $5, 'planning', $6) RETURNING *
         `, [nextId.toString(), name, eventDate, category, venue, userId]);
-        return res.json({ success: true, event: mapEventRow(result.rows[0]), message: 'Event created' });
+        const createdEvent = mapEventRow(result.rows[0]);
+        // Emit WebSocket notification
+        emitNotification(userId, 'created', 'event', createdEvent);
+        return res.json({ success: true, event: createdEvent, message: 'Event created' });
       }
 
       case 'update': {
         if (!eventId) return res.status(400).json({ error: 'eventId required' });
         // Verify ownership
-        const check = await pool.query('SELECT id FROM events WHERE id = $1 AND (user_id = $2 OR user_id IS NULL)', [eventId, userId]);
-        if (check.rows.length === 0) return res.status(404).json({ error: 'Event not found' });
+        const checkUpdate = await pool.query('SELECT * FROM events WHERE id = $1 AND (user_id = $2 OR user_id IS NULL)', [eventId, userId]);
+        if (checkUpdate.rows.length === 0) return res.status(404).json({ error: 'Event not found' });
         const fields = [];
         const values = [];
         let idx = 1;
@@ -3227,15 +3232,20 @@ app.post('/api/v1/gpt/events', async (req, res) => {
         if (fields.length === 0) return res.status(400).json({ error: 'No valid fields to update' });
         values.push(eventId);
         await pool.query(`UPDATE events SET ${fields.join(', ')} WHERE id = $${idx}`, values);
+        // Emit WebSocket notification
+        emitNotification(userId, 'updated', 'event', { id: eventId, ...data });
         return res.json({ success: true, message: 'Event updated' });
       }
 
       case 'delete': {
         if (!eventId) return res.status(400).json({ error: 'eventId required' });
         // Verify ownership before delete
-        const check = await pool.query('SELECT id FROM events WHERE id = $1 AND (user_id = $2 OR user_id IS NULL)', [eventId, userId]);
-        if (check.rows.length === 0) return res.status(404).json({ error: 'Event not found' });
+        const checkDel = await pool.query('SELECT * FROM events WHERE id = $1 AND (user_id = $2 OR user_id IS NULL)', [eventId, userId]);
+        if (checkDel.rows.length === 0) return res.status(404).json({ error: 'Event not found' });
+        const deletedEvent = mapEventRow(checkDel.rows[0]);
         await pool.query('DELETE FROM events WHERE id = $1', [eventId]);
+        // Emit WebSocket notification
+        emitNotification(userId, 'deleted', 'event', deletedEvent);
         return res.json({ success: true, message: 'Event deleted' });
       }
 
@@ -3303,14 +3313,17 @@ app.post('/api/v1/gpt/guests', async (req, res) => {
           INSERT INTO guests (name, email, phone, instagram, party_size, category, notes, user_id)
           VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *
         `, [name, email, phone, instagram, partySize || 1, category || 'pending', notes, userId]);
-        return res.json({ success: true, guest: result.rows[0], message: 'Guest added' });
+        const addedGuest = result.rows[0];
+        // Emit WebSocket notification
+        emitNotification(userId, 'created', 'guest', addedGuest);
+        return res.json({ success: true, guest: addedGuest, message: 'Guest added' });
       }
 
       case 'update': {
         if (!guestId) return res.status(400).json({ error: 'guestId required' });
         // Verify ownership
-        const check = await pool.query('SELECT id FROM guests WHERE id = $1 AND (user_id = $2 OR user_id IS NULL)', [guestId, userId]);
-        if (check.rows.length === 0) return res.status(404).json({ error: 'Guest not found' });
+        const checkUpd = await pool.query('SELECT * FROM guests WHERE id = $1 AND (user_id = $2 OR user_id IS NULL)', [guestId, userId]);
+        if (checkUpd.rows.length === 0) return res.status(404).json({ error: 'Guest not found' });
         const fields = [];
         const values = [];
         let idx = 1;
@@ -3326,39 +3339,50 @@ app.post('/api/v1/gpt/guests', async (req, res) => {
         if (fields.length === 0) return res.status(400).json({ error: 'No valid fields' });
         values.push(guestId);
         await pool.query(`UPDATE guests SET ${fields.join(', ')} WHERE id = $${idx}`, values);
+        // Emit WebSocket notification
+        emitNotification(userId, 'updated', 'guest', { id: guestId, name: checkUpd.rows[0].name, ...data });
         return res.json({ success: true, message: 'Guest updated' });
       }
 
       case 'delete': {
         if (!guestId) return res.status(400).json({ error: 'guestId required' });
         // Verify ownership
-        const check = await pool.query('SELECT id FROM guests WHERE id = $1 AND (user_id = $2 OR user_id IS NULL)', [guestId, userId]);
-        if (check.rows.length === 0) return res.status(404).json({ error: 'Guest not found' });
+        const checkDel = await pool.query('SELECT * FROM guests WHERE id = $1 AND (user_id = $2 OR user_id IS NULL)', [guestId, userId]);
+        if (checkDel.rows.length === 0) return res.status(404).json({ error: 'Guest not found' });
+        const deletedGuest = checkDel.rows[0];
         await pool.query('DELETE FROM guests WHERE id = $1', [guestId]);
+        // Emit WebSocket notification
+        emitNotification(userId, 'deleted', 'guest', deletedGuest);
         return res.json({ success: true, message: 'Guest removed' });
       }
 
       case 'approve': {
         if (!guestId) return res.status(400).json({ error: 'guestId required' });
-        const check = await pool.query('SELECT id FROM guests WHERE id = $1 AND (user_id = $2 OR user_id IS NULL)', [guestId, userId]);
-        if (check.rows.length === 0) return res.status(404).json({ error: 'Guest not found' });
+        const checkAppr = await pool.query('SELECT * FROM guests WHERE id = $1 AND (user_id = $2 OR user_id IS NULL)', [guestId, userId]);
+        if (checkAppr.rows.length === 0) return res.status(404).json({ error: 'Guest not found' });
         await pool.query('UPDATE guests SET status = $1 WHERE id = $2', ['approved', guestId]);
+        // Emit WebSocket notification
+        emitNotification(userId, 'approved', 'guest', { id: guestId, name: checkAppr.rows[0].name });
         return res.json({ success: true, message: 'Guest approved' });
       }
 
       case 'reject': {
         if (!guestId) return res.status(400).json({ error: 'guestId required' });
-        const check = await pool.query('SELECT id FROM guests WHERE id = $1 AND (user_id = $2 OR user_id IS NULL)', [guestId, userId]);
-        if (check.rows.length === 0) return res.status(404).json({ error: 'Guest not found' });
+        const checkRej = await pool.query('SELECT * FROM guests WHERE id = $1 AND (user_id = $2 OR user_id IS NULL)', [guestId, userId]);
+        if (checkRej.rows.length === 0) return res.status(404).json({ error: 'Guest not found' });
         await pool.query('UPDATE guests SET status = $1 WHERE id = $2', ['rejected', guestId]);
+        // Emit WebSocket notification
+        emitNotification(userId, 'rejected', 'guest', { id: guestId, name: checkRej.rows[0].name });
         return res.json({ success: true, message: 'Guest rejected' });
       }
 
       case 'checkIn': {
         if (!guestId) return res.status(400).json({ error: 'guestId required' });
-        const check = await pool.query('SELECT id FROM guests WHERE id = $1 AND (user_id = $2 OR user_id IS NULL)', [guestId, userId]);
-        if (check.rows.length === 0) return res.status(404).json({ error: 'Guest not found' });
+        const checkIn = await pool.query('SELECT * FROM guests WHERE id = $1 AND (user_id = $2 OR user_id IS NULL)', [guestId, userId]);
+        if (checkIn.rows.length === 0) return res.status(404).json({ error: 'Guest not found' });
         await pool.query('UPDATE guests SET checked_in_at = CURRENT_TIMESTAMP WHERE id = $1', [guestId]);
+        // Emit WebSocket notification
+        emitNotification(userId, 'checkedIn', 'guest', { id: guestId, name: checkIn.rows[0].name });
         return res.json({ success: true, message: 'Guest checked in' });
       }
 
@@ -3633,14 +3657,17 @@ app.post('/api/v1/gpt/vendors', async (req, res) => {
           INSERT INTO vendors (name, category, contact_name, email, phone, website, city, notes, is_preferred, user_id)
           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *
         `, [name, category, contactName, email, phone, website, city, notes, isPreferred || false, userId]);
-        return res.json({ success: true, vendor: result.rows[0], message: 'Vendor added' });
+        const addedVendor = result.rows[0];
+        // Emit WebSocket notification
+        emitNotification(userId, 'created', 'vendor', addedVendor);
+        return res.json({ success: true, vendor: addedVendor, message: 'Vendor added' });
       }
 
       case 'update': {
         if (!vendorId) return res.status(400).json({ error: 'vendorId required' });
         // Verify ownership
-        const check = await pool.query('SELECT id FROM vendors WHERE id = $1 AND (user_id = $2 OR user_id IS NULL)', [vendorId, userId]);
-        if (check.rows.length === 0) return res.status(404).json({ error: 'Vendor not found' });
+        const checkVUpd = await pool.query('SELECT * FROM vendors WHERE id = $1 AND (user_id = $2 OR user_id IS NULL)', [vendorId, userId]);
+        if (checkVUpd.rows.length === 0) return res.status(404).json({ error: 'Vendor not found' });
         const fields = [];
         const values = [];
         let idx = 1;
@@ -3655,15 +3682,20 @@ app.post('/api/v1/gpt/vendors', async (req, res) => {
         if (fields.length === 0) return res.status(400).json({ error: 'No fields to update' });
         values.push(vendorId);
         await pool.query(`UPDATE vendors SET ${fields.join(', ')} WHERE id = $${idx}`, values);
+        // Emit WebSocket notification
+        emitNotification(userId, 'updated', 'vendor', { id: vendorId, name: checkVUpd.rows[0].name, ...data });
         return res.json({ success: true, message: 'Vendor updated' });
       }
 
       case 'delete': {
         if (!vendorId) return res.status(400).json({ error: 'vendorId required' });
         // Verify ownership
-        const check = await pool.query('SELECT id FROM vendors WHERE id = $1 AND (user_id = $2 OR user_id IS NULL)', [vendorId, userId]);
-        if (check.rows.length === 0) return res.status(404).json({ error: 'Vendor not found' });
+        const checkVDel = await pool.query('SELECT * FROM vendors WHERE id = $1 AND (user_id = $2 OR user_id IS NULL)', [vendorId, userId]);
+        if (checkVDel.rows.length === 0) return res.status(404).json({ error: 'Vendor not found' });
+        const deletedVendor = checkVDel.rows[0];
         await pool.query('DELETE FROM vendors WHERE id = $1', [vendorId]);
+        // Emit WebSocket notification
+        emitNotification(userId, 'deleted', 'vendor', deletedVendor);
         return res.json({ success: true, message: 'Vendor deleted' });
       }
 
@@ -3883,16 +3915,21 @@ app.post('/api/v1/gpt/sponsors', async (req, res) => {
           INSERT INTO sponsors (company_name, contact_name, email, phone, tier, amount, benefits, status, user_id)
           VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', $8) RETURNING *
         `, [companyName, contactName, email, phone, tier || 'silver', amount || 0, benefits, userId]);
-        return res.json({ success: true, sponsor: result.rows[0], message: 'Sponsor added' });
+        const addedSponsor = result.rows[0];
+        // Emit WebSocket notification
+        emitNotification(userId, 'created', 'sponsor', addedSponsor);
+        return res.json({ success: true, sponsor: addedSponsor, message: 'Sponsor added' });
       }
 
       case 'updateStatus': {
         if (!sponsorId) return res.status(400).json({ error: 'sponsorId required' });
         // Verify ownership
-        const check = await pool.query('SELECT id FROM sponsors WHERE id = $1 AND (user_id = $2 OR user_id IS NULL)', [sponsorId, userId]);
-        if (check.rows.length === 0) return res.status(404).json({ error: 'Sponsor not found' });
+        const checkSUpd = await pool.query('SELECT * FROM sponsors WHERE id = $1 AND (user_id = $2 OR user_id IS NULL)', [sponsorId, userId]);
+        if (checkSUpd.rows.length === 0) return res.status(404).json({ error: 'Sponsor not found' });
         const { status } = data || {};
         await pool.query('UPDATE sponsors SET status = $1 WHERE id = $2', [status, sponsorId]);
+        // Emit WebSocket notification
+        emitNotification(userId, 'updated', 'sponsor', { id: sponsorId, companyName: checkSUpd.rows[0].company_name, status });
         return res.json({ success: true, message: 'Sponsor status updated' });
       }
 
@@ -6429,16 +6466,181 @@ app.get('/api/v1/health/ready', async (req, res) => {
   }
 });
 
+// GET /api/v1/websocket/info - Get WebSocket connection info
+app.get('/api/v1/websocket/info', (req, res) => {
+  const baseUrl = process.env.RAILWAY_STATIC_URL || process.env.BASE_URL || `http://localhost:${PORT}`;
+  const wsUrl = baseUrl.replace('https://', 'wss://').replace('http://', 'ws://');
+
+  res.json({
+    websocket: {
+      url: `${wsUrl}/ws`,
+      connectionExample: `${wsUrl}/ws?token=YOUR_ACCESS_TOKEN`,
+      connectedClients: wsClients?.size || 0
+    },
+    instructions: {
+      connect: 'Connect to WebSocket with your OAuth access token as query param',
+      example: "new WebSocket('wss://berry-dashboard-api-production.up.railway.app/ws?token=YOUR_TOKEN')",
+      events: [
+        { type: 'connected', description: 'Sent when successfully connected' },
+        { type: 'notification', description: 'Real-time updates (create, update, delete)' },
+        { type: 'pong', description: 'Response to ping keepalive' },
+        { type: 'error', description: 'Error messages' }
+      ],
+      notificationFormat: {
+        type: 'notification',
+        action: 'created|updated|deleted|approved|rejected|checkedIn',
+        entity: 'event|guest|vendor|sponsor',
+        data: '{ ...entity data }',
+        message: 'Human-readable message',
+        timestamp: 'ISO timestamp'
+      }
+    }
+  });
+});
+
+// ============================================
+// WEBSOCKET SERVER FOR REAL-TIME NOTIFICATIONS
+// ============================================
+
+// Create HTTP server from Express app
+const server = http.createServer(app);
+
+// Create WebSocket server attached to HTTP server
+const wss = new WebSocketServer({ server, path: '/ws' });
+
+// Store connected clients with their user info
+const wsClients = new Map();
+
+// Authenticate WebSocket connection using token from URL
+const authenticateWsConnection = async (token) => {
+  if (!token) return null;
+  try {
+    const result = await pool.query(
+      `SELECT u.* FROM users u
+       JOIN oauth_tokens t ON u.id = t.user_id
+       WHERE t.access_token = $1 AND t.expires_at > NOW()`,
+      [token]
+    );
+    return result.rows.length > 0 ? result.rows[0] : null;
+  } catch (error) {
+    console.error('WS Auth error:', error);
+    return null;
+  }
+};
+
+// WebSocket connection handler
+wss.on('connection', async (ws, req) => {
+  // Extract token from URL: /ws?token=xxx
+  const url = new URL(req.url, `http://${req.headers.host}`);
+  const token = url.searchParams.get('token');
+
+  // Authenticate user
+  const user = await authenticateWsConnection(token);
+
+  if (!user) {
+    ws.send(JSON.stringify({ type: 'error', message: 'Authentication required' }));
+    ws.close(4001, 'Unauthorized');
+    return;
+  }
+
+  // Store client with user info
+  const clientId = crypto.randomUUID();
+  wsClients.set(clientId, { ws, user, connectedAt: new Date() });
+
+  console.log(`WebSocket: User ${user.email} connected (${clientId})`);
+
+  // Send welcome message
+  ws.send(JSON.stringify({
+    type: 'connected',
+    message: `Welcome ${user.name || user.email}!`,
+    userId: user.id,
+    timestamp: new Date().toISOString()
+  }));
+
+  // Handle incoming messages (for future use - chat, commands, etc.)
+  ws.on('message', (data) => {
+    try {
+      const message = JSON.parse(data);
+      console.log(`WS Message from ${user.email}:`, message);
+
+      // Handle ping/pong for keepalive
+      if (message.type === 'ping') {
+        ws.send(JSON.stringify({ type: 'pong', timestamp: new Date().toISOString() }));
+      }
+    } catch (e) {
+      console.error('Invalid WS message:', e);
+    }
+  });
+
+  // Handle disconnection
+  ws.on('close', () => {
+    wsClients.delete(clientId);
+    console.log(`WebSocket: User ${user.email} disconnected (${clientId})`);
+  });
+
+  // Handle errors
+  ws.on('error', (error) => {
+    console.error(`WS Error for ${user.email}:`, error);
+    wsClients.delete(clientId);
+  });
+});
+
+// Broadcast notification to specific user(s)
+const broadcastNotification = (userId, notification) => {
+  const message = JSON.stringify({
+    type: 'notification',
+    ...notification,
+    timestamp: new Date().toISOString()
+  });
+
+  wsClients.forEach((client) => {
+    // Send to specific user or to all if userId is null
+    if ((userId === null || client.user.id === userId) && client.ws.readyState === 1) {
+      client.ws.send(message);
+    }
+  });
+};
+
+// Broadcast to all connected users (admin broadcasts)
+const broadcastToAll = (notification) => {
+  broadcastNotification(null, notification);
+};
+
+// Helper to emit CRUD notifications
+const emitNotification = (userId, action, entity, data) => {
+  broadcastNotification(userId, {
+    action,     // 'created', 'updated', 'deleted'
+    entity,     // 'event', 'guest', 'vendor', 'sponsor', etc.
+    data,       // The created/updated/deleted record
+    message: getNotificationMessage(action, entity, data)
+  });
+};
+
+// Generate human-readable notification message
+const getNotificationMessage = (action, entity, data) => {
+  const name = data?.name || data?.title || data?.company_name || data?.companyName || `#${data?.id}`;
+  const messages = {
+    created: `New ${entity} created: ${name}`,
+    updated: `${entity} updated: ${name}`,
+    deleted: `${entity} deleted: ${name}`,
+    approved: `${entity} approved: ${name}`,
+    rejected: `${entity} rejected: ${name}`,
+    checkedIn: `${entity} checked in: ${name}`
+  };
+  return messages[action] || `${action} ${entity}: ${name}`;
+};
+
 // Start server
 const startServer = async () => {
   await initDatabase();
 
-  app.listen(PORT, () => {
+  server.listen(PORT, () => {
     console.log(`
   ========================================================
            Berry Dashboard API Server (PostgreSQL)
   ========================================================
     Local:   http://localhost:${PORT}
+    WebSocket: ws://localhost:${PORT}/ws
 
     Guest Endpoints (also available at /api/v1/*):
     GET    /api/guests              - List all guests
