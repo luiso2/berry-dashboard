@@ -1155,6 +1155,21 @@ function App() {
     }
   }, [vendorFormData, fetchVendors]);
 
+  // Delete Vendor
+  const deleteVendor = useCallback(async (vendorId: string) => {
+    if (!confirm('Are you sure you want to delete this vendor?')) return;
+    try {
+      const res = await fetch(`${API_URL}/vendors/${vendorId}`, { method: 'DELETE' });
+      if (res.ok) {
+        fetchVendors();
+        addToast('Vendor deleted', 'success');
+      }
+    } catch (error) {
+      console.error('Error deleting vendor:', error);
+      addToast('Failed to delete vendor', 'error');
+    }
+  }, [fetchVendors]);
+
   // Fetch Staff
   const fetchStaff = useCallback(async () => {
     try {
@@ -4035,6 +4050,15 @@ function App() {
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 12, paddingTop: 12, borderTop: '1px solid #1a1a1a' }}>
                     <span style={{ fontSize: 12, color: '#666' }}>{vendor.eventsCount || 0} events</span>
                     <span style={{ fontSize: 12, color: '#22c55e' }}>${(vendor.totalSpent || 0).toLocaleString()} total</span>
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                    <button
+                      onClick={() => deleteVendor(vendor.id)}
+                      className="btn-hover"
+                      style={{ flex: 1, padding: '8px', background: '#ef444420', border: '1px solid #ef444440', borderRadius: 6, color: '#ef4444', fontSize: 12, cursor: 'pointer' }}
+                    >
+                      Delete
+                    </button>
                   </div>
                 </div>
               ))}
