@@ -3223,9 +3223,9 @@ app.get('/api/v1/events/:eventId/budget', async (req, res) => {
     let budget = await pool.query('SELECT * FROM budgets WHERE event_id = $1', [eventId]);
 
     if (budget.rows.length === 0) {
-      // Get event name for budget - try both 'title' and 'name' columns
-      const event = await pool.query('SELECT COALESCE(title, name) as name FROM events WHERE id = $1', [eventId]);
-      const eventName = event.rows[0]?.name || 'Event';
+      // Get event title for budget
+      const event = await pool.query('SELECT title FROM events WHERE id = $1', [eventId]);
+      const eventName = event.rows[0]?.title || 'Event';
 
       budget = await pool.query(
         `INSERT INTO budgets (event_id, name) VALUES ($1, $2) RETURNING *`,
