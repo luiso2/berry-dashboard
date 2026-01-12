@@ -840,60 +840,183 @@ app.get('/oauth/authorize', async (req, res) => {
     <!DOCTYPE html>
     <html>
     <head>
-      <title>Berry Dashboard - Login</title>
+      <title>Berry Bly - Sign In</title>
       <meta name="viewport" content="width=device-width, initial-scale=1">
       <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; display: flex; align-items: center; justify-content: center; }
-        .container { background: white; padding: 40px; border-radius: 16px; box-shadow: 0 20px 60px rgba(0,0,0,0.3); width: 100%; max-width: 400px; }
-        h1 { color: #333; margin-bottom: 8px; font-size: 24px; }
-        p { color: #666; margin-bottom: 24px; font-size: 14px; }
-        .form-group { margin-bottom: 16px; }
-        label { display: block; margin-bottom: 6px; color: #333; font-weight: 500; font-size: 14px; }
-        input { width: 100%; padding: 12px 16px; border: 2px solid #e1e1e1; border-radius: 8px; font-size: 16px; transition: border-color 0.2s; }
-        input:focus { outline: none; border-color: #667eea; }
-        button { width: 100%; padding: 14px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: 600; cursor: pointer; transition: transform 0.2s, box-shadow 0.2s; }
-        button:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4); }
-        .toggle { text-align: center; margin-top: 20px; }
-        .toggle a { color: #667eea; text-decoration: none; font-weight: 500; }
-        .error { background: #fee; color: #c00; padding: 12px; border-radius: 8px; margin-bottom: 16px; font-size: 14px; }
-        .tabs { display: flex; margin-bottom: 24px; border-bottom: 2px solid #e1e1e1; }
-        .tab { flex: 1; padding: 12px; text-align: center; cursor: pointer; color: #666; font-weight: 500; border-bottom: 2px solid transparent; margin-bottom: -2px; }
-        .tab.active { color: #667eea; border-bottom-color: #667eea; }
+        body {
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+          background: #000;
+          min-height: 100vh;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          padding: 20px;
+        }
+        .container {
+          background: rgba(255, 255, 255, 0.05);
+          backdrop-filter: blur(20px);
+          -webkit-backdrop-filter: blur(20px);
+          padding: 40px;
+          border-radius: 24px;
+          border: 1px solid rgba(255, 255, 255, 0.1);
+          width: 100%;
+          max-width: 420px;
+        }
+        .logo {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 12px;
+          margin-bottom: 32px;
+        }
+        .logo-icon {
+          width: 48px;
+          height: 48px;
+          background: linear-gradient(135deg, #f59e0b 0%, #ca8a04 100%);
+          border-radius: 12px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 24px;
+          font-weight: bold;
+          color: white;
+        }
+        .logo-text {
+          font-size: 24px;
+          font-weight: bold;
+          color: white;
+        }
+        .header {
+          text-align: center;
+          margin-bottom: 32px;
+        }
+        h1 {
+          color: #fff;
+          margin-bottom: 8px;
+          font-size: 28px;
+          font-weight: 700;
+        }
+        .subtitle {
+          color: rgba(255, 255, 255, 0.6);
+          font-size: 15px;
+        }
+        .form-group { margin-bottom: 20px; }
+        label {
+          display: block;
+          margin-bottom: 8px;
+          color: rgba(255, 255, 255, 0.8);
+          font-weight: 500;
+          font-size: 14px;
+        }
+        input {
+          width: 100%;
+          padding: 14px 16px;
+          background: rgba(255, 255, 255, 0.05);
+          border: 1px solid rgba(255, 255, 255, 0.1);
+          border-radius: 12px;
+          font-size: 16px;
+          color: white;
+          transition: all 0.2s;
+        }
+        input::placeholder {
+          color: rgba(255, 255, 255, 0.3);
+        }
+        input:focus {
+          outline: none;
+          border-color: #f59e0b;
+          box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.15);
+        }
+        button {
+          width: 100%;
+          padding: 14px;
+          background: linear-gradient(135deg, #f59e0b 0%, #ca8a04 100%);
+          color: #000;
+          border: none;
+          border-radius: 12px;
+          font-size: 16px;
+          font-weight: 600;
+          cursor: pointer;
+          transition: all 0.2s;
+        }
+        button:hover {
+          transform: translateY(-2px);
+          box-shadow: 0 8px 24px rgba(245, 158, 11, 0.35);
+        }
+        .tabs {
+          display: flex;
+          margin-bottom: 28px;
+          background: rgba(255, 255, 255, 0.05);
+          border-radius: 12px;
+          padding: 4px;
+        }
+        .tab {
+          flex: 1;
+          padding: 12px;
+          text-align: center;
+          cursor: pointer;
+          color: rgba(255, 255, 255, 0.5);
+          font-weight: 500;
+          border-radius: 10px;
+          transition: all 0.2s;
+        }
+        .tab:hover {
+          color: rgba(255, 255, 255, 0.8);
+        }
+        .tab.active {
+          color: #000;
+          background: linear-gradient(135deg, #f59e0b 0%, #ca8a04 100%);
+        }
+        .footer {
+          text-align: center;
+          margin-top: 24px;
+          color: rgba(255, 255, 255, 0.4);
+          font-size: 13px;
+        }
       </style>
     </head>
     <body>
       <div class="container">
-        <h1>🎉 Berry Dashboard</h1>
-        <p>Connect your account to manage events</p>
+        <div class="logo">
+          <div class="logo-icon">B</div>
+          <span class="logo-text">Berry Bly</span>
+        </div>
 
         <div class="tabs">
-          <div class="tab active" onclick="showLogin()">Login</div>
+          <div class="tab active" onclick="showLogin()">Sign In</div>
           <div class="tab" onclick="showRegister()">Register</div>
         </div>
 
         <div id="loginForm">
+          <div class="header">
+            <h1>Welcome Back</h1>
+            <p class="subtitle">Sign in to connect your account</p>
+          </div>
           <form action="/oauth/login" method="POST">
             <input type="hidden" name="redirect_uri" value="${redirect_uri || ''}">
             <input type="hidden" name="state" value="${state || ''}">
             <div class="form-group">
-              <label>Email</label>
+              <label>Email Address</label>
               <input type="email" name="email" required placeholder="you@company.com">
             </div>
             <div class="form-group">
               <label>Password</label>
               <input type="password" name="password" required placeholder="••••••••">
             </div>
-            <button type="submit">Login</button>
+            <button type="submit">Sign In</button>
           </form>
         </div>
 
         <div id="registerForm" style="display:none;">
+          <div class="header">
+            <h1>Create Account</h1>
+            <p class="subtitle">Join Berry Bly Productions</p>
+          </div>
           <form action="/oauth/register" method="POST">
             <input type="hidden" name="redirect_uri" value="${redirect_uri || ''}">
             <input type="hidden" name="state" value="${state || ''}">
             <div class="form-group">
-              <label>Name</label>
+              <label>Full Name</label>
               <input type="text" name="name" required placeholder="Your name">
             </div>
             <div class="form-group">
@@ -901,7 +1024,7 @@ app.get('/oauth/authorize', async (req, res) => {
               <input type="text" name="company" placeholder="Your company (optional)">
             </div>
             <div class="form-group">
-              <label>Email</label>
+              <label>Email Address</label>
               <input type="email" name="email" required placeholder="you@company.com">
             </div>
             <div class="form-group">
@@ -910,6 +1033,10 @@ app.get('/oauth/authorize', async (req, res) => {
             </div>
             <button type="submit">Create Account</button>
           </form>
+        </div>
+
+        <div class="footer">
+          © 2025 Berry Bly Productions
         </div>
       </div>
       <script>
@@ -1012,11 +1139,11 @@ app.post('/oauth/register', async (req, res) => {
     );
     const isFrontend = !isOAuthRedirect;
 
-    if (!email || !password || password.length < 6) {
+    if (!email || !password) {
       if (isFrontend) {
-        return res.status(400).json({ error: 'Email required and password must be at least 6 characters' });
+        return res.status(400).json({ error: 'Email and password are required' });
       }
-      return res.send('<html><body><h1>Error</h1><p>Email required and password must be at least 6 characters. <a href="javascript:history.back()">Go back</a></p></body></html>');
+      return res.send('<html><body><h1>Error</h1><p>Email and password are required. <a href="javascript:history.back()">Go back</a></p></body></html>');
     }
 
     // Check if user exists
@@ -1069,6 +1196,37 @@ app.post('/oauth/register', async (req, res) => {
   } catch (error) {
     console.error('OAuth register error:', error);
     res.status(500).json({ error: 'Registration failed. Please try again.' });
+  }
+});
+
+// Admin: Delete user by email (for testing/admin purposes)
+app.delete('/admin/users/:email', async (req, res) => {
+  try {
+    const { email } = req.params;
+    const adminKey = req.headers['x-admin-key'];
+
+    // Simple admin key check
+    if (adminKey !== 'berry-admin-2025') {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    // Delete oauth tokens first
+    const user = await pool.query('SELECT id FROM users WHERE email = $1', [email.toLowerCase()]);
+    if (user.rows.length > 0) {
+      await pool.query('DELETE FROM oauth_tokens WHERE user_id = $1', [user.rows[0].id]);
+    }
+
+    // Delete user
+    const result = await pool.query('DELETE FROM users WHERE email = $1 RETURNING *', [email.toLowerCase()]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    res.json({ success: true, message: `User ${email} deleted` });
+  } catch (error) {
+    console.error('Delete user error:', error);
+    res.status(500).json({ error: 'Failed to delete user' });
   }
 });
 

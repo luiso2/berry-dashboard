@@ -30,11 +30,6 @@ export default function Register() {
       return;
     }
 
-    if (formData.password.length < 8) {
-      setError('Password must be at least 8 characters');
-      return;
-    }
-
     if (!agreeTerms) {
       setError('Please agree to the terms and conditions');
       return;
