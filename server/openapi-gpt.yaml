@@ -3,6 +3,7 @@ info:
   title: Berry Bly Productions - GPT Event Management API
   description: |
     Unified API for GPT to control the Berry Bly Productions event dashboard.
+    Each user has their own separate data after OAuth authentication.
 
     ## How to Use
     Use the single `gptSession` endpoint with:
@@ -22,13 +23,28 @@ info:
     - **manageTickets** - Actions: list, create, checkIn, stats
     - **manageSponsors** - Actions: list, get, add, updateStatus, stats
 
-  version: 3.1.0
+  version: 3.2.0
   contact:
     name: Berry Bly Productions
     email: concierge@berrybly.com
 
 servers:
-  - url: https://berrydashboard.merktop.com
+  - url: https://berry-dashboard-api-production.up.railway.app
+
+components:
+  securitySchemes:
+    oauth2:
+      type: oauth2
+      flows:
+        authorizationCode:
+          authorizationUrl: https://berry-dashboard-api-production.up.railway.app/oauth/authorize
+          tokenUrl: https://berry-dashboard-api-production.up.railway.app/oauth/token
+          scopes:
+            read: Read access to your events and data
+            write: Write access to your events and data
+
+security:
+  - oauth2: [read, write]
 
 paths:
   /api/v1/gpt/session:

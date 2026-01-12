@@ -30,6 +30,38 @@ const pool = new Pool({
 const initDatabase = async () => {
   const client = await pool.connect();
   try {
+    // ============================================
+    // OAUTH TABLES - Users and Authentication
+    // ============================================
+
+    // Create users table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id SERIAL PRIMARY KEY,
+        email VARCHAR(255) UNIQUE NOT NULL,
+        password_hash VARCHAR(255) NOT NULL,
+        name VARCHAR(255),
+        company VARCHAR(255),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    // Create oauth_tokens table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS oauth_tokens (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        access_token VARCHAR(255) UNIQUE NOT NULL,
+        refresh_token VARCHAR(255),
+        code VARCHAR(255),
+        expires_at TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_oauth_tokens_access ON oauth_tokens(access_token);
+      CREATE INDEX IF NOT EXISTS idx_oauth_tokens_code ON oauth_tokens(code);
+    `);
+
     // Create guests table
     await client.query(`
       CREATE TABLE IF NOT EXISTS guests (
@@ -60,6 +92,33 @@ const initDatabase = async () => {
         END IF;
         IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='guests' AND column_name='rating') THEN
           ALTER TABLE guests ADD COLUMN rating INTEGER DEFAULT 0;
+        END IF;
+      END $$;
+    `);
+
+    // Add user_id to all main tables for multi-tenant support
+    await client.query(`
+      DO $$
+      BEGIN
+        -- Add user_id to guests
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='guests' AND column_name='user_id') THEN
+          ALTER TABLE guests ADD COLUMN user_id INTEGER REFERENCES users(id) ON DELETE CASCADE;
+          CREATE INDEX IF NOT EXISTS idx_guests_user ON guests(user_id);
+        END IF;
+        -- Add user_id to events
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='events' AND column_name='user_id') THEN
+          ALTER TABLE events ADD COLUMN user_id INTEGER REFERENCES users(id) ON DELETE CASCADE;
+          CREATE INDEX IF NOT EXISTS idx_events_user ON events(user_id);
+        END IF;
+        -- Add user_id to vendors
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='vendors' AND column_name='user_id') THEN
+          ALTER TABLE vendors ADD COLUMN user_id INTEGER REFERENCES users(id) ON DELETE CASCADE;
+          CREATE INDEX IF NOT EXISTS idx_vendors_user ON vendors(user_id);
+        END IF;
+        -- Add user_id to sponsors
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='sponsors' AND column_name='user_id') THEN
+          ALTER TABLE sponsors ADD COLUMN user_id INTEGER REFERENCES users(id) ON DELETE CASCADE;
+          CREATE INDEX IF NOT EXISTS idx_sponsors_user ON sponsors(user_id);
         END IF;
       END $$;
     `);
@@ -195,7 +254,7 @@ const initDatabase = async () => {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
-      CREATE INDEX IF NOT EXISTS idx_events_date ON events(event_date);
+      CREATE INDEX IF NOT EXISTS idx_events_date ON events(date);
       CREATE INDEX IF NOT EXISTS idx_events_status ON events(status);
       CREATE INDEX IF NOT EXISTS idx_events_slug ON events(slug);
     `);
@@ -736,6 +795,276 @@ app.use(cors({
   credentials: true
 }));
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+// ============================================
+// OAUTH 2.0 ENDPOINTS
+// ============================================
+
+// Simple password hashing (for production use bcrypt)
+const hashPassword = (password) => {
+  return crypto.createHash('sha256').update(password + 'berry-salt-2024').digest('hex');
+};
+
+// Generate random token
+const generateToken = () => crypto.randomBytes(32).toString('hex');
+
+// OAuth: Authorization page (GET /oauth/authorize)
+app.get('/oauth/authorize', async (req, res) => {
+  const { client_id, redirect_uri, state, response_type } = req.query;
+
+  res.send(`
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>Berry Dashboard - Login</title>
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+        .container { background: white; padding: 40px; border-radius: 16px; box-shadow: 0 20px 60px rgba(0,0,0,0.3); width: 100%; max-width: 400px; }
+        h1 { color: #333; margin-bottom: 8px; font-size: 24px; }
+        p { color: #666; margin-bottom: 24px; font-size: 14px; }
+        .form-group { margin-bottom: 16px; }
+        label { display: block; margin-bottom: 6px; color: #333; font-weight: 500; font-size: 14px; }
+        input { width: 100%; padding: 12px 16px; border: 2px solid #e1e1e1; border-radius: 8px; font-size: 16px; transition: border-color 0.2s; }
+        input:focus { outline: none; border-color: #667eea; }
+        button { width: 100%; padding: 14px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: 600; cursor: pointer; transition: transform 0.2s, box-shadow 0.2s; }
+        button:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4); }
+        .toggle { text-align: center; margin-top: 20px; }
+        .toggle a { color: #667eea; text-decoration: none; font-weight: 500; }
+        .error { background: #fee; color: #c00; padding: 12px; border-radius: 8px; margin-bottom: 16px; font-size: 14px; }
+        .tabs { display: flex; margin-bottom: 24px; border-bottom: 2px solid #e1e1e1; }
+        .tab { flex: 1; padding: 12px; text-align: center; cursor: pointer; color: #666; font-weight: 500; border-bottom: 2px solid transparent; margin-bottom: -2px; }
+        .tab.active { color: #667eea; border-bottom-color: #667eea; }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <h1>🎉 Berry Dashboard</h1>
+        <p>Connect your account to manage events</p>
+
+        <div class="tabs">
+          <div class="tab active" onclick="showLogin()">Login</div>
+          <div class="tab" onclick="showRegister()">Register</div>
+        </div>
+
+        <div id="loginForm">
+          <form action="/oauth/login" method="POST">
+            <input type="hidden" name="redirect_uri" value="${redirect_uri || ''}">
+            <input type="hidden" name="state" value="${state || ''}">
+            <div class="form-group">
+              <label>Email</label>
+              <input type="email" name="email" required placeholder="you@company.com">
+            </div>
+            <div class="form-group">
+              <label>Password</label>
+              <input type="password" name="password" required placeholder="••••••••">
+            </div>
+            <button type="submit">Login</button>
+          </form>
+        </div>
+
+        <div id="registerForm" style="display:none;">
+          <form action="/oauth/register" method="POST">
+            <input type="hidden" name="redirect_uri" value="${redirect_uri || ''}">
+            <input type="hidden" name="state" value="${state || ''}">
+            <div class="form-group">
+              <label>Name</label>
+              <input type="text" name="name" required placeholder="Your name">
+            </div>
+            <div class="form-group">
+              <label>Company</label>
+              <input type="text" name="company" placeholder="Your company (optional)">
+            </div>
+            <div class="form-group">
+              <label>Email</label>
+              <input type="email" name="email" required placeholder="you@company.com">
+            </div>
+            <div class="form-group">
+              <label>Password</label>
+              <input type="password" name="password" required placeholder="Min 6 characters">
+            </div>
+            <button type="submit">Create Account</button>
+          </form>
+        </div>
+      </div>
+      <script>
+        function showLogin() {
+          document.getElementById('loginForm').style.display = 'block';
+          document.getElementById('registerForm').style.display = 'none';
+          document.querySelectorAll('.tab')[0].classList.add('active');
+          document.querySelectorAll('.tab')[1].classList.remove('active');
+        }
+        function showRegister() {
+          document.getElementById('loginForm').style.display = 'none';
+          document.getElementById('registerForm').style.display = 'block';
+          document.querySelectorAll('.tab')[0].classList.remove('active');
+          document.querySelectorAll('.tab')[1].classList.add('active');
+        }
+      </script>
+    </body>
+    </html>
+  `);
+});
+
+// OAuth: Login handler
+app.post('/oauth/login', async (req, res) => {
+  try {
+    const { email, password, redirect_uri, state } = req.body;
+
+    // Find user
+    const userResult = await pool.query('SELECT * FROM users WHERE email = $1', [email.toLowerCase()]);
+    if (userResult.rows.length === 0) {
+      return res.send('<html><body><h1>Error</h1><p>User not found. <a href="javascript:history.back()">Go back</a></p></body></html>');
+    }
+
+    const user = userResult.rows[0];
+
+    // Check password
+    if (user.password_hash !== hashPassword(password)) {
+      return res.send('<html><body><h1>Error</h1><p>Invalid password. <a href="javascript:history.back()">Go back</a></p></body></html>');
+    }
+
+    // Generate tokens
+    const code = generateToken();
+    const accessToken = generateToken();
+    const refreshToken = generateToken();
+
+    // Save token
+    await pool.query(
+      'INSERT INTO oauth_tokens (user_id, access_token, refresh_token, code, expires_at) VALUES ($1, $2, $3, $4, NOW() + INTERVAL \'30 days\')',
+      [user.id, accessToken, refreshToken, code]
+    );
+
+    // Redirect back to ChatGPT with code
+    const redirectUrl = `${redirect_uri}?code=${code}${state ? '&state=' + state : ''}`;
+    res.redirect(redirectUrl);
+  } catch (error) {
+    console.error('OAuth login error:', error);
+    res.status(500).send('<html><body><h1>Error</h1><p>Login failed. Please try again.</p></body></html>');
+  }
+});
+
+// OAuth: Register handler
+app.post('/oauth/register', async (req, res) => {
+  try {
+    const { name, email, password, company, redirect_uri, state } = req.body;
+
+    if (!email || !password || password.length < 6) {
+      return res.send('<html><body><h1>Error</h1><p>Email required and password must be at least 6 characters. <a href="javascript:history.back()">Go back</a></p></body></html>');
+    }
+
+    // Check if user exists
+    const existing = await pool.query('SELECT id FROM users WHERE email = $1', [email.toLowerCase()]);
+    if (existing.rows.length > 0) {
+      return res.send('<html><body><h1>Error</h1><p>Email already registered. <a href="javascript:history.back()">Go back to login</a></p></body></html>');
+    }
+
+    // Create user
+    const userResult = await pool.query(
+      'INSERT INTO users (email, password_hash, name, company) VALUES ($1, $2, $3, $4) RETURNING id',
+      [email.toLowerCase(), hashPassword(password), name, company]
+    );
+
+    const userId = userResult.rows[0].id;
+
+    // Generate tokens
+    const code = generateToken();
+    const accessToken = generateToken();
+    const refreshToken = generateToken();
+
+    // Save token
+    await pool.query(
+      'INSERT INTO oauth_tokens (user_id, access_token, refresh_token, code, expires_at) VALUES ($1, $2, $3, $4, NOW() + INTERVAL \'30 days\')',
+      [userId, accessToken, refreshToken, code]
+    );
+
+    // Redirect back to ChatGPT with code
+    const redirectUrl = `${redirect_uri}?code=${code}${state ? '&state=' + state : ''}`;
+    res.redirect(redirectUrl);
+  } catch (error) {
+    console.error('OAuth register error:', error);
+    res.status(500).send('<html><body><h1>Error</h1><p>Registration failed. Please try again.</p></body></html>');
+  }
+});
+
+// OAuth: Token exchange endpoint
+app.post('/oauth/token', async (req, res) => {
+  try {
+    const { code, grant_type, refresh_token } = req.body;
+
+    let tokenResult;
+
+    if (grant_type === 'authorization_code' && code) {
+      tokenResult = await pool.query('SELECT * FROM oauth_tokens WHERE code = $1', [code]);
+    } else if (grant_type === 'refresh_token' && refresh_token) {
+      tokenResult = await pool.query('SELECT * FROM oauth_tokens WHERE refresh_token = $1', [refresh_token]);
+    } else {
+      return res.status(400).json({ error: 'invalid_grant' });
+    }
+
+    if (tokenResult.rows.length === 0) {
+      return res.status(400).json({ error: 'invalid_grant', error_description: 'Code or token not found' });
+    }
+
+    const token = tokenResult.rows[0];
+
+    // Clear the code after use (one-time use)
+    if (code) {
+      await pool.query('UPDATE oauth_tokens SET code = NULL WHERE id = $1', [token.id]);
+    }
+
+    res.json({
+      access_token: token.access_token,
+      token_type: 'Bearer',
+      expires_in: 2592000, // 30 days
+      refresh_token: token.refresh_token
+    });
+  } catch (error) {
+    console.error('OAuth token error:', error);
+    res.status(500).json({ error: 'server_error' });
+  }
+});
+
+// Middleware: Extract user from Bearer token
+const authenticateToken = async (req, res, next) => {
+  const authHeader = req.headers.authorization;
+
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    req.user = null;
+    return next();
+  }
+
+  const token = authHeader.substring(7);
+
+  try {
+    const result = await pool.query(
+      `SELECT u.* FROM users u
+       JOIN oauth_tokens t ON u.id = t.user_id
+       WHERE t.access_token = $1 AND t.expires_at > NOW()`,
+      [token]
+    );
+
+    if (result.rows.length > 0) {
+      req.user = result.rows[0];
+    } else {
+      req.user = null;
+    }
+  } catch (error) {
+    console.error('Auth error:', error);
+    req.user = null;
+  }
+
+  next();
+};
+
+// Apply auth middleware to all routes
+app.use(authenticateToken);
+
+// ============================================
+// END OAUTH
+// ============================================
 
 // Helper to transform DB row to API response
 const transformGuest = (row) => ({
@@ -2516,6 +2845,9 @@ const transformEvent = (row) => ({
   updatedAt: row.updated_at,
 });
 
+// Alias for GPT endpoints
+const mapEventRow = transformEvent;
+
 // ============================================
 // OPENAPI SPEC ENDPOINT (for GPT integration)
 // ============================================
@@ -2557,28 +2889,27 @@ app.get('/api/v1/dashboard', async (_req, res) => {
     const eventsResult = await pool.query(`
       SELECT
         COUNT(*) as total,
-        COUNT(*) FILTER (WHERE event_date >= CURRENT_DATE) as upcoming,
-        COUNT(*) FILTER (WHERE event_date >= date_trunc('month', CURRENT_DATE) AND event_date < date_trunc('month', CURRENT_DATE) + INTERVAL '1 month') as this_month
+        COUNT(*) FILTER (WHERE date >= CURRENT_DATE) as upcoming,
+        COUNT(*) FILTER (WHERE date >= date_trunc('month', CURRENT_DATE) AND date < date_trunc('month', CURRENT_DATE) + INTERVAL '1 month') as this_month
       FROM events
     `);
 
     const eventsList = await pool.query(`
-      SELECT id, name, event_date, status, venue_name, venue_city
+      SELECT id, title as name, date, status, venue
       FROM events
-      WHERE event_date >= CURRENT_DATE - INTERVAL '30 days'
-      ORDER BY event_date ASC
+      ORDER BY date ASC
       LIMIT 10
     `);
 
-    // Get guests summary
+    // Get guests summary - guests table uses 'category' column (pending, A, B, C)
     let guestsSummary = { total: 0, pending: 0, approved: 0, checkedIn: 0 };
     const guestsTableCheck = await pool.query(`SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'guests')`);
     if (guestsTableCheck.rows[0].exists) {
       const guestsResult = await pool.query(`
         SELECT
           COUNT(*) as total,
-          COUNT(*) FILTER (WHERE status = 'pending') as pending,
-          COUNT(*) FILTER (WHERE status = 'approved') as approved,
+          COUNT(*) FILTER (WHERE category = 'pending') as pending,
+          COUNT(*) FILTER (WHERE category IN ('A', 'B', 'C')) as approved,
           COUNT(*) FILTER (WHERE checked_in_at IS NOT NULL) as checked_in
         FROM guests
       `);
@@ -2638,10 +2969,9 @@ app.get('/api/v1/dashboard', async (_req, res) => {
         list: eventsList.rows.map(e => ({
           id: e.id,
           name: e.name,
-          eventDate: e.event_date,
+          eventDate: e.date,
           status: e.status,
-          venue: e.venue_name,
-          city: e.venue_city
+          venue: e.venue
         }))
       },
       guests: {
@@ -2798,19 +3128,18 @@ app.get('/api/v1/events/:id/full', async (req, res) => {
 app.post('/api/v1/gpt/events', async (req, res) => {
   try {
     const { action, eventId, data, filters } = req.body;
+    const userId = req.user?.id;
 
     switch (action) {
       case 'list': {
         const { status, limit = 50 } = filters || {};
-        let query = 'SELECT * FROM events';
-        const conditions = [];
-        const values = [];
+        let query = 'SELECT * FROM events WHERE (user_id = $1 OR user_id IS NULL)';
+        const values = [userId];
         if (status) {
-          conditions.push(`status = $${values.length + 1}`);
+          query += ` AND status = $${values.length + 1}`;
           values.push(status);
         }
-        if (conditions.length > 0) query += ' WHERE ' + conditions.join(' AND ');
-        query += ' ORDER BY event_date DESC LIMIT $' + (values.length + 1);
+        query += ' ORDER BY date DESC LIMIT $' + (values.length + 1);
         values.push(limit);
         const result = await pool.query(query, values);
         return res.json({ success: true, events: result.rows.map(mapEventRow), total: result.rows.length });
@@ -2818,7 +3147,7 @@ app.post('/api/v1/gpt/events', async (req, res) => {
 
       case 'get': {
         if (!eventId) return res.status(400).json({ error: 'eventId required' });
-        const result = await pool.query('SELECT * FROM events WHERE id = $1', [eventId]);
+        const result = await pool.query('SELECT * FROM events WHERE id = $1 AND (user_id = $2 OR user_id IS NULL)', [eventId, userId]);
         if (result.rows.length === 0) return res.status(404).json({ error: 'Event not found' });
         return res.json({ success: true, event: mapEventRow(result.rows[0]) });
       }
@@ -2826,14 +3155,14 @@ app.post('/api/v1/gpt/events', async (req, res) => {
       case 'getFull': {
         if (!eventId) return res.status(400).json({ error: 'eventId required' });
         // Reuse the full event logic
-        const eventResult = await pool.query('SELECT * FROM events WHERE id = $1', [eventId]);
+        const eventResult = await pool.query('SELECT * FROM events WHERE id = $1 AND (user_id = $2 OR user_id IS NULL)', [eventId, userId]);
         if (eventResult.rows.length === 0) return res.status(404).json({ error: 'Event not found' });
         const event = mapEventRow(eventResult.rows[0]);
 
         let guests = { total: 0, list: [] };
         const guestsCheck = await pool.query(`SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'guests')`);
         if (guestsCheck.rows[0].exists) {
-          const guestsResult = await pool.query('SELECT * FROM guests WHERE event_id = $1', [eventId]);
+          const guestsResult = await pool.query('SELECT * FROM guests WHERE (user_id = $1 OR user_id IS NULL)', [userId]);
           guests = { total: guestsResult.rows.length, list: guestsResult.rows };
         }
 
@@ -2861,20 +3190,32 @@ app.post('/api/v1/gpt/events', async (req, res) => {
       case 'create': {
         const { name, eventDate, eventType, venueName, venueCity, expectedAttendance, dressCode, theme, notes } = data || {};
         if (!name || !eventDate) return res.status(400).json({ error: 'name and eventDate required' });
+        // Use actual database column names: title, date, venue, category
+        const venue = venueName ? (venueCity ? `${venueName}, ${venueCity}` : venueName) : venueCity || null;
+        // Map eventType to valid category (only 'corporate' and 'nightlife' allowed)
+        const validCategories = ['corporate', 'nightlife'];
+        const category = validCategories.includes(eventType) ? eventType : 'nightlife';
+        // Generate next ID
+        const maxIdResult = await pool.query('SELECT COALESCE(MAX(CAST(id AS INTEGER)), 0) + 1 as next_id FROM events');
+        const nextId = maxIdResult.rows[0].next_id;
         const result = await pool.query(`
-          INSERT INTO events (name, event_date, event_type, venue_name, venue_city, expected_attendance, dress_code, theme, notes, status)
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'planning') RETURNING *
-        `, [name, eventDate, eventType || 'party', venueName, venueCity, expectedAttendance || 0, dressCode, theme, notes]);
+          INSERT INTO events (id, title, date, category, venue, status, user_id)
+          VALUES ($1, $2, $3, $4, $5, 'planning', $6) RETURNING *
+        `, [nextId.toString(), name, eventDate, category, venue, userId]);
         return res.json({ success: true, event: mapEventRow(result.rows[0]), message: 'Event created' });
       }
 
       case 'update': {
         if (!eventId) return res.status(400).json({ error: 'eventId required' });
+        // Verify ownership
+        const check = await pool.query('SELECT id FROM events WHERE id = $1 AND (user_id = $2 OR user_id IS NULL)', [eventId, userId]);
+        if (check.rows.length === 0) return res.status(404).json({ error: 'Event not found' });
         const fields = [];
         const values = [];
         let idx = 1;
-        const allowedFields = ['name', 'event_date', 'event_type', 'venue_name', 'venue_city', 'expected_attendance', 'dress_code', 'theme', 'notes', 'status'];
-        const fieldMap = { eventDate: 'event_date', eventType: 'event_type', venueName: 'venue_name', venueCity: 'venue_city', expectedAttendance: 'expected_attendance', dressCode: 'dress_code' };
+        // Map API field names to actual database columns (title, date, venue, category, status)
+        const allowedFields = ['title', 'date', 'category', 'venue', 'status'];
+        const fieldMap = { name: 'title', eventDate: 'date', eventType: 'category', venueName: 'venue', venueCity: 'venue' };
 
         for (const [key, value] of Object.entries(data || {})) {
           const dbField = fieldMap[key] || key;
@@ -2885,12 +3226,15 @@ app.post('/api/v1/gpt/events', async (req, res) => {
         }
         if (fields.length === 0) return res.status(400).json({ error: 'No valid fields to update' });
         values.push(eventId);
-        await pool.query(`UPDATE events SET ${fields.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = $${idx}`, values);
+        await pool.query(`UPDATE events SET ${fields.join(', ')} WHERE id = $${idx}`, values);
         return res.json({ success: true, message: 'Event updated' });
       }
 
       case 'delete': {
         if (!eventId) return res.status(400).json({ error: 'eventId required' });
+        // Verify ownership before delete
+        const check = await pool.query('SELECT id FROM events WHERE id = $1 AND (user_id = $2 OR user_id IS NULL)', [eventId, userId]);
+        if (check.rows.length === 0) return res.status(404).json({ error: 'Event not found' });
         await pool.query('DELETE FROM events WHERE id = $1', [eventId]);
         return res.json({ success: true, message: 'Event deleted' });
       }
@@ -2929,12 +3273,13 @@ app.post('/api/v1/gpt/events', async (req, res) => {
 app.post('/api/v1/gpt/guests', async (req, res) => {
   try {
     const { action, guestId, eventId, data, filters } = req.body;
+    const userId = req.user?.id;
 
     switch (action) {
       case 'list': {
         const { category, search, limit = 100 } = filters || {};
-        let query = 'SELECT * FROM guests WHERE 1=1';
-        const values = [];
+        let query = 'SELECT * FROM guests WHERE (user_id = $1 OR user_id IS NULL)';
+        const values = [userId];
         if (eventId) { query += ` AND event_id = $${values.length + 1}`; values.push(eventId); }
         if (category) { query += ` AND status = $${values.length + 1}`; values.push(category); }
         if (search) { query += ` AND (name ILIKE $${values.length + 1} OR email ILIKE $${values.length + 1})`; values.push(`%${search}%`); }
@@ -2946,7 +3291,7 @@ app.post('/api/v1/gpt/guests', async (req, res) => {
 
       case 'get': {
         if (!guestId) return res.status(400).json({ error: 'guestId required' });
-        const result = await pool.query('SELECT * FROM guests WHERE id = $1', [guestId]);
+        const result = await pool.query('SELECT * FROM guests WHERE id = $1 AND (user_id = $2 OR user_id IS NULL)', [guestId, userId]);
         if (result.rows.length === 0) return res.status(404).json({ error: 'Guest not found' });
         return res.json({ success: true, guest: result.rows[0] });
       }
@@ -2955,14 +3300,17 @@ app.post('/api/v1/gpt/guests', async (req, res) => {
         const { name, email, phone, instagram, partySize, category, notes } = data || {};
         if (!name || !email) return res.status(400).json({ error: 'name and email required' });
         const result = await pool.query(`
-          INSERT INTO guests (name, email, phone, instagram, party_size, event_id, status, notes)
+          INSERT INTO guests (name, email, phone, instagram, party_size, category, notes, user_id)
           VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *
-        `, [name, email, phone, instagram, partySize || 1, eventId, category || 'pending', notes]);
+        `, [name, email, phone, instagram, partySize || 1, category || 'pending', notes, userId]);
         return res.json({ success: true, guest: result.rows[0], message: 'Guest added' });
       }
 
       case 'update': {
         if (!guestId) return res.status(400).json({ error: 'guestId required' });
+        // Verify ownership
+        const check = await pool.query('SELECT id FROM guests WHERE id = $1 AND (user_id = $2 OR user_id IS NULL)', [guestId, userId]);
+        if (check.rows.length === 0) return res.status(404).json({ error: 'Guest not found' });
         const fields = [];
         const values = [];
         let idx = 1;
@@ -2983,24 +3331,33 @@ app.post('/api/v1/gpt/guests', async (req, res) => {
 
       case 'delete': {
         if (!guestId) return res.status(400).json({ error: 'guestId required' });
+        // Verify ownership
+        const check = await pool.query('SELECT id FROM guests WHERE id = $1 AND (user_id = $2 OR user_id IS NULL)', [guestId, userId]);
+        if (check.rows.length === 0) return res.status(404).json({ error: 'Guest not found' });
         await pool.query('DELETE FROM guests WHERE id = $1', [guestId]);
         return res.json({ success: true, message: 'Guest removed' });
       }
 
       case 'approve': {
         if (!guestId) return res.status(400).json({ error: 'guestId required' });
+        const check = await pool.query('SELECT id FROM guests WHERE id = $1 AND (user_id = $2 OR user_id IS NULL)', [guestId, userId]);
+        if (check.rows.length === 0) return res.status(404).json({ error: 'Guest not found' });
         await pool.query('UPDATE guests SET status = $1 WHERE id = $2', ['approved', guestId]);
         return res.json({ success: true, message: 'Guest approved' });
       }
 
       case 'reject': {
         if (!guestId) return res.status(400).json({ error: 'guestId required' });
+        const check = await pool.query('SELECT id FROM guests WHERE id = $1 AND (user_id = $2 OR user_id IS NULL)', [guestId, userId]);
+        if (check.rows.length === 0) return res.status(404).json({ error: 'Guest not found' });
         await pool.query('UPDATE guests SET status = $1 WHERE id = $2', ['rejected', guestId]);
         return res.json({ success: true, message: 'Guest rejected' });
       }
 
       case 'checkIn': {
         if (!guestId) return res.status(400).json({ error: 'guestId required' });
+        const check = await pool.query('SELECT id FROM guests WHERE id = $1 AND (user_id = $2 OR user_id IS NULL)', [guestId, userId]);
+        if (check.rows.length === 0) return res.status(404).json({ error: 'Guest not found' });
         await pool.query('UPDATE guests SET checked_in_at = CURRENT_TIMESTAMP WHERE id = $1', [guestId]);
         return res.json({ success: true, message: 'Guest checked in' });
       }
@@ -3011,8 +3368,8 @@ app.post('/api/v1/gpt/guests', async (req, res) => {
             COUNT(*) FILTER (WHERE status = 'pending') as pending,
             COUNT(*) FILTER (WHERE status = 'approved') as approved,
             COUNT(*) FILTER (WHERE checked_in_at IS NOT NULL) as checked_in
-          FROM guests ${eventId ? 'WHERE event_id = $1' : ''}
-        `, eventId ? [eventId] : []);
+          FROM guests WHERE (user_id = $1 OR user_id IS NULL)
+        `, [userId]);
         return res.json({ success: true, stats: result.rows[0] });
       }
 
@@ -3243,6 +3600,7 @@ app.post('/api/v1/gpt/staff', async (req, res) => {
 app.post('/api/v1/gpt/vendors', async (req, res) => {
   try {
     const { action, vendorId, data, filters } = req.body;
+    const userId = req.user?.id;
 
     const tableCheck = await pool.query(`SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'vendors')`);
     if (!tableCheck.rows[0].exists) {
@@ -3252,8 +3610,8 @@ app.post('/api/v1/gpt/vendors', async (req, res) => {
     switch (action) {
       case 'list': {
         const { category, isPreferred } = filters || {};
-        let query = 'SELECT * FROM vendors WHERE 1=1';
-        const values = [];
+        let query = 'SELECT * FROM vendors WHERE (user_id = $1 OR user_id IS NULL)';
+        const values = [userId];
         if (category) { query += ` AND category = $${values.length + 1}`; values.push(category); }
         if (isPreferred !== undefined) { query += ` AND is_preferred = $${values.length + 1}`; values.push(isPreferred); }
         query += ' ORDER BY name';
@@ -3263,7 +3621,7 @@ app.post('/api/v1/gpt/vendors', async (req, res) => {
 
       case 'get': {
         if (!vendorId) return res.status(400).json({ error: 'vendorId required' });
-        const result = await pool.query('SELECT * FROM vendors WHERE id = $1', [vendorId]);
+        const result = await pool.query('SELECT * FROM vendors WHERE id = $1 AND (user_id = $2 OR user_id IS NULL)', [vendorId, userId]);
         if (result.rows.length === 0) return res.status(404).json({ error: 'Vendor not found' });
         return res.json({ success: true, vendor: result.rows[0] });
       }
@@ -3272,14 +3630,17 @@ app.post('/api/v1/gpt/vendors', async (req, res) => {
         const { name, category, contactName, email, phone, website, city, notes, isPreferred } = data || {};
         if (!name) return res.status(400).json({ error: 'name required' });
         const result = await pool.query(`
-          INSERT INTO vendors (name, category, contact_name, email, phone, website, city, notes, is_preferred)
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *
-        `, [name, category, contactName, email, phone, website, city, notes, isPreferred || false]);
+          INSERT INTO vendors (name, category, contact_name, email, phone, website, city, notes, is_preferred, user_id)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *
+        `, [name, category, contactName, email, phone, website, city, notes, isPreferred || false, userId]);
         return res.json({ success: true, vendor: result.rows[0], message: 'Vendor added' });
       }
 
       case 'update': {
         if (!vendorId) return res.status(400).json({ error: 'vendorId required' });
+        // Verify ownership
+        const check = await pool.query('SELECT id FROM vendors WHERE id = $1 AND (user_id = $2 OR user_id IS NULL)', [vendorId, userId]);
+        if (check.rows.length === 0) return res.status(404).json({ error: 'Vendor not found' });
         const fields = [];
         const values = [];
         let idx = 1;
@@ -3299,6 +3660,9 @@ app.post('/api/v1/gpt/vendors', async (req, res) => {
 
       case 'delete': {
         if (!vendorId) return res.status(400).json({ error: 'vendorId required' });
+        // Verify ownership
+        const check = await pool.query('SELECT id FROM vendors WHERE id = $1 AND (user_id = $2 OR user_id IS NULL)', [vendorId, userId]);
+        if (check.rows.length === 0) return res.status(404).json({ error: 'Vendor not found' });
         await pool.query('DELETE FROM vendors WHERE id = $1', [vendorId]);
         return res.json({ success: true, message: 'Vendor deleted' });
       }
@@ -3492,6 +3856,7 @@ app.post('/api/v1/gpt/tickets', async (req, res) => {
 app.post('/api/v1/gpt/sponsors', async (req, res) => {
   try {
     const { action, sponsorId, data, filters } = req.body;
+    const userId = req.user?.id;
 
     const tableCheck = await pool.query(`SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'sponsors')`);
     if (!tableCheck.rows[0].exists) {
@@ -3500,13 +3865,13 @@ app.post('/api/v1/gpt/sponsors', async (req, res) => {
 
     switch (action) {
       case 'list': {
-        const result = await pool.query('SELECT * FROM sponsors ORDER BY created_at DESC');
+        const result = await pool.query('SELECT * FROM sponsors WHERE (user_id = $1 OR user_id IS NULL) ORDER BY created_at DESC', [userId]);
         return res.json({ success: true, sponsors: result.rows });
       }
 
       case 'get': {
         if (!sponsorId) return res.status(400).json({ error: 'sponsorId required' });
-        const result = await pool.query('SELECT * FROM sponsors WHERE id = $1', [sponsorId]);
+        const result = await pool.query('SELECT * FROM sponsors WHERE id = $1 AND (user_id = $2 OR user_id IS NULL)', [sponsorId, userId]);
         if (result.rows.length === 0) return res.status(404).json({ error: 'Sponsor not found' });
         return res.json({ success: true, sponsor: result.rows[0] });
       }
@@ -3515,14 +3880,17 @@ app.post('/api/v1/gpt/sponsors', async (req, res) => {
         const { companyName, contactName, email, phone, tier, amount, benefits } = data || {};
         if (!companyName) return res.status(400).json({ error: 'companyName required' });
         const result = await pool.query(`
-          INSERT INTO sponsors (company_name, contact_name, email, phone, tier, amount, benefits, status)
-          VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending') RETURNING *
-        `, [companyName, contactName, email, phone, tier || 'silver', amount || 0, benefits]);
+          INSERT INTO sponsors (company_name, contact_name, email, phone, tier, amount, benefits, status, user_id)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', $8) RETURNING *
+        `, [companyName, contactName, email, phone, tier || 'silver', amount || 0, benefits, userId]);
         return res.json({ success: true, sponsor: result.rows[0], message: 'Sponsor added' });
       }
 
       case 'updateStatus': {
         if (!sponsorId) return res.status(400).json({ error: 'sponsorId required' });
+        // Verify ownership
+        const check = await pool.query('SELECT id FROM sponsors WHERE id = $1 AND (user_id = $2 OR user_id IS NULL)', [sponsorId, userId]);
+        if (check.rows.length === 0) return res.status(404).json({ error: 'Sponsor not found' });
         const { status } = data || {};
         await pool.query('UPDATE sponsors SET status = $1 WHERE id = $2', [status, sponsorId]);
         return res.json({ success: true, message: 'Sponsor status updated' });
@@ -3534,8 +3902,8 @@ app.post('/api/v1/gpt/sponsors', async (req, res) => {
             COUNT(*) FILTER (WHERE status = 'pending') as pending,
             COUNT(*) FILTER (WHERE status = 'active') as active,
             COALESCE(SUM(amount) FILTER (WHERE status = 'active'), 0) as revenue
-          FROM sponsors
-        `);
+          FROM sponsors WHERE (user_id = $1 OR user_id IS NULL)
+        `, [userId]);
         return res.json({ success: true, stats: result.rows[0] });
       }
 
@@ -3554,6 +3922,14 @@ app.post('/api/v1/gpt/sponsors', async (req, res) => {
 // Accepts flat structure: { endpoint, action, name, eventDate, ... }
 // ============================================
 app.post('/api/v1/gpt/session', async (req, res) => {
+  // Require authentication for GPT session
+  if (!req.user) {
+    return res.status(401).json({
+      error: 'Authentication required',
+      message: 'Please authenticate via OAuth to use this API'
+    });
+  }
+
   const {
     endpoint,
     action,
@@ -3676,23 +4052,21 @@ app.get('/api/v1/events/calendar', async (req, res) => {
     const currentMonth = month || new Date().getMonth() + 1;
 
     const result = await pool.query(
-      `SELECT id, name, event_date, status, event_type, venue_name, is_featured
+      `SELECT id, title, date, status, venue
        FROM events
-       WHERE EXTRACT(YEAR FROM event_date) = $1
-       AND EXTRACT(MONTH FROM event_date) = $2
-       ORDER BY event_date`,
+       WHERE EXTRACT(YEAR FROM date) = $1
+       AND EXTRACT(MONTH FROM date) = $2
+       ORDER BY date`,
       [currentYear, currentMonth]
     );
 
     res.json({
       events: result.rows.map(row => ({
         id: row.id,
-        name: row.name,
-        eventDate: row.event_date,
+        name: row.title,
+        eventDate: row.date,
         status: row.status,
-        eventType: row.event_type,
-        venueName: row.venue_name,
-        isFeatured: row.is_featured,
+        venue: row.venue,
       })),
       month: currentMonth,
       year: currentYear,
@@ -3827,21 +4201,23 @@ app.post('/api/v1/events', async (req, res) => {
       return res.status(400).json({ error: 'Name and event date are required' });
     }
 
-    // Generate slug from name
-    const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') + '-' + Date.now().toString(36);
+    // Combine venue info
+    const venue = venueName ? (venueCity ? `${venueName}, ${venueCity}` : venueName) : venueCity || null;
 
+    // Map eventType to valid category (only 'corporate' and 'nightlife' allowed)
+    const validCategories = ['corporate', 'nightlife'];
+    const category = validCategories.includes(eventType) ? eventType : 'nightlife';
+
+    // Generate next ID
+    const maxIdResult = await pool.query('SELECT COALESCE(MAX(CAST(id AS INTEGER)), 0) + 1 as next_id FROM events');
+    const nextId = maxIdResult.rows[0].next_id;
+
+    // Use actual database columns: title, date, venue, category, status
     const result = await pool.query(
-      `INSERT INTO events (
-        name, slug, description, event_type, venue_name, venue_address, venue_city, venue_capacity,
-        event_date, start_time, end_time, doors_open, status, cover_image, theme, dress_code,
-        age_restriction, ticket_link, is_public, is_featured, expected_attendance, notes
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
-      RETURNING *`,
-      [
-        name, slug, description, eventType || 'party', venueName, venueAddress, venueCity, venueCapacity,
-        eventDate, startTime, endTime, doorsOpen, status || 'planning', coverImage, theme, dressCode,
-        ageRestriction, ticketLink, isPublic || false, isFeatured || false, expectedAttendance, notes
-      ]
+      `INSERT INTO events (id, title, date, venue, category, status)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING *`,
+      [nextId.toString(), name, eventDate, venue, category, status || 'planning']
     );
 
     console.log(`✅ New event created: ${name} on ${eventDate}`);
@@ -3975,20 +4351,18 @@ app.post('/api/v1/events/:id/duplicate', async (req, res) => {
     }
 
     const event = original.rows[0];
-    const name = newName || `${event.name} (Copy)`;
-    const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-') + '-' + Date.now().toString(36);
+    const name = newName || `${event.title} (Copy)`;
 
+    // Generate next ID
+    const maxIdResult = await pool.query('SELECT COALESCE(MAX(CAST(id AS INTEGER)), 0) + 1 as next_id FROM events');
+    const nextId = maxIdResult.rows[0].next_id;
+
+    // Use actual database columns: title, date, venue, category, status
     const result = await pool.query(
-      `INSERT INTO events (
-        name, slug, description, event_type, venue_name, venue_address, venue_city, venue_capacity,
-        start_time, end_time, doors_open, status, cover_image, theme, dress_code,
-        age_restriction, ticket_link, is_public, expected_attendance, notes, event_date
-      ) SELECT $1, $2, description, event_type, venue_name, venue_address, venue_city, venue_capacity,
-        start_time, end_time, doors_open, 'planning', cover_image, theme, dress_code,
-        age_restriction, ticket_link, false, expected_attendance, notes, $3
-      FROM events WHERE id = $4
-      RETURNING *`,
-      [name, slug, newDate || event.event_date, id]
+      `INSERT INTO events (id, title, date, venue, category, status)
+       VALUES ($1, $2, $3, $4, $5, 'planning')
+       RETURNING *`,
+      [nextId.toString(), name, newDate || event.date, event.venue, event.category]
     );
 
     console.log(`✅ Event duplicated: ${name}`);
@@ -4705,7 +5079,7 @@ app.get('/api/v1/staff', async (_req, res) => {
           (SELECT COUNT(*) FROM staff_assignments sa WHERE sa.staff_id = s.id) as assignments_count,
           (SELECT COUNT(*) FROM staff_assignments sa
            JOIN events e ON sa.event_id = e.id
-           WHERE sa.staff_id = s.id AND e.event_date >= CURRENT_DATE) as upcoming_events
+           WHERE sa.staff_id = s.id AND e.date >= CURRENT_DATE) as upcoming_events
         FROM staff s
         ORDER BY s.created_at DESC
       `);
@@ -4743,7 +5117,7 @@ app.get('/api/v1/staff/available', async (req, res) => {
       AND s.id NOT IN (
         SELECT DISTINCT sa.staff_id FROM staff_assignments sa
         JOIN events e ON sa.event_id = e.id
-        WHERE e.event_date = $1 AND sa.status != 'cancelled'
+        WHERE e.date = $1 AND sa.status != 'cancelled'
       )
     `;
     const params = [date || new Date().toISOString().split('T')[0]];
@@ -4775,11 +5149,11 @@ app.get('/api/v1/staff/:id', async (req, res) => {
 
     // Get recent assignments
     const assignments = await pool.query(`
-      SELECT sa.*, e.name as event_name, e.event_date
+      SELECT sa.*, e.name as event_name, e.date as event_date
       FROM staff_assignments sa
       JOIN events e ON sa.event_id = e.id
       WHERE sa.staff_id = $1
-      ORDER BY e.event_date DESC
+      ORDER BY e.date DESC
       LIMIT 10
     `, [id]);
 
@@ -5251,8 +5625,8 @@ app.get('/api/v1/client-portal/:token', async (req, res) => {
 
     // Validate token
     const accessResult = await pool.query(`
-      SELECT ca.*, e.name as event_name, e.event_date, e.venue_name, e.venue_city,
-             e.status as event_status, e.expected_attendance, e.theme, e.dress_code
+      SELECT ca.*, e.name as event_name, e.date as event_date, e.venue,
+             e.status as event_status
       FROM client_access ca
       JOIN events e ON ca.event_id = e.id
       WHERE ca.access_token = $1
