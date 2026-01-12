@@ -4,6 +4,13 @@ import cors from 'cors';
 import crypto from 'crypto';
 import { Resend } from 'resend';
 import pg from 'pg';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import yaml from 'js-yaml';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const { Pool } = pg;
 
@@ -2501,6 +2508,282 @@ const transformEvent = (row) => ({
   updatedAt: row.updated_at,
 });
 
+// ============================================
+// OPENAPI SPEC ENDPOINT (for GPT integration)
+// ============================================
+
+// GET /openapi.yaml - Serve OpenAPI specification for GPT
+app.get('/openapi.yaml', (_req, res) => {
+  const openApiPath = path.join(__dirname, 'openapi-gpt.yaml');
+  if (fs.existsSync(openApiPath)) {
+    res.type('text/yaml').sendFile(openApiPath);
+  } else {
+    res.status(404).json({ error: 'OpenAPI spec not found' });
+  }
+});
+
+// GET /openapi.json - Serve OpenAPI specification as JSON
+app.get('/openapi.json', (_req, res) => {
+  const openApiPath = path.join(__dirname, 'openapi-gpt.yaml');
+  if (fs.existsSync(openApiPath)) {
+    const content = fs.readFileSync(openApiPath, 'utf8');
+    try {
+      const jsonSpec = yaml.load(content);
+      res.json(jsonSpec);
+    } catch (e) {
+      res.type('text/yaml').sendFile(openApiPath);
+    }
+  } else {
+    res.status(404).json({ error: 'OpenAPI spec not found' });
+  }
+});
+
+// ============================================
+// UNIFIED DASHBOARD ENDPOINTS (for GPT integration)
+// ============================================
+
+// GET /api/v1/dashboard - Complete dashboard overview
+app.get('/api/v1/dashboard', async (_req, res) => {
+  try {
+    // Get events summary
+    const eventsResult = await pool.query(`
+      SELECT
+        COUNT(*) as total,
+        COUNT(*) FILTER (WHERE event_date >= CURRENT_DATE) as upcoming,
+        COUNT(*) FILTER (WHERE event_date >= date_trunc('month', CURRENT_DATE) AND event_date < date_trunc('month', CURRENT_DATE) + INTERVAL '1 month') as this_month
+      FROM events
+    `);
+
+    const eventsList = await pool.query(`
+      SELECT id, name, event_date, status, venue_name, venue_city
+      FROM events
+      WHERE event_date >= CURRENT_DATE - INTERVAL '30 days'
+      ORDER BY event_date ASC
+      LIMIT 10
+    `);
+
+    // Get guests summary
+    let guestsSummary = { total: 0, pending: 0, approved: 0, checkedIn: 0 };
+    const guestsTableCheck = await pool.query(`SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'guests')`);
+    if (guestsTableCheck.rows[0].exists) {
+      const guestsResult = await pool.query(`
+        SELECT
+          COUNT(*) as total,
+          COUNT(*) FILTER (WHERE status = 'pending') as pending,
+          COUNT(*) FILTER (WHERE status = 'approved') as approved,
+          COUNT(*) FILTER (WHERE checked_in_at IS NOT NULL) as checked_in
+        FROM guests
+      `);
+      guestsSummary = guestsResult.rows[0];
+    }
+
+    // Get budget summary
+    let budgetSummary = { totalIncome: 0, totalExpenses: 0, profit: 0 };
+    const budgetTableCheck = await pool.query(`SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'budget_items')`);
+    if (budgetTableCheck.rows[0].exists) {
+      const budgetResult = await pool.query(`
+        SELECT
+          COALESCE(SUM(actual_amount) FILTER (WHERE bc.is_income = true), 0) as total_income,
+          COALESCE(SUM(actual_amount) FILTER (WHERE bc.is_income = false OR bc.is_income IS NULL), 0) as total_expenses
+        FROM budget_items bi
+        LEFT JOIN budget_categories bc ON bi.category_id = bc.id
+      `);
+      const row = budgetResult.rows[0];
+      budgetSummary = {
+        totalIncome: parseFloat(row.total_income) || 0,
+        totalExpenses: parseFloat(row.total_expenses) || 0,
+        profit: (parseFloat(row.total_income) || 0) - (parseFloat(row.total_expenses) || 0)
+      };
+    }
+
+    // Get staff summary
+    let staffSummary = { total: 0, active: 0 };
+    const staffTableCheck = await pool.query(`SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'staff')`);
+    if (staffTableCheck.rows[0].exists) {
+      const staffResult = await pool.query(`
+        SELECT
+          COUNT(*) as total,
+          COUNT(*) FILTER (WHERE status = 'active') as active
+        FROM staff
+      `);
+      staffSummary = staffResult.rows[0];
+    }
+
+    // Get vendors summary
+    let vendorsSummary = { total: 0, preferred: 0 };
+    const vendorsTableCheck = await pool.query(`SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'vendors')`);
+    if (vendorsTableCheck.rows[0].exists) {
+      const vendorsResult = await pool.query(`
+        SELECT
+          COUNT(*) as total,
+          COUNT(*) FILTER (WHERE is_preferred = true) as preferred
+        FROM vendors
+      `);
+      vendorsSummary = vendorsResult.rows[0];
+    }
+
+    res.json({
+      events: {
+        total: parseInt(eventsResult.rows[0].total) || 0,
+        upcoming: parseInt(eventsResult.rows[0].upcoming) || 0,
+        thisMonth: parseInt(eventsResult.rows[0].this_month) || 0,
+        list: eventsList.rows.map(e => ({
+          id: e.id,
+          name: e.name,
+          eventDate: e.event_date,
+          status: e.status,
+          venue: e.venue_name,
+          city: e.venue_city
+        }))
+      },
+      guests: {
+        total: parseInt(guestsSummary.total) || 0,
+        pending: parseInt(guestsSummary.pending) || 0,
+        approved: parseInt(guestsSummary.approved) || 0,
+        checkedIn: parseInt(guestsSummary.checked_in) || 0
+      },
+      budget: budgetSummary,
+      staff: {
+        total: parseInt(staffSummary.total) || 0,
+        active: parseInt(staffSummary.active) || 0
+      },
+      vendors: {
+        total: parseInt(vendorsSummary.total) || 0,
+        preferred: parseInt(vendorsSummary.preferred) || 0
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching dashboard:', error);
+    res.status(500).json({ error: 'Failed to fetch dashboard data' });
+  }
+});
+
+// GET /api/v1/events/:id/full - Get complete event with all related data
+app.get('/api/v1/events/:id/full', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Get event
+    const eventResult = await pool.query('SELECT * FROM events WHERE id = $1', [id]);
+    if (eventResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Event not found' });
+    }
+    const event = mapEventRow(eventResult.rows[0]);
+
+    // Get guests for this event
+    let guests = { total: 0, list: [] };
+    const guestsTableCheck = await pool.query(`SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'guests')`);
+    if (guestsTableCheck.rows[0].exists) {
+      const guestsResult = await pool.query('SELECT * FROM guests WHERE event_id = $1 ORDER BY created_at DESC', [id]);
+      guests = {
+        total: guestsResult.rows.length,
+        list: guestsResult.rows
+      };
+    }
+
+    // Get budget for this event
+    let budget = { summary: {}, items: [] };
+    const budgetTableCheck = await pool.query(`SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'budgets')`);
+    if (budgetTableCheck.rows[0].exists) {
+      const budgetResult = await pool.query(`
+        SELECT bi.*, bc.name as category_name, bc.icon, bc.is_income
+        FROM budget_items bi
+        JOIN budgets b ON bi.budget_id = b.id
+        LEFT JOIN budget_categories bc ON bi.category_id = bc.id
+        WHERE b.event_id = $1
+        ORDER BY bc.sort_order, bi.created_at
+      `, [id]);
+
+      const summary = await pool.query(`
+        SELECT
+          COALESCE(SUM(bi.estimated_amount) FILTER (WHERE bc.is_income = false OR bc.is_income IS NULL), 0) as total_estimated_expenses,
+          COALESCE(SUM(bi.actual_amount) FILTER (WHERE bc.is_income = false OR bc.is_income IS NULL), 0) as total_actual_expenses,
+          COALESCE(SUM(bi.estimated_amount) FILTER (WHERE bc.is_income = true), 0) as total_estimated_income,
+          COALESCE(SUM(bi.actual_amount) FILTER (WHERE bc.is_income = true), 0) as total_actual_income,
+          COUNT(*) FILTER (WHERE bi.is_paid = true) as paid_count,
+          COUNT(*) FILTER (WHERE bi.is_paid = false) as pending_count
+        FROM budget_items bi
+        JOIN budgets b ON bi.budget_id = b.id
+        LEFT JOIN budget_categories bc ON bi.category_id = bc.id
+        WHERE b.event_id = $1
+      `, [id]);
+
+      budget = {
+        summary: summary.rows[0],
+        items: budgetResult.rows.map(item => ({
+          id: item.id,
+          categoryId: item.category_id,
+          categoryName: item.category_name,
+          icon: item.icon,
+          description: item.description,
+          vendorName: item.vendor_name,
+          estimatedAmount: parseFloat(item.estimated_amount) || 0,
+          actualAmount: parseFloat(item.actual_amount) || 0,
+          isPaid: item.is_paid,
+          isIncome: item.is_income,
+          dueDate: item.due_date,
+          notes: item.notes
+        }))
+      };
+    }
+
+    // Get timeline
+    let timeline = [];
+    const timelineTableCheck = await pool.query(`SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'event_timeline')`);
+    if (timelineTableCheck.rows[0].exists) {
+      const timelineResult = await pool.query('SELECT * FROM event_timeline WHERE event_id = $1 ORDER BY sort_order, time', [id]);
+      timeline = timelineResult.rows;
+    }
+
+    // Get checklist
+    let checklist = [];
+    const checklistTableCheck = await pool.query(`SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'event_checklist')`);
+    if (checklistTableCheck.rows[0].exists) {
+      const checklistResult = await pool.query('SELECT * FROM event_checklist WHERE event_id = $1 ORDER BY priority DESC, category', [id]);
+      checklist = checklistResult.rows;
+    }
+
+    // Get staff assignments
+    let staff = [];
+    const assignmentsTableCheck = await pool.query(`SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'staff_assignments')`);
+    if (assignmentsTableCheck.rows[0].exists) {
+      const staffResult = await pool.query(`
+        SELECT sa.*, s.name as staff_name, s.role as staff_role, s.photo_url
+        FROM staff_assignments sa
+        JOIN staff s ON sa.staff_id = s.id
+        WHERE sa.event_id = $1
+        ORDER BY sa.shift_start
+      `, [id]);
+      staff = staffResult.rows.map(s => ({
+        id: s.id,
+        staffId: s.staff_id,
+        staffName: s.staff_name,
+        role: s.role || s.staff_role,
+        photoUrl: s.photo_url,
+        shiftStart: s.shift_start,
+        shiftEnd: s.shift_end,
+        status: s.status
+      }));
+    }
+
+    res.json({
+      event,
+      guests,
+      budget,
+      timeline,
+      checklist,
+      staff
+    });
+  } catch (error) {
+    console.error('Error fetching full event:', error);
+    res.status(500).json({ error: 'Failed to fetch event data' });
+  }
+});
+
+// ============================================
+// EVENTS ENDPOINTS
+// ============================================
+
 // GET /api/v1/events - Get all events with optional filters
 app.get('/api/v1/events', async (req, res) => {
   try {
@@ -4005,7 +4288,7 @@ app.post('/api/v1/events/:eventId/client-access', async (req, res) => {
     `, [eventId, clientName, clientEmail, accessToken, permissions || { viewBudget: true, viewTimeline: true, viewStaff: false, viewVendors: false }, expiresAt]);
 
     // Generate portal URL
-    const portalUrl = `${process.env.FRONTEND_URL || 'https://berry-dashboard.vercel.app'}/client/${accessToken}`;
+    const portalUrl = `${process.env.FRONTEND_URL || 'https://berry-dashboard-production.up.railway.app'}/client/${accessToken}`;
 
     // Send email with portal link
     let emailSent = false;

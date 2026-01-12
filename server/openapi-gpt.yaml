@@ -1,0 +1,1626 @@
+openapi: 3.1.0
+info:
+  title: Berry Bly Productions - Event Management API
+  description: |
+    Complete API for managing luxury events, guest lists, budgets, staff, vendors, and more.
+
+    This API allows a GPT assistant to fully control the Berry Bly Productions event dashboard.
+
+    ## Quick Start
+    1. Use `getDashboardOverview` to get a complete overview of all events and stats
+    2. Use `getEventFull` to get complete details of a specific event
+    3. Use CRUD operations on individual resources as needed
+
+    ## Main Resources
+    - **Events**: Create and manage events with timeline, checklist, and budget
+    - **Guests**: Manage guest lists, send invitations, track check-ins
+    - **Budget**: Track income and expenses per event
+    - **Staff**: Manage staff members and event assignments
+    - **Vendors**: Track vendor relationships
+    - **Models**: Manage talent/model applications
+    - **Sponsors**: Manage event sponsors
+    - **Tables**: VIP table reservations
+    - **Tickets**: Ticket sales and check-ins
+
+  version: 2.0.0
+  contact:
+    name: Berry Bly Productions
+    email: concierge@berrybly.com
+
+servers:
+  - url: https://berry-dashboard-api-production.up.railway.app
+    description: Production Server
+
+tags:
+  - name: Dashboard
+    description: Unified dashboard endpoints for complete overview
+  - name: Events
+    description: Event management (create, update, delete, timeline, checklist)
+  - name: Guests
+    description: Guest list management and invitations
+  - name: Budget
+    description: Budget tracking (income and expenses)
+  - name: Staff
+    description: Staff management and event assignments
+  - name: Vendors
+    description: Vendor/supplier management
+  - name: Models
+    description: Talent/model applications
+  - name: Sponsors
+    description: Event sponsor management
+  - name: Tables
+    description: VIP table reservations
+  - name: Tickets
+    description: Ticket management and check-ins
+  - name: Health
+    description: System health monitoring
+
+paths:
+  # ==========================================
+  # DASHBOARD - Unified Overview Endpoints
+  # ==========================================
+
+  /api/v1/dashboard:
+    get:
+      operationId: getDashboardOverview
+      tags: [Dashboard]
+      summary: Get complete dashboard overview
+      description: |
+        Returns a comprehensive overview of the entire dashboard including:
+        - All events with their stats
+        - Guest list summary
+        - Budget summary
+        - Staff overview
+        - Recent activity
+
+        Use this as the first call to understand the current state of everything.
+      responses:
+        '200':
+          description: Complete dashboard overview
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  events:
+                    type: object
+                    properties:
+                      total: { type: integer }
+                      upcoming: { type: integer }
+                      thisMonth: { type: integer }
+                      list:
+                        type: array
+                        items: { $ref: '#/components/schemas/EventSummary' }
+                  guests:
+                    type: object
+                    properties:
+                      total: { type: integer }
+                      pending: { type: integer }
+                      approved: { type: integer }
+                      checkedIn: { type: integer }
+                  budget:
+                    type: object
+                    properties:
+                      totalIncome: { type: number }
+                      totalExpenses: { type: number }
+                      profit: { type: number }
+                  staff:
+                    type: object
+                    properties:
+                      total: { type: integer }
+                      active: { type: integer }
+                  vendors:
+                    type: object
+                    properties:
+                      total: { type: integer }
+                      preferred: { type: integer }
+
+  # ==========================================
+  # EVENTS
+  # ==========================================
+
+  /api/v1/events:
+    get:
+      operationId: listEvents
+      tags: [Events]
+      summary: List all events
+      description: Get all events with optional filtering by status or date range.
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [upcoming, ongoing, past, planning, confirmed, completed]
+          description: Filter by event status
+        - name: featured
+          in: query
+          schema:
+            type: boolean
+          description: Only show featured events
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+          description: Maximum number of events to return
+      responses:
+        '200':
+          description: List of events
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  events:
+                    type: array
+                    items: { $ref: '#/components/schemas/Event' }
+                  total: { type: integer }
+
+    post:
+      operationId: createEvent
+      tags: [Events]
+      summary: Create a new event
+      description: Create a new event with basic information. Timeline and checklist can be added separately.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EventInput'
+            example:
+              name: "New Year's Eve Gala 2025"
+              eventDate: "2025-12-31"
+              eventType: "gala"
+              venueName: "The Grand Ballroom"
+              venueCity: "Miami"
+              expectedAttendance: 500
+              dressCode: "Black Tie"
+              theme: "Midnight in Paris"
+      responses:
+        '201':
+          description: Event created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Event'
+
+  /api/v1/events/stats:
+    get:
+      operationId: getEventStats
+      tags: [Events]
+      summary: Get event statistics
+      description: Get aggregate statistics for all events.
+      responses:
+        '200':
+          description: Event statistics
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total: { type: integer }
+                  upcoming: { type: integer }
+                  ongoing: { type: integer }
+                  past: { type: integer }
+                  thisMonth: { type: integer }
+                  byCategory: { type: object }
+
+  /api/v1/events/{eventId}:
+    get:
+      operationId: getEvent
+      tags: [Events]
+      summary: Get event details
+      description: Get complete details for a specific event.
+      parameters:
+        - name: eventId
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Event details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Event'
+        '404':
+          description: Event not found
+
+    put:
+      operationId: updateEvent
+      tags: [Events]
+      summary: Update an event
+      description: Update event details. Only provided fields will be updated.
+      parameters:
+        - name: eventId
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EventInput'
+      responses:
+        '200':
+          description: Event updated
+
+    delete:
+      operationId: deleteEvent
+      tags: [Events]
+      summary: Delete an event
+      description: Permanently delete an event and all associated data.
+      parameters:
+        - name: eventId
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Event deleted
+
+  /api/v1/events/{eventId}/full:
+    get:
+      operationId: getEventFull
+      tags: [Events]
+      summary: Get complete event with all related data
+      description: |
+        Returns everything about an event in a single call:
+        - Event details
+        - Guest list
+        - Budget and expenses
+        - Timeline
+        - Checklist
+        - Assigned staff
+        - Vendors
+
+        Use this to get a complete picture of an event's status.
+      parameters:
+        - name: eventId
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Complete event data
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  event: { $ref: '#/components/schemas/Event' }
+                  guests:
+                    type: object
+                    properties:
+                      total: { type: integer }
+                      list: { type: array, items: { $ref: '#/components/schemas/Guest' } }
+                  budget:
+                    type: object
+                    properties:
+                      summary: { type: object }
+                      items: { type: array, items: { $ref: '#/components/schemas/BudgetItem' } }
+                  timeline: { type: array, items: { $ref: '#/components/schemas/TimelineItem' } }
+                  checklist: { type: array, items: { $ref: '#/components/schemas/ChecklistItem' } }
+                  staff: { type: array, items: { $ref: '#/components/schemas/StaffAssignment' } }
+
+  /api/v1/events/{eventId}/duplicate:
+    post:
+      operationId: duplicateEvent
+      tags: [Events]
+      summary: Duplicate an event
+      description: Create a copy of an existing event with a new date.
+      parameters:
+        - name: eventId
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                newDate:
+                  type: string
+                  format: date
+                newName:
+                  type: string
+      responses:
+        '201':
+          description: Event duplicated
+
+  # Event Timeline
+  /api/v1/events/{eventId}/timeline:
+    get:
+      operationId: getEventTimeline
+      tags: [Events]
+      summary: Get event timeline
+      description: Get the schedule/timeline for an event.
+      parameters:
+        - name: eventId
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Timeline items
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/TimelineItem' }
+
+    post:
+      operationId: addTimelineItem
+      tags: [Events]
+      summary: Add timeline item
+      description: Add a new item to the event timeline.
+      parameters:
+        - name: eventId
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TimelineItemInput'
+            example:
+              time: "19:00"
+              title: "Cocktail Hour"
+              description: "Welcome drinks and networking"
+              location: "Main Lobby"
+              isCritical: false
+      responses:
+        '201':
+          description: Timeline item added
+
+  # Event Checklist
+  /api/v1/events/{eventId}/checklist:
+    get:
+      operationId: getEventChecklist
+      tags: [Events]
+      summary: Get event checklist
+      description: Get the planning checklist for an event.
+      parameters:
+        - name: eventId
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Checklist items
+
+    post:
+      operationId: addChecklistItem
+      tags: [Events]
+      summary: Add checklist item
+      description: Add a new item to the event checklist.
+      parameters:
+        - name: eventId
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChecklistItemInput'
+      responses:
+        '201':
+          description: Checklist item added
+
+  /api/v1/events/{eventId}/checklist/{itemId}:
+    put:
+      operationId: updateChecklistItem
+      tags: [Events]
+      summary: Update checklist item
+      description: Update a checklist item (e.g., mark as completed).
+      parameters:
+        - name: eventId
+          in: path
+          required: true
+          schema: { type: integer }
+        - name: itemId
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                isCompleted: { type: boolean }
+                item: { type: string }
+      responses:
+        '200':
+          description: Item updated
+
+  # ==========================================
+  # GUESTS
+  # ==========================================
+
+  /api/v1/guest-lists:
+    get:
+      operationId: listGuests
+      tags: [Guests]
+      summary: List all guests
+      description: Get all guests with optional filtering.
+      parameters:
+        - name: eventId
+          in: query
+          schema: { type: integer }
+          description: Filter by event
+        - name: category
+          in: query
+          schema:
+            type: string
+            enum: [pending, A, B, C, rejected]
+          description: Filter by guest category
+        - name: search
+          in: query
+          schema: { type: string }
+          description: Search by name, email, or Instagram
+      responses:
+        '200':
+          description: List of guests
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Guest' }
+
+    post:
+      operationId: addGuest
+      tags: [Guests]
+      summary: Add a new guest
+      description: Add a guest to the guest list.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GuestInput'
+            example:
+              name: "John Smith"
+              email: "john@example.com"
+              instagram: "@johnsmith"
+              partySize: 2
+              eventId: 1
+              category: "pending"
+      responses:
+        '201':
+          description: Guest added
+
+  /api/v1/guest-lists/stats:
+    get:
+      operationId: getGuestStats
+      tags: [Guests]
+      summary: Get guest list statistics
+      description: Get aggregate statistics for guest lists.
+      responses:
+        '200':
+          description: Guest statistics
+
+  /api/v1/guest-lists/{guestId}:
+    get:
+      operationId: getGuest
+      tags: [Guests]
+      summary: Get guest details
+      parameters:
+        - name: guestId
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Guest details
+
+    patch:
+      operationId: updateGuest
+      tags: [Guests]
+      summary: Update guest
+      description: Update guest details or category.
+      parameters:
+        - name: guestId
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GuestInput'
+      responses:
+        '200':
+          description: Guest updated
+
+    delete:
+      operationId: deleteGuest
+      tags: [Guests]
+      summary: Remove guest
+      parameters:
+        - name: guestId
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Guest removed
+
+  /api/v1/guest-lists/{guestId}/send-invitation:
+    post:
+      operationId: sendGuestInvitation
+      tags: [Guests]
+      summary: Send invitation email
+      description: Send an invitation email to a specific guest.
+      parameters:
+        - name: guestId
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Invitation sent
+
+  /api/v1/guest-lists/bulk-send:
+    post:
+      operationId: sendBulkInvitations
+      tags: [Guests]
+      summary: Send bulk invitations
+      description: Send invitation emails to multiple guests at once.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                guestIds:
+                  type: array
+                  items: { type: integer }
+                customMessage:
+                  type: string
+      responses:
+        '200':
+          description: Invitations sent
+
+  # ==========================================
+  # BUDGET
+  # ==========================================
+
+  /api/v1/budget-categories:
+    get:
+      operationId: getBudgetCategories
+      tags: [Budget]
+      summary: Get budget categories
+      description: Get all available budget categories (Venue, Catering, Entertainment, Marketing, Income).
+      responses:
+        '200':
+          description: Budget categories
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/BudgetCategory' }
+
+  /api/v1/events/{eventId}/budget:
+    get:
+      operationId: getEventBudget
+      tags: [Budget]
+      summary: Get event budget
+      description: Get complete budget for an event including all items and summary.
+      parameters:
+        - name: eventId
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Event budget
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  summary:
+                    type: object
+                    properties:
+                      totalBudget: { type: number }
+                      totalEstimatedExpenses: { type: number }
+                      totalActualExpenses: { type: number }
+                      totalEstimatedIncome: { type: number }
+                      totalActualIncome: { type: number }
+                      estimatedProfit: { type: number }
+                      actualProfit: { type: number }
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/BudgetItem' }
+
+    put:
+      operationId: updateEventBudget
+      tags: [Budget]
+      summary: Update event budget settings
+      parameters:
+        - name: eventId
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                totalBudget: { type: number }
+      responses:
+        '200':
+          description: Budget updated
+
+  /api/v1/events/{eventId}/budget/items:
+    get:
+      operationId: getEventBudgetItems
+      tags: [Budget]
+      summary: Get budget items
+      parameters:
+        - name: eventId
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Budget items
+
+    post:
+      operationId: addBudgetItem
+      tags: [Budget]
+      summary: Add budget item
+      description: Add an expense or income item to the event budget.
+      parameters:
+        - name: eventId
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BudgetItemInput'
+            example:
+              categoryId: 1
+              description: "DJ Services"
+              vendorName: "DJ Mike"
+              estimatedAmount: 2500
+              actualAmount: 2500
+              isPaid: false
+              dueDate: "2025-01-15"
+      responses:
+        '201':
+          description: Budget item added
+
+  /api/v1/budget/items/{itemId}:
+    put:
+      operationId: updateBudgetItem
+      tags: [Budget]
+      summary: Update budget item
+      parameters:
+        - name: itemId
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BudgetItemInput'
+      responses:
+        '200':
+          description: Item updated
+
+    delete:
+      operationId: deleteBudgetItem
+      tags: [Budget]
+      summary: Delete budget item
+      parameters:
+        - name: itemId
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Item deleted
+
+  # ==========================================
+  # STAFF
+  # ==========================================
+
+  /api/v1/staff:
+    get:
+      operationId: listStaff
+      tags: [Staff]
+      summary: List all staff members
+      description: Get all staff members with their stats.
+      responses:
+        '200':
+          description: Staff list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  staff:
+                    type: array
+                    items: { $ref: '#/components/schemas/Staff' }
+                  stats:
+                    type: object
+                    properties:
+                      total: { type: integer }
+                      active: { type: integer }
+                      avgRating: { type: number }
+
+    post:
+      operationId: addStaffMember
+      tags: [Staff]
+      summary: Add staff member
+      description: Add a new staff member to the roster.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StaffInput'
+      responses:
+        '201':
+          description: Staff member added
+
+  /api/v1/staff/{staffId}:
+    get:
+      operationId: getStaffMember
+      tags: [Staff]
+      summary: Get staff member details
+      parameters:
+        - name: staffId
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Staff details
+
+    put:
+      operationId: updateStaffMember
+      tags: [Staff]
+      summary: Update staff member
+      parameters:
+        - name: staffId
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StaffInput'
+      responses:
+        '200':
+          description: Staff updated
+
+    delete:
+      operationId: deleteStaffMember
+      tags: [Staff]
+      summary: Remove staff member
+      parameters:
+        - name: staffId
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Staff removed
+
+  /api/v1/events/{eventId}/staff:
+    get:
+      operationId: getEventStaff
+      tags: [Staff]
+      summary: Get staff assigned to event
+      parameters:
+        - name: eventId
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Assigned staff
+
+    post:
+      operationId: assignStaffToEvent
+      tags: [Staff]
+      summary: Assign staff to event
+      description: Assign a staff member to work at an event.
+      parameters:
+        - name: eventId
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [staffId, role]
+              properties:
+                staffId: { type: integer }
+                role: { type: string }
+                shiftStart: { type: string }
+                shiftEnd: { type: string }
+                notes: { type: string }
+      responses:
+        '201':
+          description: Staff assigned
+
+  # ==========================================
+  # VENDORS
+  # ==========================================
+
+  /api/v1/vendors:
+    get:
+      operationId: listVendors
+      tags: [Vendors]
+      summary: List all vendors
+      description: Get all vendors/suppliers.
+      parameters:
+        - name: category
+          in: query
+          schema: { type: string }
+          description: Filter by category
+        - name: isPreferred
+          in: query
+          schema: { type: boolean }
+          description: Only preferred vendors
+      responses:
+        '200':
+          description: Vendor list
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Vendor' }
+
+    post:
+      operationId: addVendor
+      tags: [Vendors]
+      summary: Add vendor
+      description: Add a new vendor to the database.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VendorInput'
+      responses:
+        '201':
+          description: Vendor added
+
+  /api/v1/vendors/{vendorId}:
+    get:
+      operationId: getVendor
+      tags: [Vendors]
+      summary: Get vendor details
+      parameters:
+        - name: vendorId
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Vendor details
+
+    put:
+      operationId: updateVendor
+      tags: [Vendors]
+      summary: Update vendor
+      parameters:
+        - name: vendorId
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VendorInput'
+      responses:
+        '200':
+          description: Vendor updated
+
+    delete:
+      operationId: deleteVendor
+      tags: [Vendors]
+      summary: Delete vendor
+      parameters:
+        - name: vendorId
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Vendor deleted
+
+  # ==========================================
+  # MODELS (Talent)
+  # ==========================================
+
+  /api/v1/models:
+    get:
+      operationId: listModels
+      tags: [Models]
+      summary: List model applications
+      description: Get all model/talent applications.
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, approved, declined, assigned]
+      responses:
+        '200':
+          description: Models list
+
+    post:
+      operationId: submitModelApplication
+      tags: [Models]
+      summary: Submit model application
+      description: Submit a new model/talent application.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ModelInput'
+      responses:
+        '201':
+          description: Application submitted
+
+  /api/v1/models/stats:
+    get:
+      operationId: getModelStats
+      tags: [Models]
+      summary: Get model statistics
+      responses:
+        '200':
+          description: Model stats
+
+  /api/v1/models/{modelId}:
+    get:
+      operationId: getModel
+      tags: [Models]
+      summary: Get model details
+      parameters:
+        - name: modelId
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Model details
+
+    patch:
+      operationId: updateModelStatus
+      tags: [Models]
+      summary: Update model status
+      description: Approve, decline, or assign a model.
+      parameters:
+        - name: modelId
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status:
+                  type: string
+                  enum: [pending, approved, declined, assigned]
+      responses:
+        '200':
+          description: Status updated
+
+  # ==========================================
+  # SPONSORS
+  # ==========================================
+
+  /api/v1/sponsors:
+    get:
+      operationId: listSponsors
+      tags: [Sponsors]
+      summary: List all sponsors
+      responses:
+        '200':
+          description: Sponsors list
+
+    post:
+      operationId: addSponsor
+      tags: [Sponsors]
+      summary: Add sponsor
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SponsorInput'
+      responses:
+        '201':
+          description: Sponsor added
+
+  /api/v1/sponsors/stats:
+    get:
+      operationId: getSponsorStats
+      tags: [Sponsors]
+      summary: Get sponsor statistics
+      responses:
+        '200':
+          description: Sponsor stats
+
+  /api/v1/sponsors/{sponsorId}:
+    get:
+      operationId: getSponsor
+      tags: [Sponsors]
+      summary: Get sponsor details
+      parameters:
+        - name: sponsorId
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Sponsor details
+
+    patch:
+      operationId: updateSponsor
+      tags: [Sponsors]
+      summary: Update sponsor
+      parameters:
+        - name: sponsorId
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SponsorInput'
+      responses:
+        '200':
+          description: Sponsor updated
+
+    delete:
+      operationId: deleteSponsor
+      tags: [Sponsors]
+      summary: Delete sponsor
+      parameters:
+        - name: sponsorId
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Sponsor deleted
+
+  # ==========================================
+  # TABLE RESERVATIONS
+  # ==========================================
+
+  /api/v1/table-reservations:
+    get:
+      operationId: listTableReservations
+      tags: [Tables]
+      summary: List table reservations
+      parameters:
+        - name: eventId
+          in: query
+          schema: { type: integer }
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, confirmed, cancelled]
+      responses:
+        '200':
+          description: Reservations list
+
+    post:
+      operationId: createTableReservation
+      tags: [Tables]
+      summary: Create table reservation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TableReservationInput'
+      responses:
+        '201':
+          description: Reservation created
+
+  /api/v1/table-reservations/stats:
+    get:
+      operationId: getTableReservationStats
+      tags: [Tables]
+      summary: Get reservation statistics
+      responses:
+        '200':
+          description: Reservation stats
+
+  /api/v1/table-reservations/{reservationId}:
+    patch:
+      operationId: updateTableReservation
+      tags: [Tables]
+      summary: Update reservation
+      parameters:
+        - name: reservationId
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status:
+                  type: string
+                  enum: [pending, confirmed, cancelled]
+      responses:
+        '200':
+          description: Reservation updated
+
+    delete:
+      operationId: deleteTableReservation
+      tags: [Tables]
+      summary: Cancel reservation
+      parameters:
+        - name: reservationId
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Reservation cancelled
+
+  # ==========================================
+  # TICKETS
+  # ==========================================
+
+  /api/v1/tickets:
+    get:
+      operationId: listTickets
+      tags: [Tickets]
+      summary: List all tickets
+      parameters:
+        - name: eventId
+          in: query
+          schema: { type: integer }
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [valid, used, cancelled]
+      responses:
+        '200':
+          description: Tickets list
+
+    post:
+      operationId: createTicket
+      tags: [Tickets]
+      summary: Create ticket
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TicketInput'
+      responses:
+        '201':
+          description: Ticket created
+
+  /api/v1/tickets/stats:
+    get:
+      operationId: getTicketStats
+      tags: [Tickets]
+      summary: Get ticket statistics
+      responses:
+        '200':
+          description: Ticket stats
+
+  /api/v1/tickets/{ticketId}/check-in:
+    post:
+      operationId: checkInTicket
+      tags: [Tickets]
+      summary: Check in ticket
+      description: Mark a ticket as used/checked-in.
+      parameters:
+        - name: ticketId
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Ticket checked in
+
+  # ==========================================
+  # CLIENT PORTAL
+  # ==========================================
+
+  /api/v1/events/{eventId}/client-access:
+    get:
+      operationId: listClientAccess
+      tags: [Events]
+      summary: List client portal access
+      description: Get all client portal links for an event.
+      parameters:
+        - name: eventId
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Client access list
+
+    post:
+      operationId: createClientAccess
+      tags: [Events]
+      summary: Create client portal access
+      description: Generate a secure link for a client to view event details.
+      parameters:
+        - name: eventId
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [clientName, clientEmail]
+              properties:
+                clientName: { type: string }
+                clientEmail: { type: string, format: email }
+                expiresInDays: { type: integer, default: 30 }
+                permissions:
+                  type: object
+                  properties:
+                    viewBudget: { type: boolean, default: true }
+                    viewTimeline: { type: boolean, default: true }
+                    viewStaff: { type: boolean, default: false }
+                    viewVendors: { type: boolean, default: false }
+      responses:
+        '201':
+          description: Client access created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  portalUrl: { type: string }
+                  accessToken: { type: string }
+
+  /api/v1/client-access/{accessId}:
+    delete:
+      operationId: revokeClientAccess
+      tags: [Events]
+      summary: Revoke client access
+      parameters:
+        - name: accessId
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '204':
+          description: Access revoked
+
+  # ==========================================
+  # HEALTH
+  # ==========================================
+
+  /api/v1/health/live:
+    get:
+      operationId: healthLive
+      tags: [Health]
+      summary: Liveness check
+      description: Simple check to verify the server is running.
+      responses:
+        '200':
+          description: Server is alive
+
+  /api/v1/health/deep:
+    get:
+      operationId: healthDeep
+      tags: [Health]
+      summary: Deep health check
+      description: Comprehensive check of database, memory, and all services.
+      responses:
+        '200':
+          description: Health status
+
+  /api/v1/health/status:
+    get:
+      operationId: healthStatus
+      tags: [Health]
+      summary: Server status
+      description: Detailed server status including uptime and memory usage.
+      responses:
+        '200':
+          description: Server status
+
+components:
+  schemas:
+    Event:
+      type: object
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        eventDate: { type: string, format: date }
+        eventType: { type: string }
+        venueName: { type: string }
+        venueCity: { type: string }
+        expectedAttendance: { type: integer }
+        dressCode: { type: string }
+        theme: { type: string }
+        status: { type: string, enum: [planning, confirmed, completed, cancelled] }
+        notes: { type: string }
+        createdAt: { type: string, format: date-time }
+
+    EventSummary:
+      type: object
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        eventDate: { type: string, format: date }
+        status: { type: string }
+        guestCount: { type: integer }
+
+    EventInput:
+      type: object
+      required: [name, eventDate]
+      properties:
+        name: { type: string }
+        eventDate: { type: string, format: date }
+        eventType: { type: string, enum: [party, gala, corporate, wedding, concert, festival, other] }
+        venueName: { type: string }
+        venueCity: { type: string }
+        expectedAttendance: { type: integer }
+        dressCode: { type: string }
+        theme: { type: string }
+        notes: { type: string }
+
+    Guest:
+      type: object
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        email: { type: string }
+        phone: { type: string }
+        instagram: { type: string }
+        partySize: { type: integer }
+        category: { type: string, enum: [pending, A, B, C, rejected] }
+        emailSent: { type: boolean }
+        checkedInAt: { type: string, format: date-time }
+        eventId: { type: integer }
+
+    GuestInput:
+      type: object
+      required: [name, email]
+      properties:
+        name: { type: string }
+        email: { type: string, format: email }
+        phone: { type: string }
+        instagram: { type: string }
+        partySize: { type: integer, default: 1 }
+        category: { type: string, enum: [pending, A, B, C], default: pending }
+        eventId: { type: integer }
+        notes: { type: string }
+
+    BudgetCategory:
+      type: object
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        icon: { type: string }
+        isIncome: { type: boolean }
+        sortOrder: { type: integer }
+
+    BudgetItem:
+      type: object
+      properties:
+        id: { type: integer }
+        categoryId: { type: integer }
+        categoryName: { type: string }
+        description: { type: string }
+        vendorName: { type: string }
+        estimatedAmount: { type: number }
+        actualAmount: { type: number }
+        isPaid: { type: boolean }
+        dueDate: { type: string, format: date }
+        notes: { type: string }
+
+    BudgetItemInput:
+      type: object
+      required: [categoryId, description]
+      properties:
+        categoryId: { type: integer }
+        description: { type: string }
+        vendorName: { type: string }
+        estimatedAmount: { type: number }
+        actualAmount: { type: number }
+        isPaid: { type: boolean, default: false }
+        dueDate: { type: string, format: date }
+        notes: { type: string }
+
+    TimelineItem:
+      type: object
+      properties:
+        id: { type: integer }
+        time: { type: string }
+        title: { type: string }
+        description: { type: string }
+        location: { type: string }
+        isCritical: { type: boolean }
+        status: { type: string }
+        sortOrder: { type: integer }
+
+    TimelineItemInput:
+      type: object
+      required: [time, title]
+      properties:
+        time: { type: string }
+        title: { type: string }
+        description: { type: string }
+        location: { type: string }
+        isCritical: { type: boolean, default: false }
+        sortOrder: { type: integer }
+
+    ChecklistItem:
+      type: object
+      properties:
+        id: { type: integer }
+        category: { type: string }
+        item: { type: string }
+        isCompleted: { type: boolean }
+        priority: { type: string, enum: [high, medium, low] }
+
+    ChecklistItemInput:
+      type: object
+      required: [item]
+      properties:
+        category: { type: string }
+        item: { type: string }
+        priority: { type: string, enum: [high, medium, low], default: medium }
+
+    Staff:
+      type: object
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        email: { type: string }
+        phone: { type: string }
+        role: { type: string }
+        photoUrl: { type: string }
+        instagram: { type: string }
+        hourlyRate: { type: number }
+        experienceLevel: { type: string }
+        rating: { type: number }
+        status: { type: string }
+        assignmentsCount: { type: integer }
+
+    StaffInput:
+      type: object
+      required: [name, email, role]
+      properties:
+        name: { type: string }
+        email: { type: string, format: email }
+        phone: { type: string }
+        role: { type: string }
+        secondaryRole: { type: string }
+        photoUrl: { type: string }
+        instagram: { type: string }
+        hourlyRate: { type: number }
+        dayRate: { type: number }
+        experienceLevel: { type: string, enum: [junior, intermediate, senior] }
+        skills: { type: string }
+        notes: { type: string }
+
+    StaffAssignment:
+      type: object
+      properties:
+        id: { type: integer }
+        staffId: { type: integer }
+        staffName: { type: string }
+        role: { type: string }
+        shiftStart: { type: string }
+        shiftEnd: { type: string }
+        status: { type: string }
+
+    Vendor:
+      type: object
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        category: { type: string }
+        contactName: { type: string }
+        email: { type: string }
+        phone: { type: string }
+        website: { type: string }
+        city: { type: string }
+        isPreferred: { type: boolean }
+        totalSpent: { type: number }
+        eventsCount: { type: integer }
+
+    VendorInput:
+      type: object
+      required: [name, category]
+      properties:
+        name: { type: string }
+        category: { type: string }
+        contactName: { type: string }
+        email: { type: string, format: email }
+        phone: { type: string }
+        website: { type: string }
+        city: { type: string }
+        notes: { type: string }
+        isPreferred: { type: boolean, default: false }
+
+    ModelInput:
+      type: object
+      required: [name, email, instagram]
+      properties:
+        name: { type: string }
+        email: { type: string, format: email }
+        phone: { type: string }
+        instagram: { type: string }
+        photos: { type: array, items: { type: string } }
+        height: { type: string }
+        experienceLevel: { type: string, enum: [beginner, intermediate, professional] }
+
+    SponsorInput:
+      type: object
+      required: [companyName, contactName, email]
+      properties:
+        companyName: { type: string }
+        contactName: { type: string }
+        email: { type: string, format: email }
+        phone: { type: string }
+        tier: { type: string, enum: [platinum, gold, silver, bronze] }
+        amount: { type: number }
+        benefits: { type: string }
+
+    TableReservationInput:
+      type: object
+      required: [eventId, customerName, tableId]
+      properties:
+        eventId: { type: integer }
+        tableId: { type: string }
+        tableName: { type: string }
+        zone: { type: string }
+        customerName: { type: string }
+        customerEmail: { type: string }
+        customerPhone: { type: string }
+        partySize: { type: integer }
+        minimumSpend: { type: number }
+
+    TicketInput:
+      type: object
+      required: [eventId, ticketType]
+      properties:
+        eventId: { type: integer }
+        ticketType: { type: string }
+        holderName: { type: string }
+        holderEmail: { type: string }
+        price: { type: number }
