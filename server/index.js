@@ -155,6 +155,7 @@ const initDatabase = async () => {
     // ============================================
 
     // Create events table - Core table for multi-event support
+    // Status values: planning, confirmed, upcoming, ongoing, past, cancelled, draft
     await client.query(`
       CREATE TABLE IF NOT EXISTS events (
         id SERIAL PRIMARY KEY,
@@ -170,7 +171,7 @@ const initDatabase = async () => {
         start_time TIME,
         end_time TIME,
         doors_open TIME,
-        status VARCHAR(50) DEFAULT 'planning',
+        status VARCHAR(50) DEFAULT 'planning' CHECK (status IN ('planning', 'confirmed', 'upcoming', 'ongoing', 'past', 'cancelled', 'draft')),
         cover_image TEXT,
         theme VARCHAR(100),
         dress_code VARCHAR(100),
