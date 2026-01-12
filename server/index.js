@@ -3379,10 +3379,21 @@ app.post('/api/v1/events/:eventId/budget/items', async (req, res) => {
     const { eventId } = req.params;
     const { categoryId, description, vendorName, estimatedAmount, actualAmount, isPaid, paidDate, paymentMethod, notes, dueDate } = req.body;
 
+    // Check if required tables exist
+    const tablesCheck = await pool.query(`
+      SELECT table_name FROM information_schema.tables
+      WHERE table_name IN ('budgets', 'budget_items')
+    `);
+    const existingTables = tablesCheck.rows.map(r => r.table_name);
+
+    if (!existingTables.includes('budgets') || !existingTables.includes('budget_items')) {
+      return res.status(503).json({ error: 'Budget feature not available - tables do not exist' });
+    }
+
     // Get budget ID
     const budget = await pool.query('SELECT id FROM budgets WHERE event_id = $1', [eventId]);
     if (budget.rows.length === 0) {
-      return res.status(404).json({ error: 'Budget not found for this event' });
+      return res.status(404).json({ error: 'Budget not found for this event. Create a budget first.' });
     }
     const budgetId = budget.rows[0].id;
 
