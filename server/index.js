@@ -2778,35 +2778,76 @@ app.put('/api/v1/events/:id', async (req, res) => {
     const { id } = req.params;
     const updates = req.body;
 
+    // First, check which columns exist in the events table
+    const columnsResult = await pool.query(`
+      SELECT column_name FROM information_schema.columns
+      WHERE table_name = 'events'
+    `);
+    const existingColumns = new Set(columnsResult.rows.map(r => r.column_name));
+
     // Build dynamic update query
     const fields = [];
     const values = [];
     let paramCount = 1;
 
-    const fieldMap = {
-      name: 'name', description: 'description', eventType: 'event_type',
-      venueName: 'venue_name', venueAddress: 'venue_address', venueCity: 'venue_city',
-      venueCapacity: 'venue_capacity', eventDate: 'event_date', startTime: 'start_time',
-      endTime: 'end_time', doorsOpen: 'doors_open', status: 'status',
-      coverImage: 'cover_image', theme: 'theme', dressCode: 'dress_code',
-      ageRestriction: 'age_restriction', ticketLink: 'ticket_link', isPublic: 'is_public',
-      isFeatured: 'is_featured', expectedAttendance: 'expected_attendance',
-      actualAttendance: 'actual_attendance', notes: 'notes'
+    // Map frontend field names to possible database column names
+    // (supports both berry-bly-productions schema and full dashboard schema)
+    const fieldMappings = {
+      name: ['name', 'title'],
+      title: ['title', 'name'],
+      description: ['description'],
+      eventType: ['event_type', 'category'],
+      category: ['category', 'event_type'],
+      venueName: ['venue_name', 'venue'],
+      venue: ['venue', 'venue_name'],
+      venueAddress: ['venue_address'],
+      venueCity: ['venue_city'],
+      venueCapacity: ['venue_capacity'],
+      eventDate: ['event_date', 'date'],
+      date: ['date', 'event_date'],
+      startTime: ['start_time', 'time'],
+      time: ['time', 'start_time'],
+      endTime: ['end_time'],
+      doorsOpen: ['doors_open'],
+      status: ['status'],
+      coverImage: ['cover_image', 'flyer_url'],
+      flyerUrl: ['flyer_url', 'cover_image'],
+      theme: ['theme'],
+      dressCode: ['dress_code'],
+      ageRestriction: ['age_restriction'],
+      ticketLink: ['ticket_link', 'eventbrite_url'],
+      eventbriteUrl: ['eventbrite_url', 'ticket_link'],
+      isPublic: ['is_public'],
+      isFeatured: ['is_featured', 'featured'],
+      featured: ['featured', 'is_featured'],
+      guestListEnabled: ['guest_list_enabled'],
+      tableMapEnabled: ['table_map_enabled'],
+      expectedAttendance: ['expected_attendance'],
+      actualAttendance: ['actual_attendance'],
+      notes: ['notes']
     };
 
-    for (const [key, dbField] of Object.entries(fieldMap)) {
+    for (const [key, possibleColumns] of Object.entries(fieldMappings)) {
       if (updates[key] !== undefined) {
-        fields.push(`${dbField} = $${paramCount}`);
-        values.push(updates[key]);
-        paramCount++;
+        // Find the first column that exists
+        const dbColumn = possibleColumns.find(col => existingColumns.has(col));
+        if (dbColumn) {
+          fields.push(`${dbColumn} = $${paramCount}`);
+          values.push(updates[key]);
+          paramCount++;
+        }
       }
     }
 
     if (fields.length === 0) {
-      return res.status(400).json({ error: 'No fields to update' });
+      return res.status(400).json({ error: 'No valid fields to update' });
     }
 
-    fields.push(`updated_at = CURRENT_TIMESTAMP`);
+    // Add updated_at if column exists
+    if (existingColumns.has('updated_at')) {
+      fields.push(`updated_at = CURRENT_TIMESTAMP`);
+    }
+
     values.push(id);
 
     const result = await pool.query(
@@ -3060,6 +3101,35 @@ app.delete('/api/v1/events/:eventId/checklist/:id', async (req, res) => {
 // GET /api/v1/budget-categories - Get all budget categories
 app.get('/api/v1/budget-categories', async (req, res) => {
   try {
+    // Check if table exists
+    const tableCheck = await pool.query(`
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables
+        WHERE table_name = 'budget_categories'
+      )
+    `);
+
+    if (!tableCheck.rows[0].exists) {
+      // Return default categories if table doesn't exist
+      return res.json({
+        categories: [
+          { id: 1, name: 'Venue Rental', icon: 'building', color: '#8B5CF6', is_income: false, sort_order: 1 },
+          { id: 2, name: 'Catering & Bar', icon: 'utensils', color: '#F59E0B', is_income: false, sort_order: 2 },
+          { id: 3, name: 'Entertainment & DJ', icon: 'music', color: '#EC4899', is_income: false, sort_order: 3 },
+          { id: 4, name: 'Decor & Production', icon: 'sparkles', color: '#10B981', is_income: false, sort_order: 4 },
+          { id: 5, name: 'Staffing', icon: 'users', color: '#3B82F6', is_income: false, sort_order: 5 },
+          { id: 6, name: 'Security', icon: 'shield', color: '#EF4444', is_income: false, sort_order: 6 },
+          { id: 7, name: 'Marketing & Promo', icon: 'megaphone', color: '#6366F1', is_income: false, sort_order: 7 },
+          { id: 8, name: 'Photography & Video', icon: 'camera', color: '#14B8A6', is_income: false, sort_order: 8 },
+          { id: 9, name: 'Permits & Insurance', icon: 'file-text', color: '#64748B', is_income: false, sort_order: 9 },
+          { id: 10, name: 'Miscellaneous', icon: 'package', color: '#A1A1AA', is_income: false, sort_order: 10 },
+          { id: 11, name: 'Ticket Sales', icon: 'ticket', color: '#22C55E', is_income: true, sort_order: 11 },
+          { id: 12, name: 'Table Reservations', icon: 'layout', color: '#D4AF37', is_income: true, sort_order: 12 },
+          { id: 13, name: 'Sponsorships', icon: 'handshake', color: '#0EA5E9', is_income: true, sort_order: 13 }
+        ]
+      });
+    }
+
     const result = await pool.query('SELECT * FROM budget_categories ORDER BY sort_order');
     res.json({ categories: result.rows });
   } catch (error) {
@@ -3073,12 +3143,50 @@ app.get('/api/v1/events/:eventId/budget', async (req, res) => {
   try {
     const { eventId } = req.params;
 
+    // Check if budgets table exists
+    const tableCheck = await pool.query(`
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables
+        WHERE table_name = 'budgets'
+      )
+    `);
+
+    if (!tableCheck.rows[0].exists) {
+      // Return default empty budget if table doesn't exist
+      return res.json({
+        budget: {
+          id: 0,
+          event_id: eventId,
+          name: 'Event Budget',
+          total_budget: 0,
+          total_spent: 0,
+          total_income: 0,
+          currency: 'USD',
+          status: 'draft'
+        },
+        items: [],
+        byCategory: [],
+        summary: {
+          totalBudget: 0,
+          totalEstimatedExpenses: 0,
+          totalActualExpenses: 0,
+          totalEstimatedIncome: 0,
+          totalActualIncome: 0,
+          estimatedProfit: 0,
+          actualProfit: 0,
+          budgetRemaining: 0,
+          paidCount: 0,
+          pendingCount: 0,
+        },
+      });
+    }
+
     // Get or create budget for event
     let budget = await pool.query('SELECT * FROM budgets WHERE event_id = $1', [eventId]);
 
     if (budget.rows.length === 0) {
-      // Get event name for budget
-      const event = await pool.query('SELECT name FROM events WHERE id = $1', [eventId]);
+      // Get event name for budget - try both 'title' and 'name' columns
+      const event = await pool.query('SELECT COALESCE(title, name) as name FROM events WHERE id = $1', [eventId]);
       const eventName = event.rows[0]?.name || 'Event';
 
       budget = await pool.query(
@@ -3133,14 +3241,14 @@ app.get('/api/v1/events/:eventId/budget', async (req, res) => {
       items: items.rows,
       byCategory: Object.values(byCategory),
       summary: {
-        totalBudget: parseFloat(budget.rows[0].total_budget),
+        totalBudget: parseFloat(budget.rows[0].total_budget || 0),
         totalEstimatedExpenses,
         totalActualExpenses,
         totalEstimatedIncome,
         totalActualIncome,
         estimatedProfit: totalEstimatedIncome - totalEstimatedExpenses,
         actualProfit: totalActualIncome - totalActualExpenses,
-        budgetRemaining: parseFloat(budget.rows[0].total_budget) - totalActualExpenses,
+        budgetRemaining: parseFloat(budget.rows[0].total_budget || 0) - totalActualExpenses,
         paidCount: items.rows.filter(i => i.is_paid).length,
         pendingCount: items.rows.filter(i => !i.is_paid && !i.is_income).length,
       },
@@ -4244,6 +4352,20 @@ app.post('/api/v1/events/:eventId/client-access', async (req, res) => {
 app.get('/api/v1/events/:eventId/client-access', async (req, res) => {
   try {
     const { eventId } = req.params;
+
+    // Check if table exists
+    const tableCheck = await pool.query(`
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables
+        WHERE table_name = 'client_access'
+      )
+    `);
+
+    if (!tableCheck.rows[0].exists) {
+      // Return empty array if table doesn't exist
+      return res.json({ clients: [] });
+    }
+
     const result = await pool.query(`
       SELECT id, client_name, client_email, permissions, last_accessed, expires_at, is_active, created_at
       FROM client_access
