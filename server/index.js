@@ -130,6 +130,16 @@ const initDatabase = async () => {
           ALTER TABLE sponsors ADD COLUMN user_id INTEGER REFERENCES users(id) ON DELETE CASCADE;
           CREATE INDEX IF NOT EXISTS idx_sponsors_user ON sponsors(user_id);
         END IF;
+        -- Add user_id to staff
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='staff' AND column_name='user_id') THEN
+          ALTER TABLE staff ADD COLUMN user_id INTEGER REFERENCES users(id) ON DELETE CASCADE;
+          CREATE INDEX IF NOT EXISTS idx_staff_user ON staff(user_id);
+        END IF;
+        -- Add user_id to models
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='models' AND column_name='user_id') THEN
+          ALTER TABLE models ADD COLUMN user_id INTEGER REFERENCES users(id) ON DELETE CASCADE;
+          CREATE INDEX IF NOT EXISTS idx_models_user ON models(user_id);
+        END IF;
       END $$;
     `);
 
@@ -3853,6 +3863,7 @@ app.post('/api/v1/gpt/budget', async (req, res) => {
 app.post('/api/v1/gpt/staff', async (req, res) => {
   try {
     const { action, staffId, eventId, assignmentId, data, filters } = req.body;
+    const userId = req.user?.id;
 
     // Check if staff table exists
     const tableCheck = await pool.query(`SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'staff')`);
@@ -3862,13 +3873,13 @@ app.post('/api/v1/gpt/staff', async (req, res) => {
 
     switch (action) {
       case 'list': {
-        const result = await pool.query('SELECT * FROM staff ORDER BY name');
+        const result = await pool.query('SELECT * FROM staff WHERE (user_id = $1 OR user_id IS NULL) ORDER BY name', [userId]);
         return res.json({ success: true, staff: result.rows });
       }
 
       case 'get': {
         if (!staffId) return res.status(400).json({ error: 'staffId required' });
-        const result = await pool.query('SELECT * FROM staff WHERE id = $1', [staffId]);
+        const result = await pool.query('SELECT * FROM staff WHERE id = $1 AND (user_id = $2 OR user_id IS NULL)', [staffId, userId]);
         if (result.rows.length === 0) return res.status(404).json({ error: 'Staff not found' });
         return res.json({ success: true, staff: result.rows[0] });
       }
@@ -3877,14 +3888,17 @@ app.post('/api/v1/gpt/staff', async (req, res) => {
         const { name, email, phone, role, hourlyRate, experienceLevel } = data || {};
         if (!name || !email) return res.status(400).json({ error: 'name and email required' });
         const result = await pool.query(`
-          INSERT INTO staff (name, email, phone, role, hourly_rate, experience_level, status)
-          VALUES ($1, $2, $3, $4, $5, $6, 'active') RETURNING *
-        `, [name, email, phone, role, hourlyRate, experienceLevel || 'intermediate']);
+          INSERT INTO staff (name, email, phone, role, hourly_rate, experience_level, status, user_id)
+          VALUES ($1, $2, $3, $4, $5, $6, 'active', $7) RETURNING *
+        `, [name, email, phone, role, hourlyRate, experienceLevel || 'intermediate', userId]);
         return res.json({ success: true, staff: result.rows[0], message: 'Staff member added' });
       }
 
       case 'update': {
         if (!staffId) return res.status(400).json({ error: 'staffId required' });
+        // Verify ownership
+        const check = await pool.query('SELECT id FROM staff WHERE id = $1 AND (user_id = $2 OR user_id IS NULL)', [staffId, userId]);
+        if (check.rows.length === 0) return res.status(404).json({ error: 'Staff not found' });
         const fields = [];
         const values = [];
         let idx = 1;
@@ -3903,7 +3917,7 @@ app.post('/api/v1/gpt/staff', async (req, res) => {
 
       case 'delete': {
         if (!staffId) return res.status(400).json({ error: 'staffId required' });
-        await pool.query('DELETE FROM staff WHERE id = $1', [staffId]);
+        await pool.query('DELETE FROM staff WHERE id = $1 AND (user_id = $2 OR user_id IS NULL)', [staffId, userId]);
         return res.json({ success: true, message: 'Staff removed' });
       }
 
@@ -4037,6 +4051,7 @@ app.post('/api/v1/gpt/vendors', async (req, res) => {
 app.post('/api/v1/gpt/models', async (req, res) => {
   try {
     const { action, modelId, data, filters } = req.body;
+    const userId = req.user?.id;
 
     const tableCheck = await pool.query(`SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'models')`);
     if (!tableCheck.rows[0].exists) {
@@ -4046,16 +4061,20 @@ app.post('/api/v1/gpt/models', async (req, res) => {
     switch (action) {
       case 'list': {
         const { status } = filters || {};
-        let query = 'SELECT * FROM models';
-        if (status) query += ` WHERE status = '${status}'`;
+        let query = 'SELECT * FROM models WHERE (user_id = $1 OR user_id IS NULL)';
+        const params = [userId];
+        if (status) {
+          query += ` AND status = $2`;
+          params.push(status);
+        }
         query += ' ORDER BY created_at DESC';
-        const result = await pool.query(query);
+        const result = await pool.query(query, params);
         return res.json({ success: true, models: result.rows });
       }
 
       case 'get': {
         if (!modelId) return res.status(400).json({ error: 'modelId required' });
-        const result = await pool.query('SELECT * FROM models WHERE id = $1', [modelId]);
+        const result = await pool.query('SELECT * FROM models WHERE id = $1 AND (user_id = $2 OR user_id IS NULL)', [modelId, userId]);
         if (result.rows.length === 0) return res.status(404).json({ error: 'Model not found' });
         return res.json({ success: true, model: result.rows[0] });
       }
@@ -4066,7 +4085,7 @@ app.post('/api/v1/gpt/models', async (req, res) => {
         if (!['pending', 'approved', 'declined', 'assigned'].includes(status)) {
           return res.status(400).json({ error: 'Invalid status' });
         }
-        await pool.query('UPDATE models SET status = $1 WHERE id = $2', [status, modelId]);
+        await pool.query('UPDATE models SET status = $1 WHERE id = $2 AND (user_id = $3 OR user_id IS NULL)', [status, modelId, userId]);
         return res.json({ success: true, message: `Model ${status}` });
       }
 
@@ -4076,8 +4095,8 @@ app.post('/api/v1/gpt/models', async (req, res) => {
             COUNT(*) FILTER (WHERE status = 'pending') as pending,
             COUNT(*) FILTER (WHERE status = 'approved') as approved,
             COUNT(*) FILTER (WHERE status = 'assigned') as assigned
-          FROM models
-        `);
+          FROM models WHERE (user_id = $1 OR user_id IS NULL)
+        `, [userId]);
         return res.json({ success: true, stats: result.rows[0] });
       }
 
@@ -5409,8 +5428,10 @@ app.delete('/api/v1/vendors/:id', async (req, res) => {
 // ============================================================
 
 // GET /api/v1/staff - Get all staff with stats
-app.get('/api/v1/staff', async (_req, res) => {
+app.get('/api/v1/staff', async (req, res) => {
   try {
+    const userId = req.user?.id;
+
     // Check if staff table exists
     const tableCheck = await pool.query(`
       SELECT EXISTS (
@@ -5443,10 +5464,11 @@ app.get('/api/v1/staff', async (_req, res) => {
            JOIN events e ON sa.event_id = e.id
            WHERE sa.staff_id = s.id AND e.date >= CURRENT_DATE) as upcoming_events
         FROM staff s
+        WHERE (s.user_id = $1 OR s.user_id IS NULL)
         ORDER BY s.created_at DESC
-      `);
+      `, [userId]);
     } else {
-      result = await pool.query(`SELECT * FROM staff ORDER BY created_at DESC`);
+      result = await pool.query(`SELECT * FROM staff WHERE (user_id = $1 OR user_id IS NULL) ORDER BY created_at DESC`, [userId]);
     }
 
     // Get stats
@@ -5456,8 +5478,8 @@ app.get('/api/v1/staff', async (_req, res) => {
         COUNT(*) FILTER (WHERE status = 'inactive') as inactive,
         COUNT(*) as total,
         COALESCE(AVG(rating), 0) as avg_rating
-      FROM staff
-    `);
+      FROM staff WHERE (user_id = $1 OR user_id IS NULL)
+    `, [userId]);
 
     res.json({
       staff: result.rows,
@@ -5472,20 +5494,22 @@ app.get('/api/v1/staff', async (_req, res) => {
 // GET /api/v1/staff/available - Get available staff for a date
 app.get('/api/v1/staff/available', async (req, res) => {
   try {
+    const userId = req.user?.id;
     const { date, role } = req.query;
     let query = `
       SELECT s.* FROM staff s
       WHERE s.status = 'active'
+      AND (s.user_id = $1 OR s.user_id IS NULL)
       AND s.id NOT IN (
         SELECT DISTINCT sa.staff_id FROM staff_assignments sa
         JOIN events e ON sa.event_id = e.id
-        WHERE e.date = $1 AND sa.status != 'cancelled'
+        WHERE e.date = $2 AND sa.status != 'cancelled'
       )
     `;
-    const params = [date || new Date().toISOString().split('T')[0]];
+    const params = [userId, date || new Date().toISOString().split('T')[0]];
 
     if (role) {
-      query += ` AND (s.role = $2 OR s.secondary_role = $2)`;
+      query += ` AND (s.role = $3 OR s.secondary_role = $3)`;
       params.push(role);
     }
 
@@ -5502,9 +5526,10 @@ app.get('/api/v1/staff/available', async (req, res) => {
 // GET /api/v1/staff/:id - Get single staff member with history
 app.get('/api/v1/staff/:id', async (req, res) => {
   try {
+    const userId = req.user?.id;
     const { id } = req.params;
 
-    const staffResult = await pool.query('SELECT * FROM staff WHERE id = $1', [id]);
+    const staffResult = await pool.query('SELECT * FROM staff WHERE id = $1 AND (user_id = $2 OR user_id IS NULL)', [id, userId]);
     if (staffResult.rows.length === 0) {
       return res.status(404).json({ error: 'Staff not found' });
     }
@@ -5543,6 +5568,7 @@ app.get('/api/v1/staff/:id', async (req, res) => {
 // POST /api/v1/staff - Create new staff member
 app.post('/api/v1/staff', async (req, res) => {
   try {
+    const userId = req.user?.id;
     const {
       name, email, phone, role, secondaryRole, photoUrl, instagram,
       hourlyRate, dayRate, experienceLevel, skills, notes,
@@ -5553,15 +5579,15 @@ app.post('/api/v1/staff', async (req, res) => {
       INSERT INTO staff (
         name, email, phone, role, secondary_role, photo_url, instagram,
         hourly_rate, day_rate, experience_level, skills, notes,
-        availability, emergency_contact, emergency_phone
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+        availability, emergency_contact, emergency_phone, user_id
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
       RETURNING *
     `, [
       name, email, phone, role, secondaryRole, photoUrl, instagram,
       hourlyRate, dayRate, experienceLevel || 'intermediate',
       skills || [], notes,
       availability || { weekdays: true, weekends: true },
-      emergencyContact, emergencyPhone
+      emergencyContact, emergencyPhone, userId
     ]);
 
     res.status(201).json(result.rows[0]);
@@ -5574,6 +5600,7 @@ app.post('/api/v1/staff', async (req, res) => {
 // PUT /api/v1/staff/:id - Update staff member
 app.put('/api/v1/staff/:id', async (req, res) => {
   try {
+    const userId = req.user?.id;
     const { id } = req.params;
     const {
       name, email, phone, role, secondaryRole, photoUrl, instagram,
@@ -5601,12 +5628,12 @@ app.put('/api/v1/staff/:id', async (req, res) => {
         emergency_phone = $16,
         rating = COALESCE($17, rating),
         updated_at = CURRENT_TIMESTAMP
-      WHERE id = $18
+      WHERE id = $18 AND (user_id = $19 OR user_id IS NULL)
       RETURNING *
     `, [
       name, email, phone, role, secondaryRole, photoUrl, instagram,
       hourlyRate, dayRate, experienceLevel, skills, notes, status,
-      availability, emergencyContact, emergencyPhone, rating, id
+      availability, emergencyContact, emergencyPhone, rating, id, userId
     ]);
 
     if (result.rows.length === 0) {
@@ -5622,8 +5649,9 @@ app.put('/api/v1/staff/:id', async (req, res) => {
 // DELETE /api/v1/staff/:id - Delete staff member
 app.delete('/api/v1/staff/:id', async (req, res) => {
   try {
+    const userId = req.user?.id;
     const { id } = req.params;
-    await pool.query('DELETE FROM staff WHERE id = $1', [id]);
+    await pool.query('DELETE FROM staff WHERE id = $1 AND (user_id = $2 OR user_id IS NULL)', [id, userId]);
     res.status(204).send();
   } catch (error) {
     console.error('Error deleting staff:', error);
@@ -6132,10 +6160,11 @@ app.get('/api/v1/client-portal/:token', async (req, res) => {
 // Get all models
 app.get('/api/v1/models', async (req, res) => {
   try {
+    const userId = req.user?.id;
     const { status, event_id } = req.query;
-    let query = 'SELECT * FROM models WHERE 1=1';
-    const params = [];
-    let paramIndex = 1;
+    let query = 'SELECT * FROM models WHERE (user_id = $1 OR user_id IS NULL)';
+    const params = [userId];
+    let paramIndex = 2;
 
     if (status) {
       query += ` AND status = $${paramIndex++}`;
@@ -6177,6 +6206,7 @@ app.get('/api/v1/models', async (req, res) => {
 // Get models stats
 app.get('/api/v1/models/stats', async (req, res) => {
   try {
+    const userId = req.user?.id;
     const result = await pool.query(`
       SELECT
         COUNT(*) as total,
@@ -6184,8 +6214,8 @@ app.get('/api/v1/models/stats', async (req, res) => {
         COUNT(*) FILTER (WHERE status = 'approved') as approved,
         COUNT(*) FILTER (WHERE status = 'assigned') as assigned,
         COUNT(*) FILTER (WHERE status = 'declined') as declined
-      FROM models
-    `);
+      FROM models WHERE (user_id = $1 OR user_id IS NULL)
+    `, [userId]);
     res.json(result.rows[0]);
   } catch (error) {
     console.error('Error fetching models stats:', error);
@@ -6196,7 +6226,8 @@ app.get('/api/v1/models/stats', async (req, res) => {
 // Get single model
 app.get('/api/v1/models/:id', async (req, res) => {
   try {
-    const result = await pool.query('SELECT * FROM models WHERE id = $1', [req.params.id]);
+    const userId = req.user?.id;
+    const result = await pool.query('SELECT * FROM models WHERE id = $1 AND (user_id = $2 OR user_id IS NULL)', [req.params.id, userId]);
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Model not found' });
     }
@@ -6226,12 +6257,13 @@ app.get('/api/v1/models/:id', async (req, res) => {
 // Create model
 app.post('/api/v1/models', async (req, res) => {
   try {
+    const userId = req.user?.id;
     const { name, email, phone, instagram, photos, height, experienceLevel, availability, notes, eventId } = req.body;
     const result = await pool.query(`
-      INSERT INTO models (name, email, phone, instagram, photos, height, experience_level, availability, notes, event_id, status)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending')
+      INSERT INTO models (name, email, phone, instagram, photos, height, experience_level, availability, notes, event_id, status, user_id)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending', $11)
       RETURNING *
-    `, [name, email, phone, instagram, photos || [], height, experienceLevel || 'intermediate', availability || {}, notes, eventId || null]);
+    `, [name, email, phone, instagram, photos || [], height, experienceLevel || 'intermediate', availability || {}, notes, eventId || null, userId]);
 
     const m = result.rows[0];
     res.status(201).json({
@@ -6249,6 +6281,7 @@ app.post('/api/v1/models', async (req, res) => {
 // Update model status
 app.patch('/api/v1/models/:id', async (req, res) => {
   try {
+    const userId = req.user?.id;
     const { status, eventId } = req.body;
     const updates = [];
     const params = [];
@@ -6264,9 +6297,10 @@ app.patch('/api/v1/models/:id', async (req, res) => {
     }
     updates.push(`updated_at = CURRENT_TIMESTAMP`);
     params.push(req.params.id);
+    params.push(userId);
 
     const result = await pool.query(
-      `UPDATE models SET ${updates.join(', ')} WHERE id = $${paramIndex} RETURNING *`,
+      `UPDATE models SET ${updates.join(', ')} WHERE id = $${paramIndex} AND (user_id = $${paramIndex + 1} OR user_id IS NULL) RETURNING *`,
       params
     );
 
@@ -6283,7 +6317,8 @@ app.patch('/api/v1/models/:id', async (req, res) => {
 // Delete model
 app.delete('/api/v1/models/:id', async (req, res) => {
   try {
-    await pool.query('DELETE FROM models WHERE id = $1', [req.params.id]);
+    const userId = req.user?.id;
+    await pool.query('DELETE FROM models WHERE id = $1 AND (user_id = $2 OR user_id IS NULL)', [req.params.id, userId]);
     res.json({ success: true });
   } catch (error) {
     console.error('Error deleting model:', error);
