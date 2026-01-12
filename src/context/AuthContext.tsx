@@ -3,7 +3,6 @@ import type { ReactNode } from 'react';
 
 // Base URL for the API - OAuth endpoints are at root level
 const API_HOST = 'https://berry-dashboard-api-production.up.railway.app';
-const API_URL = `${API_HOST}/api/v1`;
 const AUTH_URL = API_HOST; // OAuth endpoints at /oauth/*, not /api/v1/oauth/*
 
 interface User {
