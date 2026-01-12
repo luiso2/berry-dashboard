@@ -36,7 +36,7 @@ const categoryToStatus = (category: GuestCategory): string => {
 
 type GuestCategory = 'pending' | 'A' | 'B' | 'C' | 'rejected';
 type GuestStatus = 'pending' | 'approved' | 'declined' | 'rejected';
-type ViewType = 'overview' | 'guests' | 'emails' | 'vip' | 'priority' | 'standard' | 'analytics' | 'activity' | 'automation' | 'checkin' | 'models' | 'tables' | 'tickets' | 'sponsors' | 'events' | 'budget' | 'vendors';
+type ViewType = 'overview' | 'guests' | 'emails' | 'vip' | 'priority' | 'standard' | 'analytics' | 'activity' | 'automation' | 'checkin' | 'models' | 'tables' | 'tickets' | 'sponsors' | 'events' | 'budget' | 'vendors' | 'staff';
 type ThemeMode = 'dark' | 'light';
 
 interface Purchase {
@@ -233,32 +233,8 @@ interface Event {
   totalBudget?: number;
 }
 
-interface EventTimeline {
-  id: number;
-  eventId: number;
-  time: string;
-  title: string;
-  description?: string;
-  responsible?: string;
-  location?: string;
-  isCritical: boolean;
-  status: string;
-  notes?: string;
-  sortOrder: number;
-}
-
-interface EventChecklist {
-  id: number;
-  eventId: number;
-  category: string;
-  item: string;
-  isCompleted: boolean;
-  completedBy?: string;
-  completedAt?: string;
-  dueDate?: string;
-  priority: 'low' | 'medium' | 'high';
-  notes?: string;
-}
+// EventTimeline and EventChecklist interfaces will be added when
+// timeline and checklist features are implemented in the UI
 
 // Budget Interfaces
 interface BudgetCategory {
@@ -319,6 +295,33 @@ interface Vendor {
   totalSpent: number;
   eventsCount: number;
   createdAt: string;
+}
+
+// Staff Management Interfaces
+interface Staff {
+  id: number;
+  name: string;
+  email?: string;
+  phone?: string;
+  role: string;
+  secondaryRole?: string;
+  photoUrl?: string;
+  instagram?: string;
+  hourlyRate?: number;
+  dayRate?: number;
+  experienceLevel: 'beginner' | 'intermediate' | 'advanced' | 'expert';
+  skills?: string[];
+  notes?: string;
+  status: 'active' | 'inactive' | 'unavailable';
+  rating: number;
+  totalEvents: number;
+  totalEarned: number;
+  availability?: { weekdays: boolean; weekends: boolean };
+  emergencyContact?: string;
+  emergencyPhone?: string;
+  createdAt: string;
+  assignmentsCount?: number;
+  upcomingEvents?: number;
 }
 
 // Instagram-based AI Score Calculator
@@ -696,12 +699,15 @@ function App() {
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
   const [showEventForm, setShowEventForm] = useState(false);
   const [eventFormData, setEventFormData] = useState({ name: '', eventDate: '', eventType: 'party', venueName: '', venueCity: '', expectedAttendance: '', dressCode: '', theme: '', notes: '' });
-  const [calendarMonth, setCalendarMonth] = useState(new Date().getMonth() + 1);
-  const [calendarYear, setCalendarYear] = useState(new Date().getFullYear());
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [_calendarMonth, _setCalendarMonth] = useState(new Date().getMonth() + 1);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [_calendarYear, _setCalendarYear] = useState(new Date().getFullYear());
 
   // Budget state
   const [budgetCategories, setBudgetCategories] = useState<BudgetCategory[]>([]);
-  const [currentBudget, setCurrentBudget] = useState<Budget | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [_currentBudget, setCurrentBudget] = useState<Budget | null>(null);
   const [budgetItems, setBudgetItems] = useState<BudgetItem[]>([]);
   const [budgetSummary, setBudgetSummary] = useState({ totalBudget: 0, totalEstimatedExpenses: 0, totalActualExpenses: 0, totalEstimatedIncome: 0, totalActualIncome: 0, estimatedProfit: 0, actualProfit: 0, budgetRemaining: 0, paidCount: 0, pendingCount: 0 });
   const [showBudgetItemForm, setShowBudgetItemForm] = useState(false);
@@ -711,6 +717,17 @@ function App() {
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [showVendorForm, setShowVendorForm] = useState(false);
   const [vendorFormData, setVendorFormData] = useState({ name: '', category: '', contactName: '', email: '', phone: '', website: '', city: '', notes: '', isPreferred: false });
+
+  // Staff state
+  const [staffMembers, setStaffMembers] = useState<Staff[]>([]);
+  const [staffStats, setStaffStats] = useState({ active: 0, inactive: 0, total: 0, avgRating: 0 });
+  const [showStaffForm, setShowStaffForm] = useState(false);
+  const [staffFormData, setStaffFormData] = useState({
+    name: '', email: '', phone: '', role: '', secondaryRole: '', photoUrl: '', instagram: '',
+    hourlyRate: '', dayRate: '', experienceLevel: 'intermediate', skills: '', notes: '',
+    emergencyContact: '', emergencyPhone: ''
+  });
+  const [selectedStaff, setSelectedStaff] = useState<Staff | null>(null);
 
   // Collapsible menu state
   const [expandedMenus, setExpandedMenus] = useState<Set<string>>(new Set(['main', 'intelligence']));
@@ -1104,6 +1121,72 @@ function App() {
     }
   }, [vendorFormData, fetchVendors]);
 
+  // Fetch Staff
+  const fetchStaff = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_URL}/staff`);
+      const data = await res.json();
+      setStaffMembers(data.staff || []);
+      setStaffStats({
+        active: parseInt(data.stats?.active) || 0,
+        inactive: parseInt(data.stats?.inactive) || 0,
+        total: parseInt(data.stats?.total) || 0,
+        avgRating: parseFloat(data.stats?.avg_rating) || 0
+      });
+    } catch (error) {
+      console.error('Error fetching staff:', error);
+    }
+  }, []);
+
+  // Create Staff
+  const createStaff = useCallback(async () => {
+    if (!staffFormData.name || !staffFormData.role) {
+      addToast('Staff name and role are required', 'error');
+      return;
+    }
+    try {
+      const res = await fetch(`${API_URL}/staff`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...staffFormData,
+          hourlyRate: staffFormData.hourlyRate ? parseFloat(staffFormData.hourlyRate) : null,
+          dayRate: staffFormData.dayRate ? parseFloat(staffFormData.dayRate) : null,
+          skills: staffFormData.skills ? staffFormData.skills.split(',').map(s => s.trim()) : []
+        }),
+      });
+      if (res.ok) {
+        fetchStaff();
+        setShowStaffForm(false);
+        setStaffFormData({
+          name: '', email: '', phone: '', role: '', secondaryRole: '', photoUrl: '', instagram: '',
+          hourlyRate: '', dayRate: '', experienceLevel: 'intermediate', skills: '', notes: '',
+          emergencyContact: '', emergencyPhone: ''
+        });
+        addToast('Staff member added!', 'success');
+      }
+    } catch (error) {
+      console.error('Error creating staff:', error);
+      addToast('Failed to add staff member', 'error');
+    }
+  }, [staffFormData, fetchStaff]);
+
+  // Delete Staff
+  const deleteStaff = useCallback(async (id: number) => {
+    if (!confirm('Are you sure you want to delete this staff member?')) return;
+    try {
+      const res = await fetch(`${API_URL}/staff/${id}`, { method: 'DELETE' });
+      if (res.ok) {
+        fetchStaff();
+        setSelectedStaff(null);
+        addToast('Staff member deleted', 'success');
+      }
+    } catch (error) {
+      console.error('Error deleting staff:', error);
+      addToast('Failed to delete staff member', 'error');
+    }
+  }, [fetchStaff]);
+
   // Flyer ref for html-to-image
   const flyerRef = useRef<HTMLDivElement>(null);
 
@@ -1135,8 +1218,9 @@ function App() {
     if (activeView === 'sponsors') fetchSponsors();
     if (activeView === 'events') fetchEvents();
     if (activeView === 'vendors') fetchVendors();
+    if (activeView === 'staff') fetchStaff();
     if (activeView === 'budget' && selectedEvent) fetchBudget(selectedEvent.id);
-  }, [activeView, fetchModels, fetchTables, fetchTickets, fetchSponsors, fetchEvents, fetchVendors, fetchBudget, selectedEvent]);
+  }, [activeView, fetchModels, fetchTables, fetchTickets, fetchSponsors, fetchEvents, fetchVendors, fetchStaff, fetchBudget, selectedEvent]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -1751,6 +1835,7 @@ function App() {
             <NavItem label="All Events" active={activeView === 'events'} icon="📅" count={eventStats.total} onClick={() => navigateTo('events')} />
             <NavItem label="Budget" active={activeView === 'budget'} icon="💰" onClick={() => navigateTo('budget')} />
             <NavItem label="Vendors" active={activeView === 'vendors'} icon="🏢" count={vendors.length} onClick={() => navigateTo('vendors')} />
+            <NavItem label="Staff" active={activeView === 'staff'} icon="👥" count={staffStats.total} onClick={() => navigateTo('staff')} />
           </CollapsibleMenu>
         </nav>
 
@@ -3779,6 +3864,243 @@ function App() {
                       <button onClick={() => setShowVendorForm(false)} style={{ flex: 1, padding: '12px', background: '#1a1a1a', border: 'none', borderRadius: 8, color: '#fff', cursor: 'pointer' }}>Cancel</button>
                       <button onClick={createVendor} style={{ flex: 1, padding: '12px', background: '#3b82f6', border: 'none', borderRadius: 8, color: '#fff', fontWeight: 600, cursor: 'pointer' }}>Add Vendor</button>
                     </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ============================================ */}
+        {/* STAFF VIEW */}
+        {/* ============================================ */}
+        {activeView === 'staff' && (
+          <div className="page-content" style={{ padding: 32, animation: 'fadeIn 0.3s ease' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+              <div>
+                <h2 style={{ fontSize: 20, fontWeight: 600, margin: 0 }}>Staff Management</h2>
+                <p style={{ fontSize: 13, color: '#666', margin: '4px 0 0' }}>{staffStats.active} active • {staffStats.total} total staff members</p>
+              </div>
+              <button onClick={() => setShowStaffForm(true)} className="btn-hover" style={{ background: '#8b5cf6', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: 8, fontWeight: 600, cursor: 'pointer' }}>+ Add Staff</button>
+            </div>
+
+            {/* Staff Stats Cards */}
+            <div className="stats-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 24 }}>
+              <div style={{ background: '#0a0a0a', border: '1px solid #1a1a1a', borderRadius: 12, padding: 20 }}>
+                <div style={{ fontSize: 12, color: '#666', marginBottom: 8 }}>Total Staff</div>
+                <div style={{ fontSize: 28, fontWeight: 700, color: '#fff' }}>{staffStats.total}</div>
+              </div>
+              <div style={{ background: '#0a0a0a', border: '1px solid #1a1a1a', borderRadius: 12, padding: 20 }}>
+                <div style={{ fontSize: 12, color: '#666', marginBottom: 8 }}>Active</div>
+                <div style={{ fontSize: 28, fontWeight: 700, color: '#22c55e' }}>{staffStats.active}</div>
+              </div>
+              <div style={{ background: '#0a0a0a', border: '1px solid #1a1a1a', borderRadius: 12, padding: 20 }}>
+                <div style={{ fontSize: 12, color: '#666', marginBottom: 8 }}>Inactive</div>
+                <div style={{ fontSize: 28, fontWeight: 700, color: '#666' }}>{staffStats.inactive}</div>
+              </div>
+              <div style={{ background: '#0a0a0a', border: '1px solid #1a1a1a', borderRadius: 12, padding: 20 }}>
+                <div style={{ fontSize: 12, color: '#666', marginBottom: 8 }}>Avg Rating</div>
+                <div style={{ fontSize: 28, fontWeight: 700, color: '#d4af37' }}>⭐ {staffStats.avgRating.toFixed(1)}</div>
+              </div>
+            </div>
+
+            {/* Staff Grid */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 16 }}>
+              {staffMembers.map(staff => (
+                <div
+                  key={staff.id}
+                  style={{
+                    background: '#0a0a0a',
+                    border: `1px solid ${staff.status === 'active' ? '#8b5cf640' : '#1a1a1a'}`,
+                    borderRadius: 12,
+                    padding: 20,
+                    cursor: 'pointer',
+                    transition: 'all 0.2s'
+                  }}
+                  onClick={() => setSelectedStaff(staff)}
+                  className="btn-hover"
+                >
+                  <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
+                    {/* Avatar */}
+                    <div style={{
+                      width: 60, height: 60, borderRadius: 12,
+                      background: staff.photoUrl ? `url(${staff.photoUrl}) center/cover` : '#8b5cf620',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: 24, color: '#8b5cf6', flexShrink: 0
+                    }}>
+                      {!staff.photoUrl && staff.name.charAt(0).toUpperCase()}
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                        <div>
+                          <h3 style={{ fontSize: 16, fontWeight: 600, margin: 0 }}>{staff.name}</h3>
+                          <div style={{ fontSize: 13, color: '#8b5cf6', marginTop: 2 }}>{staff.role}</div>
+                          {staff.secondaryRole && <div style={{ fontSize: 11, color: '#666', marginTop: 2 }}>Also: {staff.secondaryRole}</div>}
+                        </div>
+                        <span style={{
+                          fontSize: 10, padding: '3px 8px', borderRadius: 4,
+                          background: staff.status === 'active' ? '#22c55e20' : '#66666620',
+                          color: staff.status === 'active' ? '#22c55e' : '#666'
+                        }}>
+                          {staff.status.toUpperCase()}
+                        </span>
+                      </div>
+                      <div style={{ display: 'flex', gap: 12, marginTop: 12, fontSize: 12, color: '#888' }}>
+                        {staff.phone && <span>📱 {staff.phone}</span>}
+                        {staff.instagram && <span>📷 @{staff.instagram.replace('@', '')}</span>}
+                      </div>
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 16, paddingTop: 12, borderTop: '1px solid #1a1a1a' }}>
+                    <div style={{ display: 'flex', gap: 2 }}>
+                      {[1, 2, 3, 4, 5].map(star => (
+                        <span key={star} style={{ fontSize: 12, color: star <= staff.rating ? '#d4af37' : '#333' }}>★</span>
+                      ))}
+                    </div>
+                    <div style={{ fontSize: 12 }}>
+                      <span style={{ color: '#666' }}>{staff.totalEvents || 0} events</span>
+                      <span style={{ color: '#22c55e', marginLeft: 12 }}>${(staff.totalEarned || 0).toLocaleString()} earned</span>
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8, fontSize: 12, color: '#666' }}>
+                    <span>{staff.experienceLevel} level</span>
+                    <span>${staff.hourlyRate || 0}/hr • ${staff.dayRate || 0}/day</span>
+                  </div>
+                </div>
+              ))}
+              {staffMembers.length === 0 && (
+                <div style={{ gridColumn: '1 / -1', padding: 60, textAlign: 'center', background: '#0a0a0a', borderRadius: 12, border: '1px solid #1a1a1a' }}>
+                  <div style={{ fontSize: 48, marginBottom: 12 }}>👥</div>
+                  <div style={{ color: '#666', fontSize: 15 }}>No staff members yet</div>
+                  <div style={{ color: '#444', fontSize: 13, marginTop: 8 }}>Add your first staff member to start scheduling</div>
+                </div>
+              )}
+            </div>
+
+            {/* Add Staff Modal */}
+            {showStaffForm && (
+              <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.9)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200, padding: 16 }} onClick={() => setShowStaffForm(false)}>
+                <div style={{ background: '#0a0a0a', border: '1px solid #1a1a1a', borderRadius: 16, padding: 32, width: '100%', maxWidth: 550, maxHeight: '90vh', overflowY: 'auto', animation: 'slideUp 0.3s ease' }} onClick={e => e.stopPropagation()}>
+                  <h2 style={{ fontSize: 20, fontWeight: 600, margin: '0 0 24px' }}>Add Staff Member</h2>
+                  <div style={{ display: 'grid', gap: 16 }}>
+                    <input placeholder="Full Name *" value={staffFormData.name} onChange={e => setStaffFormData(p => ({ ...p, name: e.target.value }))} style={{ background: '#111', border: '1px solid #222', borderRadius: 8, padding: '12px 16px', color: '#fff', fontSize: 14 }} />
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                      <select value={staffFormData.role} onChange={e => setStaffFormData(p => ({ ...p, role: e.target.value }))} style={{ background: '#111', border: '1px solid #222', borderRadius: 8, padding: '12px 16px', color: '#fff', fontSize: 14 }}>
+                        <option value="">Primary Role *</option>
+                        <option value="Model">Model</option>
+                        <option value="Hostess">Hostess</option>
+                        <option value="Bartender">Bartender</option>
+                        <option value="Waiter">Waiter</option>
+                        <option value="Security">Security</option>
+                        <option value="DJ">DJ</option>
+                        <option value="Photographer">Photographer</option>
+                        <option value="Videographer">Videographer</option>
+                        <option value="Coordinator">Coordinator</option>
+                        <option value="Manager">Manager</option>
+                        <option value="Other">Other</option>
+                      </select>
+                      <select value={staffFormData.secondaryRole} onChange={e => setStaffFormData(p => ({ ...p, secondaryRole: e.target.value }))} style={{ background: '#111', border: '1px solid #222', borderRadius: 8, padding: '12px 16px', color: '#fff', fontSize: 14 }}>
+                        <option value="">Secondary Role</option>
+                        <option value="Model">Model</option>
+                        <option value="Hostess">Hostess</option>
+                        <option value="Bartender">Bartender</option>
+                        <option value="Waiter">Waiter</option>
+                        <option value="Security">Security</option>
+                        <option value="DJ">DJ</option>
+                        <option value="Photographer">Photographer</option>
+                        <option value="Coordinator">Coordinator</option>
+                      </select>
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                      <input placeholder="Email" type="email" value={staffFormData.email} onChange={e => setStaffFormData(p => ({ ...p, email: e.target.value }))} style={{ background: '#111', border: '1px solid #222', borderRadius: 8, padding: '12px 16px', color: '#fff', fontSize: 14 }} />
+                      <input placeholder="Phone" value={staffFormData.phone} onChange={e => setStaffFormData(p => ({ ...p, phone: e.target.value }))} style={{ background: '#111', border: '1px solid #222', borderRadius: 8, padding: '12px 16px', color: '#fff', fontSize: 14 }} />
+                    </div>
+                    <input placeholder="Instagram Handle" value={staffFormData.instagram} onChange={e => setStaffFormData(p => ({ ...p, instagram: e.target.value }))} style={{ background: '#111', border: '1px solid #222', borderRadius: 8, padding: '12px 16px', color: '#fff', fontSize: 14 }} />
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
+                      <input placeholder="Hourly Rate ($)" type="number" value={staffFormData.hourlyRate} onChange={e => setStaffFormData(p => ({ ...p, hourlyRate: e.target.value }))} style={{ background: '#111', border: '1px solid #222', borderRadius: 8, padding: '12px 16px', color: '#fff', fontSize: 14 }} />
+                      <input placeholder="Day Rate ($)" type="number" value={staffFormData.dayRate} onChange={e => setStaffFormData(p => ({ ...p, dayRate: e.target.value }))} style={{ background: '#111', border: '1px solid #222', borderRadius: 8, padding: '12px 16px', color: '#fff', fontSize: 14 }} />
+                      <select value={staffFormData.experienceLevel} onChange={e => setStaffFormData(p => ({ ...p, experienceLevel: e.target.value }))} style={{ background: '#111', border: '1px solid #222', borderRadius: 8, padding: '12px 16px', color: '#fff', fontSize: 14 }}>
+                        <option value="beginner">Beginner</option>
+                        <option value="intermediate">Intermediate</option>
+                        <option value="advanced">Advanced</option>
+                        <option value="expert">Expert</option>
+                      </select>
+                    </div>
+                    <input placeholder="Skills (comma-separated: bartending, hosting, bilingual)" value={staffFormData.skills} onChange={e => setStaffFormData(p => ({ ...p, skills: e.target.value }))} style={{ background: '#111', border: '1px solid #222', borderRadius: 8, padding: '12px 16px', color: '#fff', fontSize: 14 }} />
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                      <input placeholder="Emergency Contact Name" value={staffFormData.emergencyContact} onChange={e => setStaffFormData(p => ({ ...p, emergencyContact: e.target.value }))} style={{ background: '#111', border: '1px solid #222', borderRadius: 8, padding: '12px 16px', color: '#fff', fontSize: 14 }} />
+                      <input placeholder="Emergency Phone" value={staffFormData.emergencyPhone} onChange={e => setStaffFormData(p => ({ ...p, emergencyPhone: e.target.value }))} style={{ background: '#111', border: '1px solid #222', borderRadius: 8, padding: '12px 16px', color: '#fff', fontSize: 14 }} />
+                    </div>
+                    <textarea placeholder="Notes" value={staffFormData.notes} onChange={e => setStaffFormData(p => ({ ...p, notes: e.target.value }))} rows={3} style={{ background: '#111', border: '1px solid #222', borderRadius: 8, padding: '12px 16px', color: '#fff', fontSize: 14, resize: 'vertical' }} />
+                    <div style={{ display: 'flex', gap: 12 }}>
+                      <button onClick={() => setShowStaffForm(false)} style={{ flex: 1, padding: '12px', background: '#1a1a1a', border: 'none', borderRadius: 8, color: '#fff', cursor: 'pointer' }}>Cancel</button>
+                      <button onClick={createStaff} style={{ flex: 1, padding: '12px', background: '#8b5cf6', border: 'none', borderRadius: 8, color: '#fff', fontWeight: 600, cursor: 'pointer' }}>Add Staff</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Staff Detail Modal */}
+            {selectedStaff && (
+              <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.9)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200, padding: 16 }} onClick={() => setSelectedStaff(null)}>
+                <div style={{ background: '#0a0a0a', border: '1px solid #1a1a1a', borderRadius: 16, padding: 32, width: '100%', maxWidth: 500, animation: 'slideUp 0.3s ease' }} onClick={e => e.stopPropagation()}>
+                  <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start', marginBottom: 24 }}>
+                    <div style={{
+                      width: 80, height: 80, borderRadius: 16,
+                      background: selectedStaff.photoUrl ? `url(${selectedStaff.photoUrl}) center/cover` : '#8b5cf620',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: 32, color: '#8b5cf6', flexShrink: 0
+                    }}>
+                      {!selectedStaff.photoUrl && selectedStaff.name.charAt(0).toUpperCase()}
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <h2 style={{ fontSize: 24, fontWeight: 600, margin: 0 }}>{selectedStaff.name}</h2>
+                      <div style={{ fontSize: 15, color: '#8b5cf6', marginTop: 4 }}>{selectedStaff.role}</div>
+                      {selectedStaff.secondaryRole && <div style={{ fontSize: 13, color: '#666', marginTop: 2 }}>Also: {selectedStaff.secondaryRole}</div>}
+                      <div style={{ display: 'flex', gap: 2, marginTop: 8 }}>
+                        {[1, 2, 3, 4, 5].map(star => (
+                          <span key={star} style={{ fontSize: 16, color: star <= selectedStaff.rating ? '#d4af37' : '#333' }}>★</span>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 24 }}>
+                    <div style={{ background: '#111', borderRadius: 8, padding: 16 }}>
+                      <div style={{ fontSize: 12, color: '#666' }}>Total Events</div>
+                      <div style={{ fontSize: 24, fontWeight: 600 }}>{selectedStaff.totalEvents || 0}</div>
+                    </div>
+                    <div style={{ background: '#111', borderRadius: 8, padding: 16 }}>
+                      <div style={{ fontSize: 12, color: '#666' }}>Total Earned</div>
+                      <div style={{ fontSize: 24, fontWeight: 600, color: '#22c55e' }}>${(selectedStaff.totalEarned || 0).toLocaleString()}</div>
+                    </div>
+                  </div>
+                  <div style={{ fontSize: 14, color: '#888', marginBottom: 16 }}>
+                    {selectedStaff.email && <div style={{ marginBottom: 8 }}>📧 {selectedStaff.email}</div>}
+                    {selectedStaff.phone && <div style={{ marginBottom: 8 }}>📱 {selectedStaff.phone}</div>}
+                    {selectedStaff.instagram && <div style={{ marginBottom: 8 }}>📷 @{selectedStaff.instagram.replace('@', '')}</div>}
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 0', borderTop: '1px solid #1a1a1a', fontSize: 14 }}>
+                    <span style={{ color: '#666' }}>Rates</span>
+                    <span>${selectedStaff.hourlyRate || 0}/hr • ${selectedStaff.dayRate || 0}/day</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 0', borderTop: '1px solid #1a1a1a', fontSize: 14 }}>
+                    <span style={{ color: '#666' }}>Experience</span>
+                    <span style={{ textTransform: 'capitalize' }}>{selectedStaff.experienceLevel}</span>
+                  </div>
+                  {selectedStaff.skills && selectedStaff.skills.length > 0 && (
+                    <div style={{ padding: '12px 0', borderTop: '1px solid #1a1a1a' }}>
+                      <div style={{ fontSize: 12, color: '#666', marginBottom: 8 }}>Skills</div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                        {selectedStaff.skills.map((skill, idx) => (
+                          <span key={idx} style={{ fontSize: 12, padding: '4px 10px', background: '#8b5cf620', color: '#8b5cf6', borderRadius: 4 }}>{skill}</span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  <div style={{ display: 'flex', gap: 12, marginTop: 24 }}>
+                    <button onClick={() => deleteStaff(selectedStaff.id)} style={{ padding: '12px', background: '#ef444420', border: 'none', borderRadius: 8, color: '#ef4444', cursor: 'pointer' }}>Delete</button>
+                    <button onClick={() => setSelectedStaff(null)} style={{ flex: 1, padding: '12px', background: '#1a1a1a', border: 'none', borderRadius: 8, color: '#fff', cursor: 'pointer' }}>Close</button>
                   </div>
                 </div>
               </div>

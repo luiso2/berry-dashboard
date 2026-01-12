@@ -367,7 +367,169 @@ const initDatabase = async () => {
       CREATE INDEX IF NOT EXISTS idx_vendors_rating ON vendors(rating DESC);
     `);
 
-    console.log('Database tables initialized successfully (guests, email_events, tickets, activity_log, sponsors, events, budgets, vendors)');
+    // ============================================
+    // PRIORITY MEDIUM #1: STAFF SCHEDULING
+    // ============================================
+
+    // Create staff table - All event staff/talent
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS staff (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(255) NOT NULL,
+        email VARCHAR(255),
+        phone VARCHAR(100),
+        role VARCHAR(100) NOT NULL,
+        secondary_role VARCHAR(100),
+        photo_url TEXT,
+        instagram VARCHAR(255),
+        hourly_rate DECIMAL(10,2),
+        day_rate DECIMAL(10,2),
+        experience_level VARCHAR(50) DEFAULT 'intermediate',
+        skills TEXT[],
+        notes TEXT,
+        status VARCHAR(50) DEFAULT 'active',
+        rating INTEGER DEFAULT 0,
+        total_events INTEGER DEFAULT 0,
+        total_earned DECIMAL(12,2) DEFAULT 0,
+        availability JSONB DEFAULT '{"weekdays": true, "weekends": true}',
+        emergency_contact VARCHAR(255),
+        emergency_phone VARCHAR(100),
+        bank_info TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_staff_role ON staff(role);
+      CREATE INDEX IF NOT EXISTS idx_staff_status ON staff(status);
+    `);
+
+    // Create staff_assignments table - Staff assigned to events
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS staff_assignments (
+        id SERIAL PRIMARY KEY,
+        staff_id INTEGER REFERENCES staff(id) ON DELETE CASCADE,
+        event_id INTEGER REFERENCES events(id) ON DELETE CASCADE,
+        role VARCHAR(100) NOT NULL,
+        shift_start TIME,
+        shift_end TIME,
+        break_duration INTEGER DEFAULT 0,
+        location VARCHAR(255),
+        uniform VARCHAR(255),
+        special_instructions TEXT,
+        rate_type VARCHAR(20) DEFAULT 'hourly',
+        rate_amount DECIMAL(10,2),
+        bonus DECIMAL(10,2) DEFAULT 0,
+        status VARCHAR(50) DEFAULT 'pending',
+        confirmed_at TIMESTAMP,
+        checked_in_at TIMESTAMP,
+        checked_out_at TIMESTAMP,
+        hours_worked DECIMAL(5,2),
+        notes TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(staff_id, event_id, role)
+      );
+      CREATE INDEX IF NOT EXISTS idx_assignments_event ON staff_assignments(event_id);
+      CREATE INDEX IF NOT EXISTS idx_assignments_staff ON staff_assignments(staff_id);
+      CREATE INDEX IF NOT EXISTS idx_assignments_status ON staff_assignments(status);
+    `);
+
+    // Create staff_payments table - Payment tracking
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS staff_payments (
+        id SERIAL PRIMARY KEY,
+        staff_id INTEGER REFERENCES staff(id) ON DELETE CASCADE,
+        assignment_id INTEGER REFERENCES staff_assignments(id) ON DELETE SET NULL,
+        event_id INTEGER REFERENCES events(id) ON DELETE SET NULL,
+        amount DECIMAL(10,2) NOT NULL,
+        payment_type VARCHAR(50) DEFAULT 'event',
+        payment_method VARCHAR(50),
+        payment_date DATE,
+        reference VARCHAR(255),
+        status VARCHAR(50) DEFAULT 'pending',
+        notes TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_payments_staff ON staff_payments(staff_id);
+      CREATE INDEX IF NOT EXISTS idx_payments_status ON staff_payments(status);
+    `);
+
+    // ============================================
+    // PRIORITY MEDIUM #2: VENDOR ENHANCEMENTS
+    // ============================================
+
+    // Create vendor_quotes table - Quotes/proposals from vendors
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS vendor_quotes (
+        id SERIAL PRIMARY KEY,
+        vendor_id INTEGER REFERENCES vendors(id) ON DELETE CASCADE,
+        event_id INTEGER REFERENCES events(id) ON DELETE CASCADE,
+        quote_number VARCHAR(100),
+        description TEXT,
+        amount DECIMAL(12,2) NOT NULL,
+        valid_until DATE,
+        items JSONB,
+        terms TEXT,
+        status VARCHAR(50) DEFAULT 'pending',
+        accepted_at TIMESTAMP,
+        notes TEXT,
+        document_url TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_quotes_vendor ON vendor_quotes(vendor_id);
+      CREATE INDEX IF NOT EXISTS idx_quotes_event ON vendor_quotes(event_id);
+      CREATE INDEX IF NOT EXISTS idx_quotes_status ON vendor_quotes(status);
+    `);
+
+    // Create vendor_contracts table - Contracts with vendors
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS vendor_contracts (
+        id SERIAL PRIMARY KEY,
+        vendor_id INTEGER REFERENCES vendors(id) ON DELETE CASCADE,
+        event_id INTEGER REFERENCES events(id) ON DELETE CASCADE,
+        quote_id INTEGER REFERENCES vendor_quotes(id) ON DELETE SET NULL,
+        contract_number VARCHAR(100),
+        title VARCHAR(255) NOT NULL,
+        description TEXT,
+        total_amount DECIMAL(12,2) NOT NULL,
+        deposit_amount DECIMAL(12,2),
+        deposit_paid BOOLEAN DEFAULT false,
+        deposit_paid_date DATE,
+        balance_due_date DATE,
+        balance_paid BOOLEAN DEFAULT false,
+        balance_paid_date DATE,
+        start_date DATE,
+        end_date DATE,
+        terms TEXT,
+        status VARCHAR(50) DEFAULT 'draft',
+        signed_at TIMESTAMP,
+        document_url TEXT,
+        notes TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_contracts_vendor ON vendor_contracts(vendor_id);
+      CREATE INDEX IF NOT EXISTS idx_contracts_event ON vendor_contracts(event_id);
+      CREATE INDEX IF NOT EXISTS idx_contracts_status ON vendor_contracts(status);
+    `);
+
+    // Create vendor_history table - Track vendor usage per event
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS vendor_history (
+        id SERIAL PRIMARY KEY,
+        vendor_id INTEGER REFERENCES vendors(id) ON DELETE CASCADE,
+        event_id INTEGER REFERENCES events(id) ON DELETE CASCADE,
+        service_provided TEXT,
+        amount_paid DECIMAL(12,2),
+        rating INTEGER,
+        feedback TEXT,
+        would_hire_again BOOLEAN,
+        issues TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(vendor_id, event_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_history_vendor ON vendor_history(vendor_id);
+    `);
+
+    console.log('Database tables initialized successfully (guests, email_events, tickets, activity_log, sponsors, events, budgets, vendors, staff, contracts)');
   } catch (error) {
     console.error('Error initializing database:', error);
   } finally {
@@ -3113,6 +3275,821 @@ app.delete('/api/v1/vendors/:id', async (req, res) => {
   } catch (error) {
     console.error('Error deleting vendor:', error);
     res.status(500).json({ error: 'Failed to delete vendor' });
+  }
+});
+
+// ============================================================
+// PRIORITY MEDIUM: STAFF MANAGEMENT ENDPOINTS
+// ============================================================
+
+// GET /api/v1/staff - Get all staff with stats
+app.get('/api/v1/staff', async (_req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT s.*,
+        (SELECT COUNT(*) FROM staff_assignments sa WHERE sa.staff_id = s.id) as assignments_count,
+        (SELECT COUNT(*) FROM staff_assignments sa
+         JOIN events e ON sa.event_id = e.id
+         WHERE sa.staff_id = s.id AND e.event_date >= CURRENT_DATE) as upcoming_events
+      FROM staff s
+      ORDER BY s.created_at DESC
+    `);
+
+    // Get stats
+    const stats = await pool.query(`
+      SELECT
+        COUNT(*) FILTER (WHERE status = 'active') as active,
+        COUNT(*) FILTER (WHERE status = 'inactive') as inactive,
+        COUNT(*) as total,
+        COALESCE(AVG(rating), 0) as avg_rating
+      FROM staff
+    `);
+
+    res.json({
+      staff: result.rows,
+      stats: stats.rows[0]
+    });
+  } catch (error) {
+    console.error('Error fetching staff:', error);
+    res.status(500).json({ error: 'Failed to fetch staff' });
+  }
+});
+
+// GET /api/v1/staff/available - Get available staff for a date
+app.get('/api/v1/staff/available', async (req, res) => {
+  try {
+    const { date, role } = req.query;
+    let query = `
+      SELECT s.* FROM staff s
+      WHERE s.status = 'active'
+      AND s.id NOT IN (
+        SELECT DISTINCT sa.staff_id FROM staff_assignments sa
+        JOIN events e ON sa.event_id = e.id
+        WHERE e.event_date = $1 AND sa.status != 'cancelled'
+      )
+    `;
+    const params = [date || new Date().toISOString().split('T')[0]];
+
+    if (role) {
+      query += ` AND (s.role = $2 OR s.secondary_role = $2)`;
+      params.push(role);
+    }
+
+    query += ` ORDER BY s.rating DESC, s.total_events DESC`;
+
+    const result = await pool.query(query, params);
+    res.json({ staff: result.rows });
+  } catch (error) {
+    console.error('Error fetching available staff:', error);
+    res.status(500).json({ error: 'Failed to fetch available staff' });
+  }
+});
+
+// GET /api/v1/staff/:id - Get single staff member with history
+app.get('/api/v1/staff/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const staffResult = await pool.query('SELECT * FROM staff WHERE id = $1', [id]);
+    if (staffResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Staff not found' });
+    }
+
+    // Get recent assignments
+    const assignments = await pool.query(`
+      SELECT sa.*, e.name as event_name, e.event_date
+      FROM staff_assignments sa
+      JOIN events e ON sa.event_id = e.id
+      WHERE sa.staff_id = $1
+      ORDER BY e.event_date DESC
+      LIMIT 10
+    `, [id]);
+
+    // Get recent payments
+    const payments = await pool.query(`
+      SELECT sp.*, e.name as event_name
+      FROM staff_payments sp
+      LEFT JOIN events e ON sp.event_id = e.id
+      WHERE sp.staff_id = $1
+      ORDER BY sp.created_at DESC
+      LIMIT 10
+    `, [id]);
+
+    res.json({
+      staff: staffResult.rows[0],
+      recentAssignments: assignments.rows,
+      recentPayments: payments.rows
+    });
+  } catch (error) {
+    console.error('Error fetching staff member:', error);
+    res.status(500).json({ error: 'Failed to fetch staff member' });
+  }
+});
+
+// POST /api/v1/staff - Create new staff member
+app.post('/api/v1/staff', async (req, res) => {
+  try {
+    const {
+      name, email, phone, role, secondaryRole, photoUrl, instagram,
+      hourlyRate, dayRate, experienceLevel, skills, notes,
+      availability, emergencyContact, emergencyPhone
+    } = req.body;
+
+    const result = await pool.query(`
+      INSERT INTO staff (
+        name, email, phone, role, secondary_role, photo_url, instagram,
+        hourly_rate, day_rate, experience_level, skills, notes,
+        availability, emergency_contact, emergency_phone
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+      RETURNING *
+    `, [
+      name, email, phone, role, secondaryRole, photoUrl, instagram,
+      hourlyRate, dayRate, experienceLevel || 'intermediate',
+      skills || [], notes,
+      availability || { weekdays: true, weekends: true },
+      emergencyContact, emergencyPhone
+    ]);
+
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    console.error('Error creating staff:', error);
+    res.status(500).json({ error: 'Failed to create staff member' });
+  }
+});
+
+// PUT /api/v1/staff/:id - Update staff member
+app.put('/api/v1/staff/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const {
+      name, email, phone, role, secondaryRole, photoUrl, instagram,
+      hourlyRate, dayRate, experienceLevel, skills, notes, status,
+      availability, emergencyContact, emergencyPhone, rating
+    } = req.body;
+
+    const result = await pool.query(`
+      UPDATE staff SET
+        name = COALESCE($1, name),
+        email = COALESCE($2, email),
+        phone = COALESCE($3, phone),
+        role = COALESCE($4, role),
+        secondary_role = $5,
+        photo_url = $6,
+        instagram = $7,
+        hourly_rate = COALESCE($8, hourly_rate),
+        day_rate = $9,
+        experience_level = COALESCE($10, experience_level),
+        skills = COALESCE($11, skills),
+        notes = $12,
+        status = COALESCE($13, status),
+        availability = COALESCE($14, availability),
+        emergency_contact = $15,
+        emergency_phone = $16,
+        rating = COALESCE($17, rating),
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = $18
+      RETURNING *
+    `, [
+      name, email, phone, role, secondaryRole, photoUrl, instagram,
+      hourlyRate, dayRate, experienceLevel, skills, notes, status,
+      availability, emergencyContact, emergencyPhone, rating, id
+    ]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Staff not found' });
+    }
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error updating staff:', error);
+    res.status(500).json({ error: 'Failed to update staff member' });
+  }
+});
+
+// DELETE /api/v1/staff/:id - Delete staff member
+app.delete('/api/v1/staff/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    await pool.query('DELETE FROM staff WHERE id = $1', [id]);
+    res.status(204).send();
+  } catch (error) {
+    console.error('Error deleting staff:', error);
+    res.status(500).json({ error: 'Failed to delete staff member' });
+  }
+});
+
+// ============================================================
+// STAFF ASSIGNMENTS ENDPOINTS
+// ============================================================
+
+// GET /api/v1/events/:eventId/staff - Get staff assigned to event
+app.get('/api/v1/events/:eventId/staff', async (req, res) => {
+  try {
+    const { eventId } = req.params;
+    const result = await pool.query(`
+      SELECT sa.*, s.name as staff_name, s.phone, s.email, s.photo_url, s.instagram
+      FROM staff_assignments sa
+      JOIN staff s ON sa.staff_id = s.id
+      WHERE sa.event_id = $1
+      ORDER BY sa.shift_start, s.name
+    `, [eventId]);
+
+    // Get summary by role
+    const summary = await pool.query(`
+      SELECT role, COUNT(*) as count,
+        SUM(CASE WHEN status = 'confirmed' THEN 1 ELSE 0 END) as confirmed
+      FROM staff_assignments
+      WHERE event_id = $1
+      GROUP BY role
+    `, [eventId]);
+
+    res.json({
+      assignments: result.rows,
+      summary: summary.rows
+    });
+  } catch (error) {
+    console.error('Error fetching event staff:', error);
+    res.status(500).json({ error: 'Failed to fetch event staff' });
+  }
+});
+
+// POST /api/v1/events/:eventId/staff - Assign staff to event
+app.post('/api/v1/events/:eventId/staff', async (req, res) => {
+  try {
+    const { eventId } = req.params;
+    const {
+      staffId, role, shiftStart, shiftEnd, breakDuration, location,
+      uniform, specialInstructions, rateType, rateAmount, bonus
+    } = req.body;
+
+    // Check if already assigned
+    const existing = await pool.query(
+      'SELECT id FROM staff_assignments WHERE staff_id = $1 AND event_id = $2',
+      [staffId, eventId]
+    );
+    if (existing.rows.length > 0) {
+      return res.status(400).json({ error: 'Staff already assigned to this event' });
+    }
+
+    const result = await pool.query(`
+      INSERT INTO staff_assignments (
+        staff_id, event_id, role, shift_start, shift_end, break_duration,
+        location, uniform, special_instructions, rate_type, rate_amount, bonus
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+      RETURNING *
+    `, [
+      staffId, eventId, role, shiftStart, shiftEnd, breakDuration || 0,
+      location, uniform, specialInstructions, rateType || 'hourly', rateAmount, bonus || 0
+    ]);
+
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    console.error('Error assigning staff:', error);
+    res.status(500).json({ error: 'Failed to assign staff' });
+  }
+});
+
+// PUT /api/v1/staff-assignments/:id - Update assignment
+app.put('/api/v1/staff-assignments/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const {
+      role, shiftStart, shiftEnd, breakDuration, location, uniform,
+      specialInstructions, rateType, rateAmount, bonus, status,
+      confirmedAt, checkedInAt, checkedOutAt, hoursWorked, notes
+    } = req.body;
+
+    const result = await pool.query(`
+      UPDATE staff_assignments SET
+        role = COALESCE($1, role),
+        shift_start = $2,
+        shift_end = $3,
+        break_duration = COALESCE($4, break_duration),
+        location = $5,
+        uniform = $6,
+        special_instructions = $7,
+        rate_type = COALESCE($8, rate_type),
+        rate_amount = $9,
+        bonus = COALESCE($10, bonus),
+        status = COALESCE($11, status),
+        confirmed_at = $12,
+        checked_in_at = $13,
+        checked_out_at = $14,
+        hours_worked = $15,
+        notes = $16,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = $17
+      RETURNING *
+    `, [
+      role, shiftStart, shiftEnd, breakDuration, location, uniform,
+      specialInstructions, rateType, rateAmount, bonus, status,
+      confirmedAt, checkedInAt, checkedOutAt, hoursWorked, notes, id
+    ]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Assignment not found' });
+    }
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error updating assignment:', error);
+    res.status(500).json({ error: 'Failed to update assignment' });
+  }
+});
+
+// DELETE /api/v1/staff-assignments/:id - Remove assignment
+app.delete('/api/v1/staff-assignments/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    await pool.query('DELETE FROM staff_assignments WHERE id = $1', [id]);
+    res.status(204).send();
+  } catch (error) {
+    console.error('Error removing assignment:', error);
+    res.status(500).json({ error: 'Failed to remove assignment' });
+  }
+});
+
+// POST /api/v1/staff-assignments/:id/checkin - Check in staff
+app.post('/api/v1/staff-assignments/:id/checkin', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query(`
+      UPDATE staff_assignments SET
+        checked_in_at = CURRENT_TIMESTAMP,
+        status = 'checked_in'
+      WHERE id = $1
+      RETURNING *
+    `, [id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Assignment not found' });
+    }
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error checking in staff:', error);
+    res.status(500).json({ error: 'Failed to check in staff' });
+  }
+});
+
+// POST /api/v1/staff-assignments/:id/checkout - Check out staff
+app.post('/api/v1/staff-assignments/:id/checkout', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { hoursWorked } = req.body;
+
+    const result = await pool.query(`
+      UPDATE staff_assignments SET
+        checked_out_at = CURRENT_TIMESTAMP,
+        hours_worked = $1,
+        status = 'completed'
+      WHERE id = $2
+      RETURNING *
+    `, [hoursWorked, id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Assignment not found' });
+    }
+
+    // Update staff total_events
+    await pool.query(`
+      UPDATE staff SET
+        total_events = total_events + 1,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = $1
+    `, [result.rows[0].staff_id]);
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error checking out staff:', error);
+    res.status(500).json({ error: 'Failed to check out staff' });
+  }
+});
+
+// ============================================================
+// STAFF PAYMENTS ENDPOINTS
+// ============================================================
+
+// GET /api/v1/staff/:staffId/payments - Get staff payments
+app.get('/api/v1/staff/:staffId/payments', async (req, res) => {
+  try {
+    const { staffId } = req.params;
+    const result = await pool.query(`
+      SELECT sp.*, e.name as event_name
+      FROM staff_payments sp
+      LEFT JOIN events e ON sp.event_id = e.id
+      WHERE sp.staff_id = $1
+      ORDER BY sp.created_at DESC
+    `, [staffId]);
+
+    // Get totals
+    const totals = await pool.query(`
+      SELECT
+        SUM(CASE WHEN status = 'paid' THEN amount ELSE 0 END) as total_paid,
+        SUM(CASE WHEN status = 'pending' THEN amount ELSE 0 END) as total_pending
+      FROM staff_payments
+      WHERE staff_id = $1
+    `, [staffId]);
+
+    res.json({
+      payments: result.rows,
+      totals: totals.rows[0]
+    });
+  } catch (error) {
+    console.error('Error fetching payments:', error);
+    res.status(500).json({ error: 'Failed to fetch payments' });
+  }
+});
+
+// POST /api/v1/staff/:staffId/payments - Create payment
+app.post('/api/v1/staff/:staffId/payments', async (req, res) => {
+  try {
+    const { staffId } = req.params;
+    const {
+      assignmentId, eventId, amount, paymentType, paymentMethod,
+      paymentDate, reference, status, notes
+    } = req.body;
+
+    const result = await pool.query(`
+      INSERT INTO staff_payments (
+        staff_id, assignment_id, event_id, amount, payment_type,
+        payment_method, payment_date, reference, status, notes
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      RETURNING *
+    `, [
+      staffId, assignmentId, eventId, amount, paymentType || 'event',
+      paymentMethod, paymentDate, reference, status || 'pending', notes
+    ]);
+
+    // Update staff total_earned if paid
+    if (status === 'paid') {
+      await pool.query(`
+        UPDATE staff SET
+          total_earned = total_earned + $1,
+          updated_at = CURRENT_TIMESTAMP
+        WHERE id = $2
+      `, [amount, staffId]);
+    }
+
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    console.error('Error creating payment:', error);
+    res.status(500).json({ error: 'Failed to create payment' });
+  }
+});
+
+// PUT /api/v1/payments/:id - Update payment status
+app.put('/api/v1/payments/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status, paymentMethod, paymentDate, reference, notes } = req.body;
+
+    // Get current payment to check if status is changing
+    const current = await pool.query('SELECT * FROM staff_payments WHERE id = $1', [id]);
+    if (current.rows.length === 0) {
+      return res.status(404).json({ error: 'Payment not found' });
+    }
+
+    const result = await pool.query(`
+      UPDATE staff_payments SET
+        status = COALESCE($1, status),
+        payment_method = COALESCE($2, payment_method),
+        payment_date = COALESCE($3, payment_date),
+        reference = $4,
+        notes = $5
+      WHERE id = $6
+      RETURNING *
+    `, [status, paymentMethod, paymentDate, reference, notes, id]);
+
+    // Update staff total_earned if status changed to paid
+    if (status === 'paid' && current.rows[0].status !== 'paid') {
+      await pool.query(`
+        UPDATE staff SET
+          total_earned = total_earned + $1,
+          updated_at = CURRENT_TIMESTAMP
+        WHERE id = $2
+      `, [result.rows[0].amount, result.rows[0].staff_id]);
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error updating payment:', error);
+    res.status(500).json({ error: 'Failed to update payment' });
+  }
+});
+
+// ============================================================
+// VENDOR QUOTES ENDPOINTS
+// ============================================================
+
+// GET /api/v1/vendors/:vendorId/quotes - Get vendor quotes
+app.get('/api/v1/vendors/:vendorId/quotes', async (req, res) => {
+  try {
+    const { vendorId } = req.params;
+    const result = await pool.query(`
+      SELECT vq.*, e.name as event_name, e.event_date
+      FROM vendor_quotes vq
+      LEFT JOIN events e ON vq.event_id = e.id
+      WHERE vq.vendor_id = $1
+      ORDER BY vq.created_at DESC
+    `, [vendorId]);
+    res.json({ quotes: result.rows });
+  } catch (error) {
+    console.error('Error fetching quotes:', error);
+    res.status(500).json({ error: 'Failed to fetch quotes' });
+  }
+});
+
+// GET /api/v1/events/:eventId/quotes - Get quotes for an event
+app.get('/api/v1/events/:eventId/quotes', async (req, res) => {
+  try {
+    const { eventId } = req.params;
+    const result = await pool.query(`
+      SELECT vq.*, v.name as vendor_name, v.category as vendor_category
+      FROM vendor_quotes vq
+      JOIN vendors v ON vq.vendor_id = v.id
+      WHERE vq.event_id = $1
+      ORDER BY vq.created_at DESC
+    `, [eventId]);
+    res.json({ quotes: result.rows });
+  } catch (error) {
+    console.error('Error fetching event quotes:', error);
+    res.status(500).json({ error: 'Failed to fetch event quotes' });
+  }
+});
+
+// POST /api/v1/quotes - Create quote
+app.post('/api/v1/quotes', async (req, res) => {
+  try {
+    const {
+      vendorId, eventId, quoteNumber, description, amount,
+      validUntil, items, terms, notes, documentUrl
+    } = req.body;
+
+    const result = await pool.query(`
+      INSERT INTO vendor_quotes (
+        vendor_id, event_id, quote_number, description, amount,
+        valid_until, items, terms, notes, document_url
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      RETURNING *
+    `, [
+      vendorId, eventId, quoteNumber, description, amount,
+      validUntil, items, terms, notes, documentUrl
+    ]);
+
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    console.error('Error creating quote:', error);
+    res.status(500).json({ error: 'Failed to create quote' });
+  }
+});
+
+// PUT /api/v1/quotes/:id - Update quote
+app.put('/api/v1/quotes/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const {
+      quoteNumber, description, amount, validUntil, items,
+      terms, status, acceptedAt, notes, documentUrl
+    } = req.body;
+
+    const result = await pool.query(`
+      UPDATE vendor_quotes SET
+        quote_number = COALESCE($1, quote_number),
+        description = $2,
+        amount = COALESCE($3, amount),
+        valid_until = $4,
+        items = COALESCE($5, items),
+        terms = $6,
+        status = COALESCE($7, status),
+        accepted_at = $8,
+        notes = $9,
+        document_url = $10
+      WHERE id = $11
+      RETURNING *
+    `, [
+      quoteNumber, description, amount, validUntil, items,
+      terms, status, acceptedAt, notes, documentUrl, id
+    ]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Quote not found' });
+    }
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error updating quote:', error);
+    res.status(500).json({ error: 'Failed to update quote' });
+  }
+});
+
+// DELETE /api/v1/quotes/:id - Delete quote
+app.delete('/api/v1/quotes/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    await pool.query('DELETE FROM vendor_quotes WHERE id = $1', [id]);
+    res.status(204).send();
+  } catch (error) {
+    console.error('Error deleting quote:', error);
+    res.status(500).json({ error: 'Failed to delete quote' });
+  }
+});
+
+// ============================================================
+// VENDOR CONTRACTS ENDPOINTS
+// ============================================================
+
+// GET /api/v1/vendors/:vendorId/contracts - Get vendor contracts
+app.get('/api/v1/vendors/:vendorId/contracts', async (req, res) => {
+  try {
+    const { vendorId } = req.params;
+    const result = await pool.query(`
+      SELECT vc.*, e.name as event_name, e.event_date
+      FROM vendor_contracts vc
+      LEFT JOIN events e ON vc.event_id = e.id
+      WHERE vc.vendor_id = $1
+      ORDER BY vc.created_at DESC
+    `, [vendorId]);
+    res.json({ contracts: result.rows });
+  } catch (error) {
+    console.error('Error fetching contracts:', error);
+    res.status(500).json({ error: 'Failed to fetch contracts' });
+  }
+});
+
+// GET /api/v1/events/:eventId/contracts - Get contracts for an event
+app.get('/api/v1/events/:eventId/contracts', async (req, res) => {
+  try {
+    const { eventId } = req.params;
+    const result = await pool.query(`
+      SELECT vc.*, v.name as vendor_name, v.category as vendor_category
+      FROM vendor_contracts vc
+      JOIN vendors v ON vc.vendor_id = v.id
+      WHERE vc.event_id = $1
+      ORDER BY vc.created_at DESC
+    `, [eventId]);
+    res.json({ contracts: result.rows });
+  } catch (error) {
+    console.error('Error fetching event contracts:', error);
+    res.status(500).json({ error: 'Failed to fetch event contracts' });
+  }
+});
+
+// POST /api/v1/contracts - Create contract
+app.post('/api/v1/contracts', async (req, res) => {
+  try {
+    const {
+      vendorId, eventId, quoteId, contractNumber, title, description,
+      totalAmount, depositAmount, depositDueDate, depositPaid,
+      balanceAmount, balanceDueDate, balancePaid, signedDate,
+      deliverables, terms, cancellationPolicy, status, notes, documentUrl
+    } = req.body;
+
+    const result = await pool.query(`
+      INSERT INTO vendor_contracts (
+        vendor_id, event_id, quote_id, contract_number, title, description,
+        total_amount, deposit_amount, deposit_due_date, deposit_paid,
+        balance_amount, balance_due_date, balance_paid, signed_date,
+        deliverables, terms, cancellation_policy, status, notes, document_url
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+      RETURNING *
+    `, [
+      vendorId, eventId, quoteId, contractNumber, title, description,
+      totalAmount, depositAmount, depositDueDate, depositPaid || false,
+      balanceAmount, balanceDueDate, balancePaid || false, signedDate,
+      deliverables, terms, cancellationPolicy, status || 'draft', notes, documentUrl
+    ]);
+
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    console.error('Error creating contract:', error);
+    res.status(500).json({ error: 'Failed to create contract' });
+  }
+});
+
+// PUT /api/v1/contracts/:id - Update contract
+app.put('/api/v1/contracts/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const {
+      contractNumber, title, description, totalAmount, depositAmount,
+      depositDueDate, depositPaid, balanceAmount, balanceDueDate, balancePaid,
+      signedDate, deliverables, terms, cancellationPolicy, status, notes, documentUrl
+    } = req.body;
+
+    const result = await pool.query(`
+      UPDATE vendor_contracts SET
+        contract_number = COALESCE($1, contract_number),
+        title = COALESCE($2, title),
+        description = $3,
+        total_amount = COALESCE($4, total_amount),
+        deposit_amount = $5,
+        deposit_due_date = $6,
+        deposit_paid = COALESCE($7, deposit_paid),
+        balance_amount = $8,
+        balance_due_date = $9,
+        balance_paid = COALESCE($10, balance_paid),
+        signed_date = $11,
+        deliverables = $12,
+        terms = $13,
+        cancellation_policy = $14,
+        status = COALESCE($15, status),
+        notes = $16,
+        document_url = $17,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = $18
+      RETURNING *
+    `, [
+      contractNumber, title, description, totalAmount, depositAmount,
+      depositDueDate, depositPaid, balanceAmount, balanceDueDate, balancePaid,
+      signedDate, deliverables, terms, cancellationPolicy, status, notes, documentUrl, id
+    ]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Contract not found' });
+    }
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error updating contract:', error);
+    res.status(500).json({ error: 'Failed to update contract' });
+  }
+});
+
+// DELETE /api/v1/contracts/:id - Delete contract
+app.delete('/api/v1/contracts/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    await pool.query('DELETE FROM vendor_contracts WHERE id = $1', [id]);
+    res.status(204).send();
+  } catch (error) {
+    console.error('Error deleting contract:', error);
+    res.status(500).json({ error: 'Failed to delete contract' });
+  }
+});
+
+// ============================================================
+// VENDOR HISTORY ENDPOINTS
+// ============================================================
+
+// GET /api/v1/vendors/:vendorId/history - Get vendor event history
+app.get('/api/v1/vendors/:vendorId/history', async (req, res) => {
+  try {
+    const { vendorId } = req.params;
+    const result = await pool.query(`
+      SELECT vh.*, e.name as event_name, e.event_date, e.venue_name
+      FROM vendor_history vh
+      JOIN events e ON vh.event_id = e.id
+      WHERE vh.vendor_id = $1
+      ORDER BY e.event_date DESC
+    `, [vendorId]);
+
+    // Get summary
+    const summary = await pool.query(`
+      SELECT
+        COUNT(*) as total_events,
+        AVG(rating) as avg_rating,
+        SUM(amount_paid) as total_paid
+      FROM vendor_history
+      WHERE vendor_id = $1
+    `, [vendorId]);
+
+    res.json({
+      history: result.rows,
+      summary: summary.rows[0]
+    });
+  } catch (error) {
+    console.error('Error fetching vendor history:', error);
+    res.status(500).json({ error: 'Failed to fetch vendor history' });
+  }
+});
+
+// POST /api/v1/vendor-history - Add history entry
+app.post('/api/v1/vendor-history', async (req, res) => {
+  try {
+    const {
+      vendorId, eventId, servicesProvided, amountQuoted, amountPaid,
+      rating, performanceNotes, wouldHireAgain, issues
+    } = req.body;
+
+    const result = await pool.query(`
+      INSERT INTO vendor_history (
+        vendor_id, event_id, services_provided, amount_quoted, amount_paid,
+        rating, performance_notes, would_hire_again, issues
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      RETURNING *
+    `, [
+      vendorId, eventId, servicesProvided, amountQuoted, amountPaid,
+      rating, performanceNotes, wouldHireAgain, issues
+    ]);
+
+    // Update vendor stats
+    await pool.query(`
+      UPDATE vendors SET
+        total_events = total_events + 1,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = $1
+    `, [vendorId]);
+
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    console.error('Error adding vendor history:', error);
+    res.status(500).json({ error: 'Failed to add vendor history' });
   }
 });
 
