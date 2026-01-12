@@ -4468,11 +4468,15 @@ const generateAccessToken = () => {
 app.post('/api/v1/events/:eventId/client-access', async (req, res) => {
   try {
     const { eventId } = req.params;
-    const { clientName, clientEmail, permissions, expiresInDays } = req.body;
+    const { clientName, clientEmail, permissions, expiresInDays, sendEmail = true } = req.body;
 
     if (!clientName || !clientEmail) {
       return res.status(400).json({ error: 'Client name and email are required' });
     }
+
+    // Get event details for the email
+    const eventResult = await pool.query('SELECT title, date, venue FROM events WHERE id = $1', [eventId]);
+    const event = eventResult.rows[0];
 
     const accessToken = generateAccessToken();
     const expiresAt = expiresInDays
@@ -4488,9 +4492,69 @@ app.post('/api/v1/events/:eventId/client-access', async (req, res) => {
     // Generate portal URL
     const portalUrl = `${process.env.FRONTEND_URL || 'https://berry-dashboard.vercel.app'}/client/${accessToken}`;
 
+    // Send email with portal link
+    let emailSent = false;
+    if (sendEmail && process.env.RESEND_API_KEY) {
+      try {
+        const eventName = event?.title || 'Event';
+        const eventDate = event?.date ? new Date(event.date).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }) : '';
+        const venue = event?.venue || '';
+
+        await resend.emails.send({
+          from: EMAIL_CONFIG.from,
+          to: clientEmail,
+          replyTo: EMAIL_CONFIG.replyTo,
+          subject: `🎉 Your Client Portal Access - ${eventName}`,
+          html: `
+            <div style="font-family: 'Helvetica Neue', Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #0a0a0a; color: #ffffff; padding: 40px; border-radius: 16px;">
+              <div style="text-align: center; margin-bottom: 30px;">
+                <h1 style="color: #d4af37; margin: 0; font-size: 28px;">✨ Berry Bly Productions</h1>
+                <p style="color: #888; margin-top: 8px;">Client Portal Access</p>
+              </div>
+
+              <div style="background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); padding: 30px; border-radius: 12px; margin-bottom: 30px;">
+                <h2 style="color: #fff; margin: 0 0 20px 0; font-size: 22px;">Hello ${clientName}! 👋</h2>
+                <p style="color: #ccc; line-height: 1.6; margin: 0;">
+                  You've been granted access to view the event dashboard for <strong style="color: #d4af37;">${eventName}</strong>.
+                </p>
+                ${eventDate ? `<p style="color: #888; margin-top: 10px;">📅 ${eventDate}</p>` : ''}
+                ${venue ? `<p style="color: #888; margin-top: 5px;">📍 ${venue}</p>` : ''}
+              </div>
+
+              <div style="text-align: center; margin: 30px 0;">
+                <a href="${portalUrl}" style="display: inline-block; background: linear-gradient(135deg, #d4af37 0%, #f4d03f 100%); color: #000; padding: 16px 40px; border-radius: 30px; text-decoration: none; font-weight: bold; font-size: 16px;">
+                  Access Your Portal →
+                </a>
+              </div>
+
+              <div style="background: #111; padding: 20px; border-radius: 8px; margin-top: 30px;">
+                <p style="color: #888; font-size: 12px; margin: 0;">
+                  <strong>Portal Link:</strong><br>
+                  <a href="${portalUrl}" style="color: #d4af37; word-break: break-all;">${portalUrl}</a>
+                </p>
+                ${expiresAt ? `<p style="color: #666; font-size: 11px; margin-top: 10px;">This link expires on ${new Date(expiresAt).toLocaleDateString()}</p>` : ''}
+              </div>
+
+              <div style="text-align: center; margin-top: 40px; padding-top: 20px; border-top: 1px solid #222;">
+                <p style="color: #666; font-size: 12px; margin: 0;">
+                  Berry Bly Productions | Luxury Event Management<br>
+                  <a href="mailto:${EMAIL_CONFIG.replyTo}" style="color: #d4af37;">${EMAIL_CONFIG.replyTo}</a>
+                </p>
+              </div>
+            </div>
+          `
+        });
+        emailSent = true;
+        console.log(`✅ Client portal email sent to ${clientEmail} for event ${eventId}`);
+      } catch (emailError) {
+        console.error('Error sending client portal email:', emailError);
+      }
+    }
+
     res.status(201).json({
       ...result.rows[0],
-      portalUrl
+      portalUrl,
+      emailSent
     });
   } catch (error) {
     console.error('Error creating client access:', error);
