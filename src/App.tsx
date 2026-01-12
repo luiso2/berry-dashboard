@@ -1055,7 +1055,18 @@ function App() {
       const budgetData = await budgetRes.json();
       const categoriesData = await categoriesRes.json();
       setBudgetItems(budgetData.items || []);
-      setBudgetSummary(budgetData.summary);
+      setBudgetSummary({
+        totalBudget: budgetData.summary?.totalBudget || 0,
+        totalEstimatedExpenses: budgetData.summary?.totalEstimatedExpenses || 0,
+        totalActualExpenses: budgetData.summary?.totalActualExpenses || 0,
+        totalEstimatedIncome: budgetData.summary?.totalEstimatedIncome || 0,
+        totalActualIncome: budgetData.summary?.totalActualIncome || 0,
+        estimatedProfit: budgetData.summary?.estimatedProfit || 0,
+        actualProfit: budgetData.summary?.actualProfit || 0,
+        budgetRemaining: budgetData.summary?.budgetRemaining || 0,
+        paidCount: budgetData.summary?.paidCount || 0,
+        pendingCount: budgetData.summary?.pendingCount || 0,
+      });
       setBudgetCategories(categoriesData.categories || []);
     } catch (error) {
       console.error('Error fetching budget:', error);
@@ -3922,10 +3933,10 @@ function App() {
                           <td style={{ padding: '14px 16px', color: '#fff' }}>{item.description}</td>
                           <td style={{ padding: '14px 16px', color: '#888' }}>{item.vendorName || '-'}</td>
                           <td style={{ padding: '14px 16px', textAlign: 'right', color: item.isIncome ? '#22c55e' : '#fff' }}>
-                            {item.isIncome ? '+' : ''}${item.estimatedAmount.toLocaleString()}
+                            {item.isIncome ? '+' : ''}${(item.estimatedAmount || 0).toLocaleString()}
                           </td>
                           <td style={{ padding: '14px 16px', textAlign: 'right', color: item.actualAmount ? (item.isIncome ? '#22c55e' : '#fff') : '#444' }}>
-                            {item.actualAmount ? `${item.isIncome ? '+' : ''}$${item.actualAmount.toLocaleString()}` : '-'}
+                            {item.actualAmount ? `${item.isIncome ? '+' : ''}$${(item.actualAmount || 0).toLocaleString()}` : '-'}
                           </td>
                           <td style={{ padding: '14px 16px', textAlign: 'center' }}>
                             <input
@@ -4022,8 +4033,8 @@ function App() {
                     {vendor.city && <div>📍 {vendor.city}</div>}
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 12, paddingTop: 12, borderTop: '1px solid #1a1a1a' }}>
-                    <span style={{ fontSize: 12, color: '#666' }}>{vendor.eventsCount} events</span>
-                    <span style={{ fontSize: 12, color: '#22c55e' }}>${vendor.totalSpent.toLocaleString()} total</span>
+                    <span style={{ fontSize: 12, color: '#666' }}>{vendor.eventsCount || 0} events</span>
+                    <span style={{ fontSize: 12, color: '#22c55e' }}>${(vendor.totalSpent || 0).toLocaleString()} total</span>
                   </div>
                 </div>
               ))}
