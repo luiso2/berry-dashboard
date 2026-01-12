@@ -3551,15 +3551,43 @@ app.delete('/api/v1/vendors/:id', async (req, res) => {
 // GET /api/v1/staff - Get all staff with stats
 app.get('/api/v1/staff', async (_req, res) => {
   try {
-    const result = await pool.query(`
-      SELECT s.*,
-        (SELECT COUNT(*) FROM staff_assignments sa WHERE sa.staff_id = s.id) as assignments_count,
-        (SELECT COUNT(*) FROM staff_assignments sa
-         JOIN events e ON sa.event_id = e.id
-         WHERE sa.staff_id = s.id AND e.event_date >= CURRENT_DATE) as upcoming_events
-      FROM staff s
-      ORDER BY s.created_at DESC
+    // Check if staff table exists
+    const tableCheck = await pool.query(`
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables
+        WHERE table_name = 'staff'
+      )
     `);
+
+    if (!tableCheck.rows[0].exists) {
+      return res.json({
+        staff: [],
+        stats: { active: 0, inactive: 0, total: 0, avg_rating: 0 }
+      });
+    }
+
+    // Check if staff_assignments table exists for the subquery
+    const assignmentsCheck = await pool.query(`
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables
+        WHERE table_name = 'staff_assignments'
+      )
+    `);
+
+    let result;
+    if (assignmentsCheck.rows[0].exists) {
+      result = await pool.query(`
+        SELECT s.*,
+          (SELECT COUNT(*) FROM staff_assignments sa WHERE sa.staff_id = s.id) as assignments_count,
+          (SELECT COUNT(*) FROM staff_assignments sa
+           JOIN events e ON sa.event_id = e.id
+           WHERE sa.staff_id = s.id AND e.event_date >= CURRENT_DATE) as upcoming_events
+        FROM staff s
+        ORDER BY s.created_at DESC
+      `);
+    } else {
+      result = await pool.query(`SELECT * FROM staff ORDER BY created_at DESC`);
+    }
 
     // Get stats
     const stats = await pool.query(`
