@@ -36,7 +36,7 @@ const categoryToStatus = (category: GuestCategory): string => {
 
 type GuestCategory = 'pending' | 'A' | 'B' | 'C' | 'rejected';
 type GuestStatus = 'pending' | 'approved' | 'declined' | 'rejected';
-type ViewType = 'overview' | 'guests' | 'emails' | 'vip' | 'priority' | 'standard' | 'analytics' | 'activity' | 'automation' | 'checkin' | 'models' | 'tables' | 'tickets' | 'sponsors' | 'events' | 'budget' | 'vendors' | 'staff' | 'client-portal' | 'monitoring';
+type ViewType = 'overview' | 'guests' | 'emails' | 'vip' | 'priority' | 'standard' | 'analytics' | 'automation' | 'checkin' | 'models' | 'tables' | 'tickets' | 'sponsors' | 'events' | 'budget' | 'vendors' | 'staff' | 'client-portal' | 'monitoring';
 type ThemeMode = 'dark' | 'light';
 
 interface Purchase {
@@ -84,15 +84,6 @@ interface Guest {
 interface QRModal {
   show: boolean;
   guest: Guest | null;
-}
-
-interface ActivityLog {
-  id: string;
-  action: string;
-  details: string;
-  guestName?: string;
-  timestamp: string;
-  type: 'email' | 'category' | 'guest' | 'system';
 }
 
 interface ScheduledEmail {
@@ -699,7 +690,6 @@ function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   // New state for enhanced features
-  const [activityLog, setActivityLog] = useState<ActivityLog[]>([]);
   const [scheduledEmails, setScheduledEmails] = useState<ScheduledEmail[]>([]);
   const [filters, setFilters] = useState<Filters>({
     search: '',
@@ -793,18 +783,6 @@ function App() {
     setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 4000);
   };
 
-  const addActivity = (action: string, details: string, guestName?: string, type: ActivityLog['type'] = 'system') => {
-    const newActivity: ActivityLog = {
-      id: Date.now().toString(),
-      action,
-      details,
-      guestName,
-      timestamp: new Date().toISOString(),
-      type,
-    };
-    setActivityLog((prev) => [newActivity, ...prev].slice(0, 100)); // Keep last 100
-  };
-
   const fetchGuests = useCallback(async () => {
     try {
       const res = await fetch(`${API_URL}${ENDPOINTS.guests}`);
@@ -848,7 +826,6 @@ function App() {
 
   useEffect(() => {
     fetchGuests();
-    addActivity('Session Started', 'Dashboard loaded', undefined, 'system');
     const interval = autoRefresh ? setInterval(() => {
       fetchGuests();
       setLastRefresh(new Date());
@@ -1462,7 +1439,6 @@ function App() {
       if (response.ok) {
         setGuests(prev => prev.map(g => g.id === guest.id ? { ...g, checkedInAt, category: 'A' } : g));
         addToast(`${guest.name} checked in!`, 'success');
-        addActivity('Guest Checked In', `${guest.name} (Party of ${guest.partySize})`, guest.name, 'guest');
       }
     } catch (error) {
       addToast('Check-in failed', 'error');
@@ -1602,7 +1578,6 @@ function App() {
     a.click();
     URL.revokeObjectURL(url);
     addToast(`Exported ${filteredGuests.length} guests to CSV`, 'success');
-    addActivity('Export CSV', `${filteredGuests.length} guests exported`, undefined, 'system');
   };
 
   // Export to Excel with full data
@@ -1635,7 +1610,6 @@ function App() {
 
     XLSX.writeFile(workbook, `berry-guests-${new Date().toISOString().split('T')[0]}.xlsx`);
     addToast(`Exported ${filteredGuests.length} guests to Excel`, 'success');
-    addActivity('Export Excel', `${filteredGuests.length} guests exported`, undefined, 'system');
   };
 
   const toggleSelect = (id: string) => {
@@ -1690,7 +1664,6 @@ function App() {
         if (response.ok) {
           const data = await response.json();
           successfulGuests.push(data.guest || guest);
-          addActivity('Email Sent', `Invitation sent to ${guest.email}`, guest.name, 'email');
         } else {
           failedGuests.push(guest.name);
         }
@@ -1743,7 +1716,6 @@ function App() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ status: categoryToStatus(confirmation.category) }),
         });
-        addActivity('Category Changed', `Moved to ${catLabel(confirmation.category)}`, guest.name, 'category');
       }
       setGuests((prev) => prev.map((g) => (confirmation.guests.find((cg) => cg.id === g.id) ? { ...g, category: confirmation.category! } : g)));
       setSelectedGuests(new Set());
@@ -1760,7 +1732,6 @@ function App() {
       await fetch(`${API_URL}${ENDPOINTS.guests}/${id}`, { method: 'DELETE' });
       setGuests((prev) => prev.filter((g) => g.id !== id));
       addToast(`Removed ${guest?.name || 'guest'}`, 'info');
-      addActivity('Guest Removed', `${guest?.name} was removed from the list`, guest?.name, 'guest');
     } catch (e) {
       addToast('Failed to remove guest', 'error');
     }
@@ -1811,7 +1782,6 @@ function App() {
       setFormData({ name: '', email: '', phone: '', instagram: '', partySize: 1, eventDate: '', notes: '' });
       setShowForm(false);
       addToast(`Added ${newGuest.name} to guest list`, 'success');
-      addActivity('Guest Added', `${newGuest.name} was added to the list`, newGuest.name, 'guest');
     } catch (e) {
       addToast('Failed to add guest', 'error');
     }
@@ -1827,7 +1797,6 @@ function App() {
       case 'priority': return 'Priority Guests';
       case 'standard': return 'Standard Guests';
       case 'analytics': return 'Analytics';
-      case 'activity': return 'Activity Log';
       case 'automation': return 'Automation';
       case 'checkin': return 'Check-In';
       default: return 'Guests';
@@ -1842,7 +1811,6 @@ function App() {
       case 'priority': return `${stats.priority} priority guests`;
       case 'standard': return `${stats.standard} standard guests`;
       case 'analytics': return 'Performance metrics';
-      case 'activity': return `${activityLog.length} recent actions`;
       case 'automation': return `${scheduledEmails.filter(e => e.status === 'pending').length} scheduled`;
       case 'checkin': return `${stats.checkedIn}/${stats.accepted} checked in (${stats.checkedInPartySize} people)`;
       default: return `${stats.pending} pending review`;
@@ -1956,10 +1924,9 @@ function App() {
             title="Intelligence"
             expanded={expandedMenus.has('intelligence')}
             onToggle={() => toggleMenu('intelligence')}
-            count={activityLog.length}
+            count={scheduledEmails.filter(e => e.status === 'pending').length}
           >
             <NavItem label="Analytics" active={activeView === 'analytics'} icon="◐" onClick={() => navigateTo('analytics')} />
-            <NavItem label="Activity Log" active={activeView === 'activity'} icon="◷" count={activityLog.length} onClick={() => navigateTo('activity')} />
             <NavItem label="Automation" active={activeView === 'automation'} icon="⚡" count={scheduledEmails.filter(e => e.status === 'pending').length} onClick={() => navigateTo('automation')} />
           </CollapsibleMenu>
 
@@ -2314,38 +2281,6 @@ function App() {
               ))}
             </div>
 
-            {/* Recent Activity */}
-            {activityLog.length > 0 && (
-              <>
-                <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 16, color: '#888' }}>Recent Activity</h3>
-                <div style={{ background: '#0a0a0a', borderRadius: 12, border: '1px solid #1a1a1a', overflow: 'hidden' }}>
-                  {activityLog.slice(0, 5).map((activity, idx) => (
-                    <div key={activity.id} style={{ padding: '14px 16px', borderBottom: idx < 4 ? '1px solid #1a1a1a' : 'none', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                        <div style={{
-                          width: 32,
-                          height: 32,
-                          borderRadius: 8,
-                          background: activity.type === 'email' ? '#3b82f615' : activity.type === 'category' ? '#a78bfa15' : activity.type === 'guest' ? '#22c55e15' : '#1a1a1a',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          fontSize: 14,
-                          color: activity.type === 'email' ? '#3b82f6' : activity.type === 'category' ? '#a78bfa' : activity.type === 'guest' ? '#22c55e' : '#666',
-                        }}>
-                          {activity.type === 'email' ? '✉' : activity.type === 'category' ? '→' : activity.type === 'guest' ? '◉' : '◷'}
-                        </div>
-                        <div>
-                          <div style={{ fontSize: 14, fontWeight: 500 }}>{activity.action}</div>
-                          <div style={{ fontSize: 13, color: '#666' }}>{activity.details}</div>
-                        </div>
-                      </div>
-                      <div style={{ fontSize: 13, color: '#444' }}>{formatDate(activity.timestamp)}</div>
-                    </div>
-                  ))}
-                </div>
-              </>
-            )}
           </div>
         )}
 
@@ -2530,57 +2465,6 @@ function App() {
           </div>
         )}
 
-        {/* Activity Log Page */}
-        {activeView === 'activity' && (
-          <div className="page-content" style={{ padding: '32px', animation: 'fadeIn 0.3s ease' }}>
-            <div style={{ background: '#0a0a0a', borderRadius: 12, border: '1px solid #1a1a1a', overflow: 'hidden' }}>
-              {activityLog.length === 0 ? (
-                <div style={{ padding: 60, textAlign: 'center' }}>
-                  <div style={{ color: '#333', fontSize: 48, marginBottom: 16 }}>◷</div>
-                  <div style={{ color: '#666', fontSize: 16 }}>No activity yet</div>
-                  <div style={{ color: '#444', fontSize: 14, marginTop: 8 }}>Actions will appear here as you use the dashboard</div>
-                </div>
-              ) : (
-                activityLog.map((activity, idx) => (
-                  <div key={activity.id} style={{ padding: '16px 20px', borderBottom: idx < activityLog.length - 1 ? '1px solid #1a1a1a' : 'none', display: 'flex', alignItems: 'center', justifyContent: 'space-between', animation: `fadeIn 0.3s ease ${idx * 0.02}s both` }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                      <div style={{
-                        width: 40,
-                        height: 40,
-                        borderRadius: 10,
-                        background: activity.type === 'email' ? '#3b82f615' : activity.type === 'category' ? '#a78bfa15' : activity.type === 'guest' ? '#22c55e15' : '#1a1a1a',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        fontSize: 18,
-                        color: activity.type === 'email' ? '#3b82f6' : activity.type === 'category' ? '#a78bfa' : activity.type === 'guest' ? '#22c55e' : '#666',
-                      }}>
-                        {activity.type === 'email' ? '✉' : activity.type === 'category' ? '→' : activity.type === 'guest' ? '◉' : '◷'}
-                      </div>
-                      <div>
-                        <div style={{ fontSize: 15, fontWeight: 500, marginBottom: 2 }}>{activity.action}</div>
-                        <div style={{ fontSize: 14, color: '#666' }}>{activity.details}</div>
-                        {activity.guestName && <div style={{ fontSize: 13, color: '#888', marginTop: 2 }}>Guest: {activity.guestName}</div>}
-                      </div>
-                    </div>
-                    <div style={{ textAlign: 'right' }}>
-                      <div style={{ fontSize: 14, color: '#888' }}>{formatDate(activity.timestamp)}</div>
-                      <div style={{
-                        fontSize: 12,
-                        color: activity.type === 'email' ? '#3b82f6' : activity.type === 'category' ? '#a78bfa' : activity.type === 'guest' ? '#22c55e' : '#666',
-                        marginTop: 4,
-                        textTransform: 'uppercase',
-                      }}>
-                        {activity.type}
-                      </div>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-        )}
-
         {/* Automation Page */}
         {activeView === 'automation' && (
           <div className="page-content" style={{ padding: '32px', animation: 'fadeIn 0.3s ease' }}>
@@ -2669,7 +2553,6 @@ function App() {
                     }));
                     setScheduledEmails(prev => [...prev, ...newScheduled]);
                     addToast(`Scheduled ${noEmail.length} emails for tomorrow`, 'success');
-                    addActivity('Emails Scheduled', `${noEmail.length} reminder emails scheduled for tomorrow`, undefined, 'system');
                   } else {
                     addToast('All guests have received emails', 'info');
                   }
