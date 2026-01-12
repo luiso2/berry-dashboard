@@ -1156,7 +1156,7 @@ function App() {
   }, [vendorFormData, fetchVendors]);
 
   // Delete Vendor
-  const deleteVendor = useCallback(async (vendorId: string) => {
+  const deleteVendor = useCallback(async (vendorId: string | number) => {
     if (!confirm('Are you sure you want to delete this vendor?')) return;
     try {
       const res = await fetch(`${API_URL}/vendors/${vendorId}`, { method: 'DELETE' });
