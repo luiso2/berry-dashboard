@@ -2781,6 +2781,766 @@ app.get('/api/v1/events/:id/full', async (req, res) => {
 });
 
 // ============================================
+// GPT SESSION ENDPOINTS (Unified operations)
+// These endpoints consolidate multiple operations into single endpoints
+// to work within GPT's 20 operation limit
+// ============================================
+
+// POST /api/v1/gpt/events - Unified events session
+app.post('/api/v1/gpt/events', async (req, res) => {
+  try {
+    const { action, eventId, data, filters } = req.body;
+
+    switch (action) {
+      case 'list': {
+        const { status, limit = 50 } = filters || {};
+        let query = 'SELECT * FROM events';
+        const conditions = [];
+        const values = [];
+        if (status) {
+          conditions.push(`status = $${values.length + 1}`);
+          values.push(status);
+        }
+        if (conditions.length > 0) query += ' WHERE ' + conditions.join(' AND ');
+        query += ' ORDER BY event_date DESC LIMIT $' + (values.length + 1);
+        values.push(limit);
+        const result = await pool.query(query, values);
+        return res.json({ success: true, events: result.rows.map(mapEventRow), total: result.rows.length });
+      }
+
+      case 'get': {
+        if (!eventId) return res.status(400).json({ error: 'eventId required' });
+        const result = await pool.query('SELECT * FROM events WHERE id = $1', [eventId]);
+        if (result.rows.length === 0) return res.status(404).json({ error: 'Event not found' });
+        return res.json({ success: true, event: mapEventRow(result.rows[0]) });
+      }
+
+      case 'getFull': {
+        if (!eventId) return res.status(400).json({ error: 'eventId required' });
+        // Reuse the full event logic
+        const eventResult = await pool.query('SELECT * FROM events WHERE id = $1', [eventId]);
+        if (eventResult.rows.length === 0) return res.status(404).json({ error: 'Event not found' });
+        const event = mapEventRow(eventResult.rows[0]);
+
+        let guests = { total: 0, list: [] };
+        const guestsCheck = await pool.query(`SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'guests')`);
+        if (guestsCheck.rows[0].exists) {
+          const guestsResult = await pool.query('SELECT * FROM guests WHERE event_id = $1', [eventId]);
+          guests = { total: guestsResult.rows.length, list: guestsResult.rows };
+        }
+
+        let budget = { summary: {}, items: [] };
+        const budgetCheck = await pool.query(`SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'budgets')`);
+        if (budgetCheck.rows[0].exists) {
+          const budgetResult = await pool.query(`
+            SELECT bi.*, bc.name as category_name, bc.icon, bc.is_income
+            FROM budget_items bi JOIN budgets b ON bi.budget_id = b.id
+            LEFT JOIN budget_categories bc ON bi.category_id = bc.id
+            WHERE b.event_id = $1`, [eventId]);
+          budget.items = budgetResult.rows;
+        }
+
+        let timeline = [];
+        const timelineCheck = await pool.query(`SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'event_timeline')`);
+        if (timelineCheck.rows[0].exists) {
+          const result = await pool.query('SELECT * FROM event_timeline WHERE event_id = $1 ORDER BY sort_order', [eventId]);
+          timeline = result.rows;
+        }
+
+        return res.json({ success: true, event, guests, budget, timeline });
+      }
+
+      case 'create': {
+        const { name, eventDate, eventType, venueName, venueCity, expectedAttendance, dressCode, theme, notes } = data || {};
+        if (!name || !eventDate) return res.status(400).json({ error: 'name and eventDate required' });
+        const result = await pool.query(`
+          INSERT INTO events (name, event_date, event_type, venue_name, venue_city, expected_attendance, dress_code, theme, notes, status)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'planning') RETURNING *
+        `, [name, eventDate, eventType || 'party', venueName, venueCity, expectedAttendance || 0, dressCode, theme, notes]);
+        return res.json({ success: true, event: mapEventRow(result.rows[0]), message: 'Event created' });
+      }
+
+      case 'update': {
+        if (!eventId) return res.status(400).json({ error: 'eventId required' });
+        const fields = [];
+        const values = [];
+        let idx = 1;
+        const allowedFields = ['name', 'event_date', 'event_type', 'venue_name', 'venue_city', 'expected_attendance', 'dress_code', 'theme', 'notes', 'status'];
+        const fieldMap = { eventDate: 'event_date', eventType: 'event_type', venueName: 'venue_name', venueCity: 'venue_city', expectedAttendance: 'expected_attendance', dressCode: 'dress_code' };
+
+        for (const [key, value] of Object.entries(data || {})) {
+          const dbField = fieldMap[key] || key;
+          if (allowedFields.includes(dbField) && value !== undefined) {
+            fields.push(`${dbField} = $${idx++}`);
+            values.push(value);
+          }
+        }
+        if (fields.length === 0) return res.status(400).json({ error: 'No valid fields to update' });
+        values.push(eventId);
+        await pool.query(`UPDATE events SET ${fields.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = $${idx}`, values);
+        return res.json({ success: true, message: 'Event updated' });
+      }
+
+      case 'delete': {
+        if (!eventId) return res.status(400).json({ error: 'eventId required' });
+        await pool.query('DELETE FROM events WHERE id = $1', [eventId]);
+        return res.json({ success: true, message: 'Event deleted' });
+      }
+
+      case 'addTimeline': {
+        if (!eventId) return res.status(400).json({ error: 'eventId required' });
+        const { time, title, description, location, isCritical } = data || {};
+        if (!time || !title) return res.status(400).json({ error: 'time and title required' });
+        await pool.query(`
+          INSERT INTO event_timeline (event_id, time, title, description, location, is_critical)
+          VALUES ($1, $2, $3, $4, $5, $6)
+        `, [eventId, time, title, description, location, isCritical || false]);
+        return res.json({ success: true, message: 'Timeline item added' });
+      }
+
+      case 'addChecklist': {
+        if (!eventId) return res.status(400).json({ error: 'eventId required' });
+        const { item, category, priority } = data || {};
+        if (!item) return res.status(400).json({ error: 'item required' });
+        await pool.query(`
+          INSERT INTO event_checklist (event_id, item, category, priority) VALUES ($1, $2, $3, $4)
+        `, [eventId, item, category || 'General', priority || 'medium']);
+        return res.json({ success: true, message: 'Checklist item added' });
+      }
+
+      default:
+        return res.status(400).json({ error: 'Invalid action. Valid: list, get, getFull, create, update, delete, addTimeline, addChecklist' });
+    }
+  } catch (error) {
+    console.error('GPT Events error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/v1/gpt/guests - Unified guests session
+app.post('/api/v1/gpt/guests', async (req, res) => {
+  try {
+    const { action, guestId, eventId, data, filters } = req.body;
+
+    switch (action) {
+      case 'list': {
+        const { category, search, limit = 100 } = filters || {};
+        let query = 'SELECT * FROM guests WHERE 1=1';
+        const values = [];
+        if (eventId) { query += ` AND event_id = $${values.length + 1}`; values.push(eventId); }
+        if (category) { query += ` AND status = $${values.length + 1}`; values.push(category); }
+        if (search) { query += ` AND (name ILIKE $${values.length + 1} OR email ILIKE $${values.length + 1})`; values.push(`%${search}%`); }
+        query += ` ORDER BY created_at DESC LIMIT $${values.length + 1}`;
+        values.push(limit);
+        const result = await pool.query(query, values);
+        return res.json({ success: true, guests: result.rows, total: result.rows.length });
+      }
+
+      case 'get': {
+        if (!guestId) return res.status(400).json({ error: 'guestId required' });
+        const result = await pool.query('SELECT * FROM guests WHERE id = $1', [guestId]);
+        if (result.rows.length === 0) return res.status(404).json({ error: 'Guest not found' });
+        return res.json({ success: true, guest: result.rows[0] });
+      }
+
+      case 'add': {
+        const { name, email, phone, instagram, partySize, category, notes } = data || {};
+        if (!name || !email) return res.status(400).json({ error: 'name and email required' });
+        const result = await pool.query(`
+          INSERT INTO guests (name, email, phone, instagram, party_size, event_id, status, notes)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *
+        `, [name, email, phone, instagram, partySize || 1, eventId, category || 'pending', notes]);
+        return res.json({ success: true, guest: result.rows[0], message: 'Guest added' });
+      }
+
+      case 'update': {
+        if (!guestId) return res.status(400).json({ error: 'guestId required' });
+        const fields = [];
+        const values = [];
+        let idx = 1;
+        const allowedFields = ['name', 'email', 'phone', 'instagram', 'party_size', 'status', 'notes'];
+        const fieldMap = { partySize: 'party_size', category: 'status' };
+        for (const [key, value] of Object.entries(data || {})) {
+          const dbField = fieldMap[key] || key;
+          if (allowedFields.includes(dbField) && value !== undefined) {
+            fields.push(`${dbField} = $${idx++}`);
+            values.push(value);
+          }
+        }
+        if (fields.length === 0) return res.status(400).json({ error: 'No valid fields' });
+        values.push(guestId);
+        await pool.query(`UPDATE guests SET ${fields.join(', ')} WHERE id = $${idx}`, values);
+        return res.json({ success: true, message: 'Guest updated' });
+      }
+
+      case 'delete': {
+        if (!guestId) return res.status(400).json({ error: 'guestId required' });
+        await pool.query('DELETE FROM guests WHERE id = $1', [guestId]);
+        return res.json({ success: true, message: 'Guest removed' });
+      }
+
+      case 'approve': {
+        if (!guestId) return res.status(400).json({ error: 'guestId required' });
+        await pool.query('UPDATE guests SET status = $1 WHERE id = $2', ['approved', guestId]);
+        return res.json({ success: true, message: 'Guest approved' });
+      }
+
+      case 'reject': {
+        if (!guestId) return res.status(400).json({ error: 'guestId required' });
+        await pool.query('UPDATE guests SET status = $1 WHERE id = $2', ['rejected', guestId]);
+        return res.json({ success: true, message: 'Guest rejected' });
+      }
+
+      case 'checkIn': {
+        if (!guestId) return res.status(400).json({ error: 'guestId required' });
+        await pool.query('UPDATE guests SET checked_in_at = CURRENT_TIMESTAMP WHERE id = $1', [guestId]);
+        return res.json({ success: true, message: 'Guest checked in' });
+      }
+
+      case 'stats': {
+        const result = await pool.query(`
+          SELECT COUNT(*) as total,
+            COUNT(*) FILTER (WHERE status = 'pending') as pending,
+            COUNT(*) FILTER (WHERE status = 'approved') as approved,
+            COUNT(*) FILTER (WHERE checked_in_at IS NOT NULL) as checked_in
+          FROM guests ${eventId ? 'WHERE event_id = $1' : ''}
+        `, eventId ? [eventId] : []);
+        return res.json({ success: true, stats: result.rows[0] });
+      }
+
+      default:
+        return res.status(400).json({ error: 'Invalid action. Valid: list, get, add, update, delete, approve, reject, checkIn, stats' });
+    }
+  } catch (error) {
+    console.error('GPT Guests error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/v1/gpt/budget - Unified budget session
+app.post('/api/v1/gpt/budget', async (req, res) => {
+  try {
+    const { action, eventId, itemId, data } = req.body;
+
+    switch (action) {
+      case 'getCategories': {
+        const result = await pool.query('SELECT * FROM budget_categories ORDER BY sort_order');
+        return res.json({ success: true, categories: result.rows });
+      }
+
+      case 'getSummary': {
+        if (!eventId) return res.status(400).json({ error: 'eventId required' });
+        const result = await pool.query(`
+          SELECT
+            COALESCE(SUM(bi.estimated_amount) FILTER (WHERE bc.is_income = false), 0) as total_estimated_expenses,
+            COALESCE(SUM(bi.actual_amount) FILTER (WHERE bc.is_income = false), 0) as total_actual_expenses,
+            COALESCE(SUM(bi.estimated_amount) FILTER (WHERE bc.is_income = true), 0) as total_estimated_income,
+            COALESCE(SUM(bi.actual_amount) FILTER (WHERE bc.is_income = true), 0) as total_actual_income,
+            COUNT(*) FILTER (WHERE bi.is_paid) as paid_count,
+            COUNT(*) FILTER (WHERE NOT bi.is_paid) as pending_count
+          FROM budget_items bi
+          JOIN budgets b ON bi.budget_id = b.id
+          LEFT JOIN budget_categories bc ON bi.category_id = bc.id
+          WHERE b.event_id = $1
+        `, [eventId]);
+        const row = result.rows[0];
+        return res.json({
+          success: true,
+          summary: {
+            estimatedExpenses: parseFloat(row.total_estimated_expenses) || 0,
+            actualExpenses: parseFloat(row.total_actual_expenses) || 0,
+            estimatedIncome: parseFloat(row.total_estimated_income) || 0,
+            actualIncome: parseFloat(row.total_actual_income) || 0,
+            estimatedProfit: (parseFloat(row.total_estimated_income) || 0) - (parseFloat(row.total_estimated_expenses) || 0),
+            actualProfit: (parseFloat(row.total_actual_income) || 0) - (parseFloat(row.total_actual_expenses) || 0),
+            paidItems: parseInt(row.paid_count) || 0,
+            pendingItems: parseInt(row.pending_count) || 0
+          }
+        });
+      }
+
+      case 'getItems': {
+        if (!eventId) return res.status(400).json({ error: 'eventId required' });
+        const result = await pool.query(`
+          SELECT bi.*, bc.name as category_name, bc.icon, bc.is_income
+          FROM budget_items bi
+          JOIN budgets b ON bi.budget_id = b.id
+          LEFT JOIN budget_categories bc ON bi.category_id = bc.id
+          WHERE b.event_id = $1
+          ORDER BY bc.sort_order, bi.created_at
+        `, [eventId]);
+        return res.json({ success: true, items: result.rows });
+      }
+
+      case 'addItem': {
+        if (!eventId) return res.status(400).json({ error: 'eventId required' });
+        const { categoryId, description, vendorName, estimatedAmount, actualAmount, isPaid, dueDate, notes } = data || {};
+        if (!categoryId || !description) return res.status(400).json({ error: 'categoryId and description required' });
+
+        // Get or create budget for event
+        let budgetResult = await pool.query('SELECT id FROM budgets WHERE event_id = $1', [eventId]);
+        let budgetId;
+        if (budgetResult.rows.length === 0) {
+          const newBudget = await pool.query('INSERT INTO budgets (event_id) VALUES ($1) RETURNING id', [eventId]);
+          budgetId = newBudget.rows[0].id;
+        } else {
+          budgetId = budgetResult.rows[0].id;
+        }
+
+        await pool.query(`
+          INSERT INTO budget_items (budget_id, category_id, description, vendor_name, estimated_amount, actual_amount, is_paid, due_date, notes)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        `, [budgetId, categoryId, description, vendorName, estimatedAmount || 0, actualAmount || 0, isPaid || false, dueDate, notes]);
+        return res.json({ success: true, message: 'Budget item added' });
+      }
+
+      case 'updateItem': {
+        if (!itemId) return res.status(400).json({ error: 'itemId required' });
+        const fields = [];
+        const values = [];
+        let idx = 1;
+        const allowedFields = ['description', 'vendor_name', 'estimated_amount', 'actual_amount', 'is_paid', 'due_date', 'notes', 'category_id'];
+        const fieldMap = { vendorName: 'vendor_name', estimatedAmount: 'estimated_amount', actualAmount: 'actual_amount', isPaid: 'is_paid', dueDate: 'due_date', categoryId: 'category_id' };
+        for (const [key, value] of Object.entries(data || {})) {
+          const dbField = fieldMap[key] || key;
+          if (allowedFields.includes(dbField) && value !== undefined) {
+            fields.push(`${dbField} = $${idx++}`);
+            values.push(value);
+          }
+        }
+        if (fields.length === 0) return res.status(400).json({ error: 'No valid fields' });
+        values.push(itemId);
+        await pool.query(`UPDATE budget_items SET ${fields.join(', ')} WHERE id = $${idx}`, values);
+        return res.json({ success: true, message: 'Budget item updated' });
+      }
+
+      case 'deleteItem': {
+        if (!itemId) return res.status(400).json({ error: 'itemId required' });
+        await pool.query('DELETE FROM budget_items WHERE id = $1', [itemId]);
+        return res.json({ success: true, message: 'Budget item deleted' });
+      }
+
+      case 'markPaid': {
+        if (!itemId) return res.status(400).json({ error: 'itemId required' });
+        await pool.query('UPDATE budget_items SET is_paid = true WHERE id = $1', [itemId]);
+        return res.json({ success: true, message: 'Item marked as paid' });
+      }
+
+      default:
+        return res.status(400).json({ error: 'Invalid action. Valid: getCategories, getSummary, getItems, addItem, updateItem, deleteItem, markPaid' });
+    }
+  } catch (error) {
+    console.error('GPT Budget error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/v1/gpt/staff - Unified staff session
+app.post('/api/v1/gpt/staff', async (req, res) => {
+  try {
+    const { action, staffId, eventId, assignmentId, data, filters } = req.body;
+
+    // Check if staff table exists
+    const tableCheck = await pool.query(`SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'staff')`);
+    if (!tableCheck.rows[0].exists) {
+      return res.json({ success: true, staff: [], message: 'Staff table not initialized' });
+    }
+
+    switch (action) {
+      case 'list': {
+        const result = await pool.query('SELECT * FROM staff ORDER BY name');
+        return res.json({ success: true, staff: result.rows });
+      }
+
+      case 'get': {
+        if (!staffId) return res.status(400).json({ error: 'staffId required' });
+        const result = await pool.query('SELECT * FROM staff WHERE id = $1', [staffId]);
+        if (result.rows.length === 0) return res.status(404).json({ error: 'Staff not found' });
+        return res.json({ success: true, staff: result.rows[0] });
+      }
+
+      case 'add': {
+        const { name, email, phone, role, hourlyRate, experienceLevel } = data || {};
+        if (!name || !email) return res.status(400).json({ error: 'name and email required' });
+        const result = await pool.query(`
+          INSERT INTO staff (name, email, phone, role, hourly_rate, experience_level, status)
+          VALUES ($1, $2, $3, $4, $5, $6, 'active') RETURNING *
+        `, [name, email, phone, role, hourlyRate, experienceLevel || 'intermediate']);
+        return res.json({ success: true, staff: result.rows[0], message: 'Staff member added' });
+      }
+
+      case 'update': {
+        if (!staffId) return res.status(400).json({ error: 'staffId required' });
+        const fields = [];
+        const values = [];
+        let idx = 1;
+        for (const [key, value] of Object.entries(data || {})) {
+          if (value !== undefined) {
+            const dbField = key.replace(/([A-Z])/g, '_$1').toLowerCase();
+            fields.push(`${dbField} = $${idx++}`);
+            values.push(value);
+          }
+        }
+        if (fields.length === 0) return res.status(400).json({ error: 'No fields to update' });
+        values.push(staffId);
+        await pool.query(`UPDATE staff SET ${fields.join(', ')} WHERE id = $${idx}`, values);
+        return res.json({ success: true, message: 'Staff updated' });
+      }
+
+      case 'delete': {
+        if (!staffId) return res.status(400).json({ error: 'staffId required' });
+        await pool.query('DELETE FROM staff WHERE id = $1', [staffId]);
+        return res.json({ success: true, message: 'Staff removed' });
+      }
+
+      case 'assignToEvent': {
+        if (!staffId || !eventId) return res.status(400).json({ error: 'staffId and eventId required' });
+        const { role, shiftStart, shiftEnd } = data || {};
+        await pool.query(`
+          INSERT INTO staff_assignments (staff_id, event_id, role, shift_start, shift_end, status)
+          VALUES ($1, $2, $3, $4, $5, 'scheduled')
+        `, [staffId, eventId, role, shiftStart, shiftEnd]);
+        return res.json({ success: true, message: 'Staff assigned to event' });
+      }
+
+      case 'getEventStaff': {
+        if (!eventId) return res.status(400).json({ error: 'eventId required' });
+        const assignCheck = await pool.query(`SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'staff_assignments')`);
+        if (!assignCheck.rows[0].exists) return res.json({ success: true, assignments: [] });
+        const result = await pool.query(`
+          SELECT sa.*, s.name, s.phone, s.photo_url
+          FROM staff_assignments sa
+          JOIN staff s ON sa.staff_id = s.id
+          WHERE sa.event_id = $1
+        `, [eventId]);
+        return res.json({ success: true, assignments: result.rows });
+      }
+
+      case 'removeAssignment': {
+        if (!assignmentId) return res.status(400).json({ error: 'assignmentId required' });
+        await pool.query('DELETE FROM staff_assignments WHERE id = $1', [assignmentId]);
+        return res.json({ success: true, message: 'Assignment removed' });
+      }
+
+      default:
+        return res.status(400).json({ error: 'Invalid action. Valid: list, get, add, update, delete, assignToEvent, getEventStaff, removeAssignment' });
+    }
+  } catch (error) {
+    console.error('GPT Staff error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/v1/gpt/vendors - Unified vendors session
+app.post('/api/v1/gpt/vendors', async (req, res) => {
+  try {
+    const { action, vendorId, data, filters } = req.body;
+
+    const tableCheck = await pool.query(`SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'vendors')`);
+    if (!tableCheck.rows[0].exists) {
+      return res.json({ success: true, vendors: [], message: 'Vendors table not initialized' });
+    }
+
+    switch (action) {
+      case 'list': {
+        const { category, isPreferred } = filters || {};
+        let query = 'SELECT * FROM vendors WHERE 1=1';
+        const values = [];
+        if (category) { query += ` AND category = $${values.length + 1}`; values.push(category); }
+        if (isPreferred !== undefined) { query += ` AND is_preferred = $${values.length + 1}`; values.push(isPreferred); }
+        query += ' ORDER BY name';
+        const result = await pool.query(query, values);
+        return res.json({ success: true, vendors: result.rows });
+      }
+
+      case 'get': {
+        if (!vendorId) return res.status(400).json({ error: 'vendorId required' });
+        const result = await pool.query('SELECT * FROM vendors WHERE id = $1', [vendorId]);
+        if (result.rows.length === 0) return res.status(404).json({ error: 'Vendor not found' });
+        return res.json({ success: true, vendor: result.rows[0] });
+      }
+
+      case 'add': {
+        const { name, category, contactName, email, phone, website, city, notes, isPreferred } = data || {};
+        if (!name) return res.status(400).json({ error: 'name required' });
+        const result = await pool.query(`
+          INSERT INTO vendors (name, category, contact_name, email, phone, website, city, notes, is_preferred)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *
+        `, [name, category, contactName, email, phone, website, city, notes, isPreferred || false]);
+        return res.json({ success: true, vendor: result.rows[0], message: 'Vendor added' });
+      }
+
+      case 'update': {
+        if (!vendorId) return res.status(400).json({ error: 'vendorId required' });
+        const fields = [];
+        const values = [];
+        let idx = 1;
+        const fieldMap = { contactName: 'contact_name', isPreferred: 'is_preferred' };
+        for (const [key, value] of Object.entries(data || {})) {
+          if (value !== undefined) {
+            const dbField = fieldMap[key] || key;
+            fields.push(`${dbField} = $${idx++}`);
+            values.push(value);
+          }
+        }
+        if (fields.length === 0) return res.status(400).json({ error: 'No fields to update' });
+        values.push(vendorId);
+        await pool.query(`UPDATE vendors SET ${fields.join(', ')} WHERE id = $${idx}`, values);
+        return res.json({ success: true, message: 'Vendor updated' });
+      }
+
+      case 'delete': {
+        if (!vendorId) return res.status(400).json({ error: 'vendorId required' });
+        await pool.query('DELETE FROM vendors WHERE id = $1', [vendorId]);
+        return res.json({ success: true, message: 'Vendor deleted' });
+      }
+
+      default:
+        return res.status(400).json({ error: 'Invalid action. Valid: list, get, add, update, delete' });
+    }
+  } catch (error) {
+    console.error('GPT Vendors error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/v1/gpt/models - Unified models/talent session
+app.post('/api/v1/gpt/models', async (req, res) => {
+  try {
+    const { action, modelId, data, filters } = req.body;
+
+    const tableCheck = await pool.query(`SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'models')`);
+    if (!tableCheck.rows[0].exists) {
+      return res.json({ success: true, models: [], message: 'Models table not initialized' });
+    }
+
+    switch (action) {
+      case 'list': {
+        const { status } = filters || {};
+        let query = 'SELECT * FROM models';
+        if (status) query += ` WHERE status = '${status}'`;
+        query += ' ORDER BY created_at DESC';
+        const result = await pool.query(query);
+        return res.json({ success: true, models: result.rows });
+      }
+
+      case 'get': {
+        if (!modelId) return res.status(400).json({ error: 'modelId required' });
+        const result = await pool.query('SELECT * FROM models WHERE id = $1', [modelId]);
+        if (result.rows.length === 0) return res.status(404).json({ error: 'Model not found' });
+        return res.json({ success: true, model: result.rows[0] });
+      }
+
+      case 'updateStatus': {
+        if (!modelId) return res.status(400).json({ error: 'modelId required' });
+        const { status } = data || {};
+        if (!['pending', 'approved', 'declined', 'assigned'].includes(status)) {
+          return res.status(400).json({ error: 'Invalid status' });
+        }
+        await pool.query('UPDATE models SET status = $1 WHERE id = $2', [status, modelId]);
+        return res.json({ success: true, message: `Model ${status}` });
+      }
+
+      case 'stats': {
+        const result = await pool.query(`
+          SELECT COUNT(*) as total,
+            COUNT(*) FILTER (WHERE status = 'pending') as pending,
+            COUNT(*) FILTER (WHERE status = 'approved') as approved,
+            COUNT(*) FILTER (WHERE status = 'assigned') as assigned
+          FROM models
+        `);
+        return res.json({ success: true, stats: result.rows[0] });
+      }
+
+      default:
+        return res.status(400).json({ error: 'Invalid action. Valid: list, get, updateStatus, stats' });
+    }
+  } catch (error) {
+    console.error('GPT Models error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/v1/gpt/tables - Unified table reservations session
+app.post('/api/v1/gpt/tables', async (req, res) => {
+  try {
+    const { action, reservationId, eventId, data, filters } = req.body;
+
+    const tableCheck = await pool.query(`SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'table_reservations')`);
+    if (!tableCheck.rows[0].exists) {
+      return res.json({ success: true, reservations: [], message: 'Table reservations not initialized' });
+    }
+
+    switch (action) {
+      case 'list': {
+        let query = 'SELECT * FROM table_reservations';
+        const values = [];
+        if (eventId) { query += ' WHERE event_id = $1'; values.push(eventId); }
+        query += ' ORDER BY created_at DESC';
+        const result = await pool.query(query, values);
+        return res.json({ success: true, reservations: result.rows });
+      }
+
+      case 'create': {
+        const { tableId, tableName, zone, customerName, customerEmail, customerPhone, partySize, minimumSpend } = data || {};
+        if (!eventId || !customerName) return res.status(400).json({ error: 'eventId and customerName required' });
+        const result = await pool.query(`
+          INSERT INTO table_reservations (event_id, table_id, table_name, zone, customer_name, customer_email, customer_phone, party_size, minimum_spend, status)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending') RETURNING *
+        `, [eventId, tableId, tableName, zone, customerName, customerEmail, customerPhone, partySize, minimumSpend]);
+        return res.json({ success: true, reservation: result.rows[0], message: 'Reservation created' });
+      }
+
+      case 'confirm': {
+        if (!reservationId) return res.status(400).json({ error: 'reservationId required' });
+        await pool.query('UPDATE table_reservations SET status = $1 WHERE id = $2', ['confirmed', reservationId]);
+        return res.json({ success: true, message: 'Reservation confirmed' });
+      }
+
+      case 'cancel': {
+        if (!reservationId) return res.status(400).json({ error: 'reservationId required' });
+        await pool.query('UPDATE table_reservations SET status = $1 WHERE id = $2', ['cancelled', reservationId]);
+        return res.json({ success: true, message: 'Reservation cancelled' });
+      }
+
+      case 'stats': {
+        const result = await pool.query(`
+          SELECT COUNT(*) as total,
+            COUNT(*) FILTER (WHERE status = 'pending') as pending,
+            COUNT(*) FILTER (WHERE status = 'confirmed') as confirmed,
+            COALESCE(SUM(minimum_spend) FILTER (WHERE status = 'confirmed'), 0) as revenue
+          FROM table_reservations ${eventId ? 'WHERE event_id = $1' : ''}
+        `, eventId ? [eventId] : []);
+        return res.json({ success: true, stats: result.rows[0] });
+      }
+
+      default:
+        return res.status(400).json({ error: 'Invalid action. Valid: list, create, confirm, cancel, stats' });
+    }
+  } catch (error) {
+    console.error('GPT Tables error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/v1/gpt/tickets - Unified tickets session
+app.post('/api/v1/gpt/tickets', async (req, res) => {
+  try {
+    const { action, ticketId, eventId, data, filters } = req.body;
+
+    const tableCheck = await pool.query(`SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'tickets')`);
+    if (!tableCheck.rows[0].exists) {
+      return res.json({ success: true, tickets: [], message: 'Tickets table not initialized' });
+    }
+
+    switch (action) {
+      case 'list': {
+        let query = 'SELECT * FROM tickets';
+        const values = [];
+        if (eventId) { query += ' WHERE event_id = $1'; values.push(eventId); }
+        query += ' ORDER BY created_at DESC';
+        const result = await pool.query(query, values);
+        return res.json({ success: true, tickets: result.rows });
+      }
+
+      case 'create': {
+        const { ticketType, holderName, holderEmail, price } = data || {};
+        if (!eventId || !ticketType) return res.status(400).json({ error: 'eventId and ticketType required' });
+        const ticketCode = crypto.randomBytes(8).toString('hex').toUpperCase();
+        const result = await pool.query(`
+          INSERT INTO tickets (event_id, ticket_type, holder_name, holder_email, price, ticket_code, status)
+          VALUES ($1, $2, $3, $4, $5, $6, 'valid') RETURNING *
+        `, [eventId, ticketType, holderName, holderEmail, price || 0, ticketCode]);
+        return res.json({ success: true, ticket: result.rows[0], message: 'Ticket created' });
+      }
+
+      case 'checkIn': {
+        if (!ticketId) return res.status(400).json({ error: 'ticketId required' });
+        await pool.query('UPDATE tickets SET status = $1, checked_in_at = CURRENT_TIMESTAMP WHERE id = $2', ['used', ticketId]);
+        return res.json({ success: true, message: 'Ticket checked in' });
+      }
+
+      case 'stats': {
+        const result = await pool.query(`
+          SELECT COUNT(*) as total,
+            COUNT(*) FILTER (WHERE status = 'valid') as valid,
+            COUNT(*) FILTER (WHERE status = 'used') as used,
+            COALESCE(SUM(price), 0) as revenue
+          FROM tickets ${eventId ? 'WHERE event_id = $1' : ''}
+        `, eventId ? [eventId] : []);
+        return res.json({ success: true, stats: result.rows[0] });
+      }
+
+      default:
+        return res.status(400).json({ error: 'Invalid action. Valid: list, create, checkIn, stats' });
+    }
+  } catch (error) {
+    console.error('GPT Tickets error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/v1/gpt/sponsors - Unified sponsors session
+app.post('/api/v1/gpt/sponsors', async (req, res) => {
+  try {
+    const { action, sponsorId, data, filters } = req.body;
+
+    const tableCheck = await pool.query(`SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'sponsors')`);
+    if (!tableCheck.rows[0].exists) {
+      return res.json({ success: true, sponsors: [], message: 'Sponsors table not initialized' });
+    }
+
+    switch (action) {
+      case 'list': {
+        const result = await pool.query('SELECT * FROM sponsors ORDER BY created_at DESC');
+        return res.json({ success: true, sponsors: result.rows });
+      }
+
+      case 'get': {
+        if (!sponsorId) return res.status(400).json({ error: 'sponsorId required' });
+        const result = await pool.query('SELECT * FROM sponsors WHERE id = $1', [sponsorId]);
+        if (result.rows.length === 0) return res.status(404).json({ error: 'Sponsor not found' });
+        return res.json({ success: true, sponsor: result.rows[0] });
+      }
+
+      case 'add': {
+        const { companyName, contactName, email, phone, tier, amount, benefits } = data || {};
+        if (!companyName) return res.status(400).json({ error: 'companyName required' });
+        const result = await pool.query(`
+          INSERT INTO sponsors (company_name, contact_name, email, phone, tier, amount, benefits, status)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending') RETURNING *
+        `, [companyName, contactName, email, phone, tier || 'silver', amount || 0, benefits]);
+        return res.json({ success: true, sponsor: result.rows[0], message: 'Sponsor added' });
+      }
+
+      case 'updateStatus': {
+        if (!sponsorId) return res.status(400).json({ error: 'sponsorId required' });
+        const { status } = data || {};
+        await pool.query('UPDATE sponsors SET status = $1 WHERE id = $2', [status, sponsorId]);
+        return res.json({ success: true, message: 'Sponsor status updated' });
+      }
+
+      case 'stats': {
+        const result = await pool.query(`
+          SELECT COUNT(*) as total,
+            COUNT(*) FILTER (WHERE status = 'pending') as pending,
+            COUNT(*) FILTER (WHERE status = 'active') as active,
+            COALESCE(SUM(amount) FILTER (WHERE status = 'active'), 0) as revenue
+          FROM sponsors
+        `);
+        return res.json({ success: true, stats: result.rows[0] });
+      }
+
+      default:
+        return res.status(400).json({ error: 'Invalid action. Valid: list, get, add, updateStatus, stats' });
+    }
+  } catch (error) {
+    console.error('GPT Sponsors error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============================================
 // EVENTS ENDPOINTS
 // ============================================
 
