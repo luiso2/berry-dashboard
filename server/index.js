@@ -936,10 +936,13 @@ app.post('/oauth/login', async (req, res) => {
   try {
     const { email, password, redirect_uri, state } = req.body;
 
-    // Check if this is a frontend request
-    const wantsJson = req.headers.accept?.includes('application/json') ||
-                      req.headers['content-type']?.includes('application/x-www-form-urlencoded');
-    const isFrontend = wantsJson && !redirect_uri?.includes('chatgpt');
+    // Check if this is a ChatGPT OAuth request (needs redirect) or frontend request (needs JSON)
+    const isOAuthRedirect = redirect_uri && (
+      redirect_uri.includes('chat.openai.com') ||
+      redirect_uri.includes('chatgpt.com') ||
+      redirect_uri.includes('openai.com')
+    );
+    const isFrontend = !isOAuthRedirect;
 
     // Find user
     const userResult = await pool.query('SELECT * FROM users WHERE email = $1', [email.toLowerCase()]);
@@ -1001,10 +1004,13 @@ app.post('/oauth/register', async (req, res) => {
   try {
     const { name, email, password, company, redirect_uri, state } = req.body;
 
-    // Check if this is a frontend request
-    const wantsJson = req.headers.accept?.includes('application/json') ||
-                      req.headers['content-type']?.includes('application/x-www-form-urlencoded');
-    const isFrontend = wantsJson && !redirect_uri?.includes('chatgpt');
+    // Check if this is a ChatGPT OAuth request (needs redirect) or frontend request (needs JSON)
+    const isOAuthRedirect = redirect_uri && (
+      redirect_uri.includes('chat.openai.com') ||
+      redirect_uri.includes('chatgpt.com') ||
+      redirect_uri.includes('openai.com')
+    );
+    const isFrontend = !isOAuthRedirect;
 
     if (!email || !password || password.length < 6) {
       if (isFrontend) {
