@@ -1,4 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useAuth } from './context/AuthContext';
 import { QRCode, generateGuestQRData } from './components/QRCode';
 import * as XLSX from 'xlsx';
 import * as htmlToImage from 'html-to-image';
@@ -1000,6 +1002,15 @@ function App() {
   if (clientMatch) {
     return <ClientPortalView token={clientMatch[1]} />;
   }
+
+  // Auth hooks
+  const navigate = useNavigate();
+  const { user, logout } = useAuth();
+
+  const handleLogout = () => {
+    logout();
+    navigate('/login');
+  };
 
   const [guests, setGuests] = useState<Guest[]>([]);
   const [loading, setLoading] = useState(true);
@@ -2336,6 +2347,14 @@ function App() {
           </CollapsibleMenu>
         </nav>
 
+        {/* User Info & Logout */}
+        {user && (
+          <div style={{ padding: '12px', borderTop: '1px solid #1a1a1a', marginBottom: 8 }}>
+            <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>{user.email}</div>
+            <div style={{ fontSize: 14, color: '#d4af37', fontWeight: 500 }}>{user.name}</div>
+          </div>
+        )}
+
         {/* Settings Row */}
         <div style={{ padding: '12px', borderTop: '1px solid #1a1a1a', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <button
@@ -2349,6 +2368,33 @@ function App() {
             style={{ background: autoRefresh ? '#22c55e20' : 'transparent', border: 'none', color: autoRefresh ? '#22c55e' : '#666', cursor: 'pointer', fontSize: 12, padding: '4px 8px', borderRadius: 4 }}
           >
             {autoRefresh ? '● Live' : '○ Paused'}
+          </button>
+        </div>
+
+        {/* Logout Button */}
+        <div style={{ padding: '12px', borderTop: '1px solid #1a1a1a' }}>
+          <button
+            onClick={handleLogout}
+            style={{
+              width: '100%',
+              background: 'rgba(239, 68, 68, 0.1)',
+              border: '1px solid rgba(239, 68, 68, 0.3)',
+              color: '#ef4444',
+              padding: '10px 16px',
+              borderRadius: 8,
+              cursor: 'pointer',
+              fontSize: 14,
+              fontWeight: 500,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 8,
+              transition: 'all 0.2s'
+            }}
+            onMouseOver={(e) => { e.currentTarget.style.background = 'rgba(239, 68, 68, 0.2)'; }}
+            onMouseOut={(e) => { e.currentTarget.style.background = 'rgba(239, 68, 68, 0.1)'; }}
+          >
+            <span>↩</span> Logout
           </button>
         </div>
 
