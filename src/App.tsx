@@ -354,6 +354,74 @@ interface ServerStatus {
   config: { port: number; environment: string; emailConfigured: boolean; databaseConfigured: boolean };
 }
 
+// Client Portal Data Interface (for public client view)
+interface ClientPortalData {
+  client: { name: string; email: string };
+  event: {
+    id: number;
+    name: string;
+    date: string;
+    venue: string;
+    city: string;
+    status: string;
+    expectedAttendance: number;
+    theme?: string;
+    dressCode?: string;
+  };
+  permissions: {
+    viewBudget: boolean;
+    viewTimeline: boolean;
+    viewStaff: boolean;
+    viewVendors: boolean;
+  };
+  budget?: {
+    items: Array<{
+      category: string;
+      icon: string;
+      description: string;
+      estimatedAmount: number;
+      actualAmount: number;
+      isPaid: boolean;
+      isIncome: boolean;
+    }>;
+    summary: {
+      total_estimated_expenses: number;
+      total_actual_expenses: number;
+      total_estimated_income: number;
+      total_actual_income: number;
+      paid_count: number;
+      pending_count: number;
+    };
+  };
+  timeline?: Array<{
+    time: string;
+    title: string;
+    description: string;
+    location: string;
+    is_critical: boolean;
+    status: string;
+  }>;
+  checklist?: {
+    items: Array<{ category: string; item: string; is_completed: boolean; priority: string }>;
+    completed: number;
+    total: number;
+  };
+  staff?: Array<{
+    name: string;
+    role: string;
+    photo_url: string;
+    shift_start: string;
+    shift_end: string;
+    status: string;
+  }>;
+  vendors?: Array<{
+    name: string;
+    category: string;
+    contract_title: string;
+    status: string;
+  }>;
+}
+
 // Instagram-based AI Score Calculator
 const calculateAIScore = (guest: Guest): number => {
   const followers = guest.instagramFollowers || estimateFollowers(guest.instagram);
@@ -675,7 +743,264 @@ const styles = `
   }
 `;
 
+// Client Portal View Component - Public view for clients
+function ClientPortalView({ token }: { token: string }) {
+  const [data, setData] = useState<ClientPortalData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const fetchPortalData = async () => {
+      try {
+        const res = await fetch(`${API_URL}/client-portal/${token}`);
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.error || 'Invalid or expired access');
+        }
+        const portalData = await res.json();
+        setData(portalData);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to load portal');
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchPortalData();
+  }, [token]);
+
+  if (loading) {
+    return (
+      <div style={{ minHeight: '100vh', background: 'linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ width: 50, height: 50, border: '3px solid #333', borderTopColor: '#d4af37', borderRadius: '50%', animation: 'spin 0.8s linear infinite', margin: '0 auto 20px' }} />
+          <p style={{ color: '#888', fontSize: 16 }}>Loading your event portal...</p>
+        </div>
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      </div>
+    );
+  }
+
+  if (error || !data) {
+    return (
+      <div style={{ minHeight: '100vh', background: 'linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+        <div style={{ textAlign: 'center', maxWidth: 400 }}>
+          <div style={{ fontSize: 60, marginBottom: 20 }}>🔒</div>
+          <h1 style={{ color: '#fff', fontSize: 24, marginBottom: 12 }}>Access Denied</h1>
+          <p style={{ color: '#888', fontSize: 16, marginBottom: 24 }}>{error || 'This link is invalid or has expired.'}</p>
+          <p style={{ color: '#666', fontSize: 14 }}>Please contact the event organizer for a new link.</p>
+        </div>
+      </div>
+    );
+  }
+
+  const formatDate = (dateStr: string) => new Date(dateStr).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+  const formatCurrency = (amount: number) => '$' + (amount || 0).toLocaleString();
+  const formatTime = (timeStr: string) => {
+    if (!timeStr) return '';
+    try { return new Date(`2000-01-01T${timeStr}`).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }); } catch { return timeStr; }
+  };
+
+  return (
+    <div style={{ minHeight: '100vh', background: 'linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 100%)', color: '#fff', fontFamily: "'Inter', -apple-system, sans-serif" }}>
+      {/* Header */}
+      <header style={{ background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(10px)', borderBottom: '1px solid rgba(212,175,55,0.2)', padding: '20px 24px', position: 'sticky', top: 0, zIndex: 100 }}>
+        <div style={{ maxWidth: 1200, margin: '0 auto', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+          <div>
+            <h1 style={{ fontSize: 24, fontWeight: 700, margin: 0, background: 'linear-gradient(135deg, #d4af37, #f4e4bc)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
+              {data.event.name}
+            </h1>
+            <p style={{ color: '#888', fontSize: 14, margin: '4px 0 0' }}>Client Portal</p>
+          </div>
+          <div style={{ textAlign: 'right' }}>
+            <p style={{ color: '#d4af37', fontSize: 14, margin: 0 }}>Welcome, {data.client.name}</p>
+            <p style={{ color: '#666', fontSize: 12, margin: '2px 0 0' }}>{data.client.email}</p>
+          </div>
+        </div>
+      </header>
+
+      <main style={{ maxWidth: 1200, margin: '0 auto', padding: 24 }}>
+        {/* Event Info Card */}
+        <div style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(212,175,55,0.3)', borderRadius: 16, padding: 24, marginBottom: 24 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 20 }}>
+            <div>
+              <p style={{ color: '#888', fontSize: 12, marginBottom: 4, textTransform: 'uppercase' }}>Date</p>
+              <p style={{ fontSize: 18, fontWeight: 600, margin: 0 }}>📅 {formatDate(data.event.date)}</p>
+            </div>
+            <div>
+              <p style={{ color: '#888', fontSize: 12, marginBottom: 4, textTransform: 'uppercase' }}>Venue</p>
+              <p style={{ fontSize: 18, fontWeight: 600, margin: 0 }}>📍 {data.event.venue}{data.event.city ? `, ${data.event.city}` : ''}</p>
+            </div>
+            {data.event.expectedAttendance > 0 && (
+              <div>
+                <p style={{ color: '#888', fontSize: 12, marginBottom: 4, textTransform: 'uppercase' }}>Expected Guests</p>
+                <p style={{ fontSize: 18, fontWeight: 600, margin: 0 }}>👥 {data.event.expectedAttendance.toLocaleString()}</p>
+              </div>
+            )}
+            {data.event.dressCode && (
+              <div>
+                <p style={{ color: '#888', fontSize: 12, marginBottom: 4, textTransform: 'uppercase' }}>Dress Code</p>
+                <p style={{ fontSize: 18, fontWeight: 600, margin: 0 }}>👔 {data.event.dressCode}</p>
+              </div>
+            )}
+          </div>
+          {data.event.theme && (
+            <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid rgba(255,255,255,0.1)' }}>
+              <p style={{ color: '#888', fontSize: 12, marginBottom: 4, textTransform: 'uppercase' }}>Theme</p>
+              <p style={{ fontSize: 16, margin: 0, color: '#d4af37' }}>✨ {data.event.theme}</p>
+            </div>
+          )}
+        </div>
+
+        {/* Budget Section */}
+        {data.permissions.viewBudget && data.budget && (
+          <div style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 16, padding: 24, marginBottom: 24 }}>
+            <h2 style={{ fontSize: 20, fontWeight: 600, marginBottom: 20, display: 'flex', alignItems: 'center', gap: 8 }}>💰 Budget Overview</h2>
+
+            {/* Summary Cards */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 16, marginBottom: 24 }}>
+              <div style={{ background: 'rgba(34,197,94,0.1)', border: '1px solid rgba(34,197,94,0.3)', borderRadius: 12, padding: 16, textAlign: 'center' }}>
+                <p style={{ color: '#888', fontSize: 12, marginBottom: 4 }}>Expected Income</p>
+                <p style={{ color: '#22c55e', fontSize: 20, fontWeight: 700, margin: 0 }}>{formatCurrency(data.budget.summary?.total_estimated_income || 0)}</p>
+              </div>
+              <div style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 12, padding: 16, textAlign: 'center' }}>
+                <p style={{ color: '#888', fontSize: 12, marginBottom: 4 }}>Expected Expenses</p>
+                <p style={{ color: '#ef4444', fontSize: 20, fontWeight: 700, margin: 0 }}>{formatCurrency(data.budget.summary?.total_estimated_expenses || 0)}</p>
+              </div>
+              <div style={{ background: 'rgba(96,165,250,0.1)', border: '1px solid rgba(96,165,250,0.3)', borderRadius: 12, padding: 16, textAlign: 'center' }}>
+                <p style={{ color: '#888', fontSize: 12, marginBottom: 4 }}>Paid</p>
+                <p style={{ color: '#60a5fa', fontSize: 20, fontWeight: 700, margin: 0 }}>{data.budget.summary?.paid_count || 0} items</p>
+              </div>
+            </div>
+
+            {/* Budget Items */}
+            {data.budget.items.length > 0 && (
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
+                  <thead>
+                    <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
+                      <th style={{ textAlign: 'left', padding: '12px 8px', color: '#888', fontWeight: 500 }}>Category</th>
+                      <th style={{ textAlign: 'left', padding: '12px 8px', color: '#888', fontWeight: 500 }}>Description</th>
+                      <th style={{ textAlign: 'right', padding: '12px 8px', color: '#888', fontWeight: 500 }}>Estimated</th>
+                      <th style={{ textAlign: 'right', padding: '12px 8px', color: '#888', fontWeight: 500 }}>Actual</th>
+                      <th style={{ textAlign: 'center', padding: '12px 8px', color: '#888', fontWeight: 500 }}>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.budget.items.map((item, i) => (
+                      <tr key={i} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                        <td style={{ padding: '12px 8px' }}>{item.icon} {item.category}</td>
+                        <td style={{ padding: '12px 8px', color: '#ccc' }}>{item.description}</td>
+                        <td style={{ padding: '12px 8px', textAlign: 'right', color: item.isIncome ? '#22c55e' : '#ef4444' }}>{formatCurrency(item.estimatedAmount)}</td>
+                        <td style={{ padding: '12px 8px', textAlign: 'right', color: item.isIncome ? '#22c55e' : '#ef4444' }}>{formatCurrency(item.actualAmount)}</td>
+                        <td style={{ padding: '12px 8px', textAlign: 'center' }}>
+                          <span style={{ padding: '4px 8px', borderRadius: 4, fontSize: 12, background: item.isPaid ? 'rgba(34,197,94,0.2)' : 'rgba(251,191,36,0.2)', color: item.isPaid ? '#22c55e' : '#fbbf24' }}>
+                            {item.isPaid ? 'Paid' : 'Pending'}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Timeline Section */}
+        {data.permissions.viewTimeline && data.timeline && data.timeline.length > 0 && (
+          <div style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 16, padding: 24, marginBottom: 24 }}>
+            <h2 style={{ fontSize: 20, fontWeight: 600, marginBottom: 20, display: 'flex', alignItems: 'center', gap: 8 }}>📋 Event Timeline</h2>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {data.timeline.map((item, i) => (
+                <div key={i} style={{ display: 'flex', gap: 16, padding: 16, background: item.is_critical ? 'rgba(239,68,68,0.1)' : 'rgba(255,255,255,0.02)', borderRadius: 12, border: item.is_critical ? '1px solid rgba(239,68,68,0.3)' : '1px solid transparent' }}>
+                  <div style={{ minWidth: 80, color: '#d4af37', fontWeight: 600 }}>{formatTime(item.time)}</div>
+                  <div style={{ flex: 1 }}>
+                    <p style={{ fontWeight: 600, margin: 0 }}>{item.title} {item.is_critical && <span style={{ color: '#ef4444' }}>⚠️</span>}</p>
+                    {item.description && <p style={{ color: '#888', fontSize: 14, margin: '4px 0 0' }}>{item.description}</p>}
+                    {item.location && <p style={{ color: '#666', fontSize: 12, margin: '4px 0 0' }}>📍 {item.location}</p>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Checklist Section */}
+        {data.permissions.viewTimeline && data.checklist && data.checklist.items.length > 0 && (
+          <div style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 16, padding: 24, marginBottom: 24 }}>
+            <h2 style={{ fontSize: 20, fontWeight: 600, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 }}>✅ Planning Checklist</h2>
+            <p style={{ color: '#888', fontSize: 14, marginBottom: 20 }}>{data.checklist.completed} of {data.checklist.total} tasks completed</p>
+            <div style={{ width: '100%', height: 8, background: 'rgba(255,255,255,0.1)', borderRadius: 4, marginBottom: 20 }}>
+              <div style={{ width: `${(data.checklist.completed / data.checklist.total) * 100}%`, height: '100%', background: 'linear-gradient(90deg, #22c55e, #4ade80)', borderRadius: 4 }} />
+            </div>
+            <div style={{ display: 'grid', gap: 8 }}>
+              {data.checklist.items.map((item, i) => (
+                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 12px', background: 'rgba(255,255,255,0.02)', borderRadius: 8 }}>
+                  <span style={{ color: item.is_completed ? '#22c55e' : '#666' }}>{item.is_completed ? '✓' : '○'}</span>
+                  <span style={{ flex: 1, color: item.is_completed ? '#888' : '#fff', textDecoration: item.is_completed ? 'line-through' : 'none' }}>{item.item}</span>
+                  <span style={{ fontSize: 12, color: '#666' }}>{item.category}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Staff Section */}
+        {data.permissions.viewStaff && data.staff && data.staff.length > 0 && (
+          <div style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 16, padding: 24, marginBottom: 24 }}>
+            <h2 style={{ fontSize: 20, fontWeight: 600, marginBottom: 20, display: 'flex', alignItems: 'center', gap: 8 }}>👥 Event Staff</h2>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 16 }}>
+              {data.staff.map((member, i) => (
+                <div key={i} style={{ background: 'rgba(255,255,255,0.02)', borderRadius: 12, padding: 16, textAlign: 'center' }}>
+                  <div style={{ width: 60, height: 60, borderRadius: '50%', background: 'linear-gradient(135deg, #d4af37, #b8860b)', margin: '0 auto 12px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24, overflow: 'hidden' }}>
+                    {member.photo_url ? <img src={member.photo_url} alt={member.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : member.name.charAt(0)}
+                  </div>
+                  <p style={{ fontWeight: 600, margin: '0 0 4px' }}>{member.name}</p>
+                  <p style={{ color: '#d4af37', fontSize: 14, margin: 0 }}>{member.role}</p>
+                  {member.shift_start && <p style={{ color: '#666', fontSize: 12, marginTop: 8 }}>{formatTime(member.shift_start)} - {formatTime(member.shift_end)}</p>}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Vendors Section */}
+        {data.permissions.viewVendors && data.vendors && data.vendors.length > 0 && (
+          <div style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 16, padding: 24, marginBottom: 24 }}>
+            <h2 style={{ fontSize: 20, fontWeight: 600, marginBottom: 20, display: 'flex', alignItems: 'center', gap: 8 }}>🏢 Vendors & Contractors</h2>
+            <div style={{ display: 'grid', gap: 12 }}>
+              {data.vendors.map((vendor, i) => (
+                <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: 16, background: 'rgba(255,255,255,0.02)', borderRadius: 12 }}>
+                  <div>
+                    <p style={{ fontWeight: 600, margin: 0 }}>{vendor.name}</p>
+                    <p style={{ color: '#888', fontSize: 14, margin: '4px 0 0' }}>{vendor.category} • {vendor.contract_title}</p>
+                  </div>
+                  <span style={{ padding: '4px 12px', borderRadius: 20, fontSize: 12, background: vendor.status === 'signed' ? 'rgba(34,197,94,0.2)' : 'rgba(251,191,36,0.2)', color: vendor.status === 'signed' ? '#22c55e' : '#fbbf24' }}>
+                    {vendor.status}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </main>
+
+      {/* Footer */}
+      <footer style={{ textAlign: 'center', padding: '40px 24px', borderTop: '1px solid rgba(255,255,255,0.1)', marginTop: 40 }}>
+        <p style={{ color: '#666', fontSize: 14, margin: 0 }}>Powered by <span style={{ color: '#d4af37' }}>Berry Bly Productions</span></p>
+        <p style={{ color: '#444', fontSize: 12, marginTop: 8 }}>This portal is secure and only accessible with your unique link</p>
+      </footer>
+    </div>
+  );
+}
+
 function App() {
+  // Check if we're on a client portal URL
+  const clientMatch = window.location.pathname.match(/^\/client\/([a-zA-Z0-9]+)$/);
+  if (clientMatch) {
+    return <ClientPortalView token={clientMatch[1]} />;
+  }
+
   const [guests, setGuests] = useState<Guest[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
