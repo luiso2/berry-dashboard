@@ -279,25 +279,15 @@ const initDatabase = async () => {
       );
     `);
 
-    // Insert default budget categories if empty
+    // Insert default budget categories if empty (Simplified: 5 categories)
     await client.query(`
       INSERT INTO budget_categories (name, icon, color, is_income, sort_order)
       SELECT * FROM (VALUES
-        ('Venue Rental', 'building', '#8B5CF6', false, 1),
-        ('Catering & Bar', 'utensils', '#F59E0B', false, 2),
-        ('Entertainment & DJ', 'music', '#EC4899', false, 3),
-        ('Decor & Production', 'sparkles', '#10B981', false, 4),
-        ('Staffing', 'users', '#3B82F6', false, 5),
-        ('Security', 'shield', '#EF4444', false, 6),
-        ('Marketing & Promo', 'megaphone', '#6366F1', false, 7),
-        ('Photography & Video', 'camera', '#14B8A6', false, 8),
-        ('Permits & Insurance', 'file-text', '#64748B', false, 9),
-        ('Transportation', 'truck', '#78716C', false, 10),
-        ('Miscellaneous', 'package', '#A1A1AA', false, 11),
-        ('Ticket Sales', 'ticket', '#22C55E', true, 12),
-        ('Table Reservations', 'layout', '#D4AF37', true, 13),
-        ('Sponsorships', 'handshake', '#0EA5E9', true, 14),
-        ('Bar Revenue', 'wine', '#A855F7', true, 15)
+        ('Venue & Production', 'building', '#8B5CF6', false, 1),
+        ('Talent & Staffing', 'users', '#EC4899', false, 2),
+        ('Marketing & Operations', 'megaphone', '#3B82F6', false, 3),
+        ('Tickets & Tables', 'ticket', '#22C55E', true, 4),
+        ('Sponsorships', 'handshake', '#D4AF37', true, 5)
       ) AS t(name, icon, color, is_income, sort_order)
       WHERE NOT EXISTS (SELECT 1 FROM budget_categories LIMIT 1);
     `);
@@ -2101,80 +2091,7 @@ app.post('/api/v1/tickets/:ticketId/check-in', async (req, res) => {
   }
 });
 
-// ============================================
-// ACTIVITY LOG ENDPOINTS
-// ============================================
-
-// POST /api/v1/activity - Log an activity
-app.post('/api/v1/activity', async (req, res) => {
-  try {
-    const { action, details, guestName, guestId, eventType } = req.body;
-
-    const result = await pool.query(
-      `INSERT INTO activity_log (action, details, guest_name, guest_id, event_type)
-       VALUES ($1, $2, $3, $4, $5)
-       RETURNING *`,
-      [action, details, guestName || null, guestId || null, eventType || 'system']
-    );
-
-    res.status(201).json({
-      id: result.rows[0].id.toString(),
-      action: result.rows[0].action,
-      details: result.rows[0].details,
-      guestName: result.rows[0].guest_name,
-      type: result.rows[0].event_type,
-      timestamp: result.rows[0].created_at,
-    });
-  } catch (error) {
-    console.error('Error logging activity:', error);
-    res.status(500).json({ error: 'Failed to log activity' });
-  }
-});
-
-// GET /api/v1/activity - Get activity log
-app.get('/api/v1/activity', async (req, res) => {
-  try {
-    const { limit = 100, type } = req.query;
-
-    let queryText = 'SELECT * FROM activity_log';
-    const params = [];
-
-    if (type) {
-      queryText += ' WHERE event_type = $1';
-      params.push(type);
-    }
-
-    queryText += ' ORDER BY created_at DESC LIMIT $' + (params.length + 1);
-    params.push(parseInt(limit));
-
-    const result = await pool.query(queryText, params);
-
-    const activities = result.rows.map(row => ({
-      id: row.id.toString(),
-      action: row.action,
-      details: row.details,
-      guestName: row.guest_name,
-      type: row.event_type,
-      timestamp: row.created_at,
-    }));
-
-    res.json(activities);
-  } catch (error) {
-    console.error('Error fetching activity log:', error);
-    res.status(500).json({ error: 'Failed to fetch activity log' });
-  }
-});
-
-// DELETE /api/v1/activity - Clear activity log
-app.delete('/api/v1/activity', async (req, res) => {
-  try {
-    await pool.query('DELETE FROM activity_log');
-    res.json({ success: true, message: 'Activity log cleared' });
-  } catch (error) {
-    console.error('Error clearing activity log:', error);
-    res.status(500).json({ error: 'Failed to clear activity log' });
-  }
-});
+// Activity Log endpoints removed for simplification
 
 // ============================================
 // SPONSORS ENDPOINTS
@@ -3149,22 +3066,14 @@ app.get('/api/v1/budget-categories', async (req, res) => {
     `);
 
     if (!tableCheck.rows[0].exists) {
-      // Return default categories if table doesn't exist
+      // Return simplified default categories (5 total)
       return res.json({
         categories: [
-          { id: 1, name: 'Venue Rental', icon: 'building', color: '#8B5CF6', is_income: false, sort_order: 1 },
-          { id: 2, name: 'Catering & Bar', icon: 'utensils', color: '#F59E0B', is_income: false, sort_order: 2 },
-          { id: 3, name: 'Entertainment & DJ', icon: 'music', color: '#EC4899', is_income: false, sort_order: 3 },
-          { id: 4, name: 'Decor & Production', icon: 'sparkles', color: '#10B981', is_income: false, sort_order: 4 },
-          { id: 5, name: 'Staffing', icon: 'users', color: '#3B82F6', is_income: false, sort_order: 5 },
-          { id: 6, name: 'Security', icon: 'shield', color: '#EF4444', is_income: false, sort_order: 6 },
-          { id: 7, name: 'Marketing & Promo', icon: 'megaphone', color: '#6366F1', is_income: false, sort_order: 7 },
-          { id: 8, name: 'Photography & Video', icon: 'camera', color: '#14B8A6', is_income: false, sort_order: 8 },
-          { id: 9, name: 'Permits & Insurance', icon: 'file-text', color: '#64748B', is_income: false, sort_order: 9 },
-          { id: 10, name: 'Miscellaneous', icon: 'package', color: '#A1A1AA', is_income: false, sort_order: 10 },
-          { id: 11, name: 'Ticket Sales', icon: 'ticket', color: '#22C55E', is_income: true, sort_order: 11 },
-          { id: 12, name: 'Table Reservations', icon: 'layout', color: '#D4AF37', is_income: true, sort_order: 12 },
-          { id: 13, name: 'Sponsorships', icon: 'handshake', color: '#0EA5E9', is_income: true, sort_order: 13 }
+          { id: 1, name: 'Venue & Production', icon: 'building', color: '#8B5CF6', is_income: false, sort_order: 1 },
+          { id: 2, name: 'Talent & Staffing', icon: 'users', color: '#EC4899', is_income: false, sort_order: 2 },
+          { id: 3, name: 'Marketing & Operations', icon: 'megaphone', color: '#3B82F6', is_income: false, sort_order: 3 },
+          { id: 4, name: 'Tickets & Tables', icon: 'ticket', color: '#22C55E', is_income: true, sort_order: 4 },
+          { id: 5, name: 'Sponsorships', icon: 'handshake', color: '#D4AF37', is_income: true, sort_order: 5 }
         ]
       });
     }
@@ -4021,434 +3930,12 @@ app.post('/api/v1/staff-assignments/:id/checkout', async (req, res) => {
 });
 
 // ============================================================
-// STAFF PAYMENTS ENDPOINTS
+// REMOVED SECTIONS (Simplified for Berry Bly/Maxim needs):
+// - Staff Payments endpoints
+// - Vendor Quotes endpoints
+// - Vendor Contracts endpoints
+// - Vendor History endpoints
 // ============================================================
-
-// GET /api/v1/staff/:staffId/payments - Get staff payments
-app.get('/api/v1/staff/:staffId/payments', async (req, res) => {
-  try {
-    const { staffId } = req.params;
-    const result = await pool.query(`
-      SELECT sp.*, e.name as event_name
-      FROM staff_payments sp
-      LEFT JOIN events e ON sp.event_id = e.id
-      WHERE sp.staff_id = $1
-      ORDER BY sp.created_at DESC
-    `, [staffId]);
-
-    // Get totals
-    const totals = await pool.query(`
-      SELECT
-        SUM(CASE WHEN status = 'paid' THEN amount ELSE 0 END) as total_paid,
-        SUM(CASE WHEN status = 'pending' THEN amount ELSE 0 END) as total_pending
-      FROM staff_payments
-      WHERE staff_id = $1
-    `, [staffId]);
-
-    res.json({
-      payments: result.rows,
-      totals: totals.rows[0]
-    });
-  } catch (error) {
-    console.error('Error fetching payments:', error);
-    res.status(500).json({ error: 'Failed to fetch payments' });
-  }
-});
-
-// POST /api/v1/staff/:staffId/payments - Create payment
-app.post('/api/v1/staff/:staffId/payments', async (req, res) => {
-  try {
-    const { staffId } = req.params;
-    const {
-      assignmentId, eventId, amount, paymentType, paymentMethod,
-      paymentDate, reference, status, notes
-    } = req.body;
-
-    const result = await pool.query(`
-      INSERT INTO staff_payments (
-        staff_id, assignment_id, event_id, amount, payment_type,
-        payment_method, payment_date, reference, status, notes
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-      RETURNING *
-    `, [
-      staffId, assignmentId, eventId, amount, paymentType || 'event',
-      paymentMethod, paymentDate, reference, status || 'pending', notes
-    ]);
-
-    // Update staff total_earned if paid
-    if (status === 'paid') {
-      await pool.query(`
-        UPDATE staff SET
-          total_earned = total_earned + $1,
-          updated_at = CURRENT_TIMESTAMP
-        WHERE id = $2
-      `, [amount, staffId]);
-    }
-
-    res.status(201).json(result.rows[0]);
-  } catch (error) {
-    console.error('Error creating payment:', error);
-    res.status(500).json({ error: 'Failed to create payment' });
-  }
-});
-
-// PUT /api/v1/payments/:id - Update payment status
-app.put('/api/v1/payments/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { status, paymentMethod, paymentDate, reference, notes } = req.body;
-
-    // Get current payment to check if status is changing
-    const current = await pool.query('SELECT * FROM staff_payments WHERE id = $1', [id]);
-    if (current.rows.length === 0) {
-      return res.status(404).json({ error: 'Payment not found' });
-    }
-
-    const result = await pool.query(`
-      UPDATE staff_payments SET
-        status = COALESCE($1, status),
-        payment_method = COALESCE($2, payment_method),
-        payment_date = COALESCE($3, payment_date),
-        reference = $4,
-        notes = $5
-      WHERE id = $6
-      RETURNING *
-    `, [status, paymentMethod, paymentDate, reference, notes, id]);
-
-    // Update staff total_earned if status changed to paid
-    if (status === 'paid' && current.rows[0].status !== 'paid') {
-      await pool.query(`
-        UPDATE staff SET
-          total_earned = total_earned + $1,
-          updated_at = CURRENT_TIMESTAMP
-        WHERE id = $2
-      `, [result.rows[0].amount, result.rows[0].staff_id]);
-    }
-
-    res.json(result.rows[0]);
-  } catch (error) {
-    console.error('Error updating payment:', error);
-    res.status(500).json({ error: 'Failed to update payment' });
-  }
-});
-
-// ============================================================
-// VENDOR QUOTES ENDPOINTS
-// ============================================================
-
-// GET /api/v1/vendors/:vendorId/quotes - Get vendor quotes
-app.get('/api/v1/vendors/:vendorId/quotes', async (req, res) => {
-  try {
-    const { vendorId } = req.params;
-    const result = await pool.query(`
-      SELECT vq.*, e.name as event_name, e.event_date
-      FROM vendor_quotes vq
-      LEFT JOIN events e ON vq.event_id = e.id
-      WHERE vq.vendor_id = $1
-      ORDER BY vq.created_at DESC
-    `, [vendorId]);
-    res.json({ quotes: result.rows });
-  } catch (error) {
-    console.error('Error fetching quotes:', error);
-    res.status(500).json({ error: 'Failed to fetch quotes' });
-  }
-});
-
-// GET /api/v1/events/:eventId/quotes - Get quotes for an event
-app.get('/api/v1/events/:eventId/quotes', async (req, res) => {
-  try {
-    const { eventId } = req.params;
-    const result = await pool.query(`
-      SELECT vq.*, v.name as vendor_name, v.category as vendor_category
-      FROM vendor_quotes vq
-      JOIN vendors v ON vq.vendor_id = v.id
-      WHERE vq.event_id = $1
-      ORDER BY vq.created_at DESC
-    `, [eventId]);
-    res.json({ quotes: result.rows });
-  } catch (error) {
-    console.error('Error fetching event quotes:', error);
-    res.status(500).json({ error: 'Failed to fetch event quotes' });
-  }
-});
-
-// POST /api/v1/quotes - Create quote
-app.post('/api/v1/quotes', async (req, res) => {
-  try {
-    const {
-      vendorId, eventId, quoteNumber, description, amount,
-      validUntil, items, terms, notes, documentUrl
-    } = req.body;
-
-    const result = await pool.query(`
-      INSERT INTO vendor_quotes (
-        vendor_id, event_id, quote_number, description, amount,
-        valid_until, items, terms, notes, document_url
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-      RETURNING *
-    `, [
-      vendorId, eventId, quoteNumber, description, amount,
-      validUntil, items, terms, notes, documentUrl
-    ]);
-
-    res.status(201).json(result.rows[0]);
-  } catch (error) {
-    console.error('Error creating quote:', error);
-    res.status(500).json({ error: 'Failed to create quote' });
-  }
-});
-
-// PUT /api/v1/quotes/:id - Update quote
-app.put('/api/v1/quotes/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
-    const {
-      quoteNumber, description, amount, validUntil, items,
-      terms, status, acceptedAt, notes, documentUrl
-    } = req.body;
-
-    const result = await pool.query(`
-      UPDATE vendor_quotes SET
-        quote_number = COALESCE($1, quote_number),
-        description = $2,
-        amount = COALESCE($3, amount),
-        valid_until = $4,
-        items = COALESCE($5, items),
-        terms = $6,
-        status = COALESCE($7, status),
-        accepted_at = $8,
-        notes = $9,
-        document_url = $10
-      WHERE id = $11
-      RETURNING *
-    `, [
-      quoteNumber, description, amount, validUntil, items,
-      terms, status, acceptedAt, notes, documentUrl, id
-    ]);
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Quote not found' });
-    }
-    res.json(result.rows[0]);
-  } catch (error) {
-    console.error('Error updating quote:', error);
-    res.status(500).json({ error: 'Failed to update quote' });
-  }
-});
-
-// DELETE /api/v1/quotes/:id - Delete quote
-app.delete('/api/v1/quotes/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
-    await pool.query('DELETE FROM vendor_quotes WHERE id = $1', [id]);
-    res.status(204).send();
-  } catch (error) {
-    console.error('Error deleting quote:', error);
-    res.status(500).json({ error: 'Failed to delete quote' });
-  }
-});
-
-// ============================================================
-// VENDOR CONTRACTS ENDPOINTS
-// ============================================================
-
-// GET /api/v1/vendors/:vendorId/contracts - Get vendor contracts
-app.get('/api/v1/vendors/:vendorId/contracts', async (req, res) => {
-  try {
-    const { vendorId } = req.params;
-    const result = await pool.query(`
-      SELECT vc.*, e.name as event_name, e.event_date
-      FROM vendor_contracts vc
-      LEFT JOIN events e ON vc.event_id = e.id
-      WHERE vc.vendor_id = $1
-      ORDER BY vc.created_at DESC
-    `, [vendorId]);
-    res.json({ contracts: result.rows });
-  } catch (error) {
-    console.error('Error fetching contracts:', error);
-    res.status(500).json({ error: 'Failed to fetch contracts' });
-  }
-});
-
-// GET /api/v1/events/:eventId/contracts - Get contracts for an event
-app.get('/api/v1/events/:eventId/contracts', async (req, res) => {
-  try {
-    const { eventId } = req.params;
-    const result = await pool.query(`
-      SELECT vc.*, v.name as vendor_name, v.category as vendor_category
-      FROM vendor_contracts vc
-      JOIN vendors v ON vc.vendor_id = v.id
-      WHERE vc.event_id = $1
-      ORDER BY vc.created_at DESC
-    `, [eventId]);
-    res.json({ contracts: result.rows });
-  } catch (error) {
-    console.error('Error fetching event contracts:', error);
-    res.status(500).json({ error: 'Failed to fetch event contracts' });
-  }
-});
-
-// POST /api/v1/contracts - Create contract
-app.post('/api/v1/contracts', async (req, res) => {
-  try {
-    const {
-      vendorId, eventId, quoteId, contractNumber, title, description,
-      totalAmount, depositAmount, depositDueDate, depositPaid,
-      balanceAmount, balanceDueDate, balancePaid, signedDate,
-      deliverables, terms, cancellationPolicy, status, notes, documentUrl
-    } = req.body;
-
-    const result = await pool.query(`
-      INSERT INTO vendor_contracts (
-        vendor_id, event_id, quote_id, contract_number, title, description,
-        total_amount, deposit_amount, deposit_due_date, deposit_paid,
-        balance_amount, balance_due_date, balance_paid, signed_date,
-        deliverables, terms, cancellation_policy, status, notes, document_url
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
-      RETURNING *
-    `, [
-      vendorId, eventId, quoteId, contractNumber, title, description,
-      totalAmount, depositAmount, depositDueDate, depositPaid || false,
-      balanceAmount, balanceDueDate, balancePaid || false, signedDate,
-      deliverables, terms, cancellationPolicy, status || 'draft', notes, documentUrl
-    ]);
-
-    res.status(201).json(result.rows[0]);
-  } catch (error) {
-    console.error('Error creating contract:', error);
-    res.status(500).json({ error: 'Failed to create contract' });
-  }
-});
-
-// PUT /api/v1/contracts/:id - Update contract
-app.put('/api/v1/contracts/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
-    const {
-      contractNumber, title, description, totalAmount, depositAmount,
-      depositDueDate, depositPaid, balanceAmount, balanceDueDate, balancePaid,
-      signedDate, deliverables, terms, cancellationPolicy, status, notes, documentUrl
-    } = req.body;
-
-    const result = await pool.query(`
-      UPDATE vendor_contracts SET
-        contract_number = COALESCE($1, contract_number),
-        title = COALESCE($2, title),
-        description = $3,
-        total_amount = COALESCE($4, total_amount),
-        deposit_amount = $5,
-        deposit_due_date = $6,
-        deposit_paid = COALESCE($7, deposit_paid),
-        balance_amount = $8,
-        balance_due_date = $9,
-        balance_paid = COALESCE($10, balance_paid),
-        signed_date = $11,
-        deliverables = $12,
-        terms = $13,
-        cancellation_policy = $14,
-        status = COALESCE($15, status),
-        notes = $16,
-        document_url = $17,
-        updated_at = CURRENT_TIMESTAMP
-      WHERE id = $18
-      RETURNING *
-    `, [
-      contractNumber, title, description, totalAmount, depositAmount,
-      depositDueDate, depositPaid, balanceAmount, balanceDueDate, balancePaid,
-      signedDate, deliverables, terms, cancellationPolicy, status, notes, documentUrl, id
-    ]);
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Contract not found' });
-    }
-    res.json(result.rows[0]);
-  } catch (error) {
-    console.error('Error updating contract:', error);
-    res.status(500).json({ error: 'Failed to update contract' });
-  }
-});
-
-// DELETE /api/v1/contracts/:id - Delete contract
-app.delete('/api/v1/contracts/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
-    await pool.query('DELETE FROM vendor_contracts WHERE id = $1', [id]);
-    res.status(204).send();
-  } catch (error) {
-    console.error('Error deleting contract:', error);
-    res.status(500).json({ error: 'Failed to delete contract' });
-  }
-});
-
-// ============================================================
-// VENDOR HISTORY ENDPOINTS
-// ============================================================
-
-// GET /api/v1/vendors/:vendorId/history - Get vendor event history
-app.get('/api/v1/vendors/:vendorId/history', async (req, res) => {
-  try {
-    const { vendorId } = req.params;
-    const result = await pool.query(`
-      SELECT vh.*, e.name as event_name, e.event_date, e.venue_name
-      FROM vendor_history vh
-      JOIN events e ON vh.event_id = e.id
-      WHERE vh.vendor_id = $1
-      ORDER BY e.event_date DESC
-    `, [vendorId]);
-
-    // Get summary
-    const summary = await pool.query(`
-      SELECT
-        COUNT(*) as total_events,
-        AVG(rating) as avg_rating,
-        SUM(amount_paid) as total_paid
-      FROM vendor_history
-      WHERE vendor_id = $1
-    `, [vendorId]);
-
-    res.json({
-      history: result.rows,
-      summary: summary.rows[0]
-    });
-  } catch (error) {
-    console.error('Error fetching vendor history:', error);
-    res.status(500).json({ error: 'Failed to fetch vendor history' });
-  }
-});
-
-// POST /api/v1/vendor-history - Add history entry
-app.post('/api/v1/vendor-history', async (req, res) => {
-  try {
-    const {
-      vendorId, eventId, servicesProvided, amountQuoted, amountPaid,
-      rating, performanceNotes, wouldHireAgain, issues
-    } = req.body;
-
-    const result = await pool.query(`
-      INSERT INTO vendor_history (
-        vendor_id, event_id, services_provided, amount_quoted, amount_paid,
-        rating, performance_notes, would_hire_again, issues
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-      RETURNING *
-    `, [
-      vendorId, eventId, servicesProvided, amountQuoted, amountPaid,
-      rating, performanceNotes, wouldHireAgain, issues
-    ]);
-
-    // Update vendor stats
-    await pool.query(`
-      UPDATE vendors SET
-        total_events = total_events + 1,
-        updated_at = CURRENT_TIMESTAMP
-      WHERE id = $1
-    `, [vendorId]);
-
-    res.status(201).json(result.rows[0]);
-  } catch (error) {
-    console.error('Error adding vendor history:', error);
-    res.status(500).json({ error: 'Failed to add vendor history' });
-  }
-});
 
 // ============================================================
 // CLIENT PORTAL ENDPOINTS
@@ -5101,12 +4588,11 @@ let lastHealthStatus = { status: 'unknown', timestamp: null };
 let consecutiveFailures = 0;
 const MAX_FAILURES_BEFORE_ALERT = 3;
 
-// All tables that should exist in the database
+// All tables that should exist in the database (Simplified)
 const REQUIRED_TABLES = [
-  'guests', 'email_events', 'tickets', 'activity_log', 'sponsors',
+  'guests', 'email_events', 'tickets', 'sponsors',
   'events', 'event_timeline', 'event_checklist', 'budgets', 'budget_categories',
-  'budget_items', 'vendors', 'staff', 'staff_assignments', 'staff_payments',
-  'vendor_quotes', 'vendor_contracts', 'vendor_history', 'client_access',
+  'budget_items', 'vendors', 'staff', 'staff_assignments', 'client_access',
   'models', 'table_reservations'
 ];
 
@@ -5304,7 +4790,6 @@ app.get('/api/v1/health/test-apis', async (req, res) => {
     { path: '/api/v1/guest-lists/stats', name: 'Guest Lists Stats' },
     { path: '/api/v1/tickets', name: 'Tickets' },
     { path: '/api/v1/tickets/stats', name: 'Tickets Stats' },
-    { path: '/api/v1/activity', name: 'Activity Log' },
     { path: '/api/v1/sponsors', name: 'Sponsors' },
     { path: '/api/v1/sponsors/stats', name: 'Sponsors Stats' },
     { path: '/api/v1/sponsors/tiers', name: 'Sponsor Tiers' },
@@ -5450,11 +4935,6 @@ const startServer = async () => {
     POST   /api/v1/tickets          - Create ticket
     POST   /api/v1/tickets/import   - Import tickets
     POST   /api/v1/tickets/:id/check-in - Check in ticket
-
-    Activity Log Endpoints:
-    GET    /api/v1/activity         - Get activity log
-    POST   /api/v1/activity         - Log activity
-    DELETE /api/v1/activity         - Clear activity log
 
     Events Endpoints (Multi-Event Management):
     GET    /api/v1/events           - List all events
