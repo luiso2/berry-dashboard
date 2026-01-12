@@ -3236,7 +3236,7 @@ app.get('/api/v1/events/:eventId/budget', async (req, res) => {
     const budgetId = budget.rows[0].id;
 
     // Get all budget items with category info
-    const items = await pool.query(
+    const itemsResult = await pool.query(
       `SELECT bi.*, bc.name as category_name, bc.icon, bc.color, bc.is_income
        FROM budget_items bi
        LEFT JOIN budget_categories bc ON bi.category_id = bc.id
@@ -3245,38 +3245,64 @@ app.get('/api/v1/events/:eventId/budget', async (req, res) => {
       [budgetId]
     );
 
-    // Calculate totals
-    const expenses = items.rows.filter(i => !i.is_income);
-    const income = items.rows.filter(i => i.is_income);
+    // Transform items to camelCase with proper number types
+    const transformItem = (item) => ({
+      id: item.id,
+      budgetId: item.budget_id,
+      categoryId: item.category_id,
+      categoryName: item.category_name || 'Uncategorized',
+      description: item.description,
+      vendorName: item.vendor_name,
+      estimatedAmount: parseFloat(item.estimated_amount || 0),
+      actualAmount: item.actual_amount ? parseFloat(item.actual_amount) : null,
+      isPaid: item.is_paid,
+      paidDate: item.paid_date,
+      paymentMethod: item.payment_method,
+      receiptUrl: item.receipt_url,
+      notes: item.notes,
+      status: item.status,
+      dueDate: item.due_date,
+      icon: item.icon,
+      color: item.color,
+      isIncome: item.is_income || false,
+      createdAt: item.created_at,
+      updatedAt: item.updated_at,
+    });
 
-    const totalEstimatedExpenses = expenses.reduce((sum, i) => sum + parseFloat(i.estimated_amount || 0), 0);
-    const totalActualExpenses = expenses.reduce((sum, i) => sum + parseFloat(i.actual_amount || 0), 0);
-    const totalEstimatedIncome = income.reduce((sum, i) => sum + parseFloat(i.estimated_amount || 0), 0);
-    const totalActualIncome = income.reduce((sum, i) => sum + parseFloat(i.actual_amount || 0), 0);
+    const items = itemsResult.rows.map(transformItem);
+
+    // Calculate totals
+    const expenses = items.filter(i => !i.isIncome);
+    const income = items.filter(i => i.isIncome);
+
+    const totalEstimatedExpenses = expenses.reduce((sum, i) => sum + (i.estimatedAmount || 0), 0);
+    const totalActualExpenses = expenses.reduce((sum, i) => sum + (i.actualAmount || 0), 0);
+    const totalEstimatedIncome = income.reduce((sum, i) => sum + (i.estimatedAmount || 0), 0);
+    const totalActualIncome = income.reduce((sum, i) => sum + (i.actualAmount || 0), 0);
 
     // Group by category
-    const byCategory = items.rows.reduce((acc, item) => {
-      const catName = item.category_name || 'Uncategorized';
+    const byCategory = items.reduce((acc, item) => {
+      const catName = item.categoryName;
       if (!acc[catName]) {
         acc[catName] = {
           name: catName,
           icon: item.icon,
           color: item.color,
-          isIncome: item.is_income,
+          isIncome: item.isIncome,
           items: [],
           totalEstimated: 0,
           totalActual: 0,
         };
       }
       acc[catName].items.push(item);
-      acc[catName].totalEstimated += parseFloat(item.estimated_amount || 0);
-      acc[catName].totalActual += parseFloat(item.actual_amount || 0);
+      acc[catName].totalEstimated += item.estimatedAmount || 0;
+      acc[catName].totalActual += item.actualAmount || 0;
       return acc;
     }, {});
 
     res.json({
       budget: budget.rows[0],
-      items: items.rows,
+      items: items,
       byCategory: Object.values(byCategory),
       summary: {
         totalBudget: parseFloat(budget.rows[0].total_budget || 0),
