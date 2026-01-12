@@ -923,9 +923,17 @@ app.post('/oauth/login', async (req, res) => {
   try {
     const { email, password, redirect_uri, state } = req.body;
 
+    // Check if this is a frontend request
+    const wantsJson = req.headers.accept?.includes('application/json') ||
+                      req.headers['content-type']?.includes('application/x-www-form-urlencoded');
+    const isFrontend = wantsJson && !redirect_uri?.includes('chatgpt');
+
     // Find user
     const userResult = await pool.query('SELECT * FROM users WHERE email = $1', [email.toLowerCase()]);
     if (userResult.rows.length === 0) {
+      if (isFrontend) {
+        return res.status(401).json({ error: 'Invalid email or password' });
+      }
       return res.send('<html><body><h1>Error</h1><p>User not found. <a href="javascript:history.back()">Go back</a></p></body></html>');
     }
 
@@ -933,6 +941,9 @@ app.post('/oauth/login', async (req, res) => {
 
     // Check password
     if (user.password_hash !== hashPassword(password)) {
+      if (isFrontend) {
+        return res.status(401).json({ error: 'Invalid email or password' });
+      }
       return res.send('<html><body><h1>Error</h1><p>Invalid password. <a href="javascript:history.back()">Go back</a></p></body></html>');
     }
 
@@ -947,12 +958,28 @@ app.post('/oauth/login', async (req, res) => {
       [user.id, accessToken, refreshToken, code]
     );
 
+    // Return JSON for frontend
+    if (isFrontend) {
+      return res.json({
+        access_token: accessToken,
+        refresh_token: refreshToken,
+        token_type: 'Bearer',
+        expires_in: 2592000,
+        user: {
+          id: user.id,
+          email: user.email,
+          name: user.name,
+          company: user.company
+        }
+      });
+    }
+
     // Redirect back to ChatGPT with code
     const redirectUrl = `${redirect_uri}?code=${code}${state ? '&state=' + state : ''}`;
     res.redirect(redirectUrl);
   } catch (error) {
     console.error('OAuth login error:', error);
-    res.status(500).send('<html><body><h1>Error</h1><p>Login failed. Please try again.</p></body></html>');
+    res.status(500).json({ error: 'Login failed. Please try again.' });
   }
 });
 
@@ -961,13 +988,24 @@ app.post('/oauth/register', async (req, res) => {
   try {
     const { name, email, password, company, redirect_uri, state } = req.body;
 
+    // Check if this is a frontend request
+    const wantsJson = req.headers.accept?.includes('application/json') ||
+                      req.headers['content-type']?.includes('application/x-www-form-urlencoded');
+    const isFrontend = wantsJson && !redirect_uri?.includes('chatgpt');
+
     if (!email || !password || password.length < 6) {
+      if (isFrontend) {
+        return res.status(400).json({ error: 'Email required and password must be at least 6 characters' });
+      }
       return res.send('<html><body><h1>Error</h1><p>Email required and password must be at least 6 characters. <a href="javascript:history.back()">Go back</a></p></body></html>');
     }
 
     // Check if user exists
     const existing = await pool.query('SELECT id FROM users WHERE email = $1', [email.toLowerCase()]);
     if (existing.rows.length > 0) {
+      if (isFrontend) {
+        return res.status(400).json({ error: 'Email already registered' });
+      }
       return res.send('<html><body><h1>Error</h1><p>Email already registered. <a href="javascript:history.back()">Go back to login</a></p></body></html>');
     }
 
@@ -990,12 +1028,28 @@ app.post('/oauth/register', async (req, res) => {
       [userId, accessToken, refreshToken, code]
     );
 
+    // Return JSON for frontend
+    if (isFrontend) {
+      return res.json({
+        access_token: accessToken,
+        refresh_token: refreshToken,
+        token_type: 'Bearer',
+        expires_in: 2592000,
+        user: {
+          id: userId,
+          email: email.toLowerCase(),
+          name: name,
+          company: company
+        }
+      });
+    }
+
     // Redirect back to ChatGPT with code
     const redirectUrl = `${redirect_uri}?code=${code}${state ? '&state=' + state : ''}`;
     res.redirect(redirectUrl);
   } catch (error) {
     console.error('OAuth register error:', error);
-    res.status(500).send('<html><body><h1>Error</h1><p>Registration failed. Please try again.</p></body></html>');
+    res.status(500).json({ error: 'Registration failed. Please try again.' });
   }
 });
 
