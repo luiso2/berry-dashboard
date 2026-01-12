@@ -150,7 +150,224 @@ const initDatabase = async () => {
       END $$;
     `);
 
-    console.log('Database tables initialized successfully (guests, email_events, tickets, activity_log, sponsors)');
+    // ============================================
+    // PRIORITY HIGH #1: MULTI-EVENT MANAGEMENT
+    // ============================================
+
+    // Create events table - Core table for multi-event support
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS events (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(255) NOT NULL,
+        slug VARCHAR(255) UNIQUE,
+        description TEXT,
+        event_type VARCHAR(50) DEFAULT 'party',
+        venue_name VARCHAR(255),
+        venue_address TEXT,
+        venue_city VARCHAR(100),
+        venue_capacity INTEGER,
+        event_date DATE NOT NULL,
+        start_time TIME,
+        end_time TIME,
+        doors_open TIME,
+        status VARCHAR(50) DEFAULT 'planning',
+        cover_image TEXT,
+        theme VARCHAR(100),
+        dress_code VARCHAR(100),
+        age_restriction VARCHAR(50),
+        ticket_link TEXT,
+        is_public BOOLEAN DEFAULT false,
+        is_featured BOOLEAN DEFAULT false,
+        expected_attendance INTEGER,
+        actual_attendance INTEGER,
+        notes TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_events_date ON events(event_date);
+      CREATE INDEX IF NOT EXISTS idx_events_status ON events(status);
+      CREATE INDEX IF NOT EXISTS idx_events_slug ON events(slug);
+    `);
+
+    // Create event_timeline table - Run of show / production timeline
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS event_timeline (
+        id SERIAL PRIMARY KEY,
+        event_id INTEGER REFERENCES events(id) ON DELETE CASCADE,
+        time TIME NOT NULL,
+        title VARCHAR(255) NOT NULL,
+        description TEXT,
+        responsible VARCHAR(255),
+        location VARCHAR(255),
+        is_critical BOOLEAN DEFAULT false,
+        status VARCHAR(50) DEFAULT 'pending',
+        notes TEXT,
+        sort_order INTEGER DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_timeline_event ON event_timeline(event_id);
+    `);
+
+    // Create event_checklist table - Production checklist per event
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS event_checklist (
+        id SERIAL PRIMARY KEY,
+        event_id INTEGER REFERENCES events(id) ON DELETE CASCADE,
+        category VARCHAR(100) NOT NULL,
+        item VARCHAR(255) NOT NULL,
+        is_completed BOOLEAN DEFAULT false,
+        completed_by VARCHAR(255),
+        completed_at TIMESTAMP,
+        due_date DATE,
+        priority VARCHAR(20) DEFAULT 'medium',
+        notes TEXT,
+        sort_order INTEGER DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_checklist_event ON event_checklist(event_id);
+    `);
+
+    // Add event_id to existing guests table
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='guests' AND column_name='event_id') THEN
+          ALTER TABLE guests ADD COLUMN event_id INTEGER REFERENCES events(id) ON DELETE SET NULL;
+          CREATE INDEX IF NOT EXISTS idx_guests_event ON guests(event_id);
+        END IF;
+      END $$;
+    `);
+
+    // Add event_id to existing tickets table
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='tickets' AND column_name='event_ref_id') THEN
+          ALTER TABLE tickets ADD COLUMN event_ref_id INTEGER REFERENCES events(id) ON DELETE SET NULL;
+          CREATE INDEX IF NOT EXISTS idx_tickets_event_ref ON tickets(event_ref_id);
+        END IF;
+      END $$;
+    `);
+
+    // Add event_id to sponsors table
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='sponsors' AND column_name='event_id') THEN
+          ALTER TABLE sponsors ADD COLUMN event_id INTEGER REFERENCES events(id) ON DELETE SET NULL;
+          CREATE INDEX IF NOT EXISTS idx_sponsors_event ON sponsors(event_id);
+        END IF;
+      END $$;
+    `);
+
+    // ============================================
+    // PRIORITY HIGH #2: BUDGET TRACKER
+    // ============================================
+
+    // Create budget_categories table - Predefined budget categories
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS budget_categories (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(100) NOT NULL UNIQUE,
+        icon VARCHAR(50),
+        color VARCHAR(20),
+        description TEXT,
+        is_income BOOLEAN DEFAULT false,
+        sort_order INTEGER DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    // Insert default budget categories if empty
+    await client.query(`
+      INSERT INTO budget_categories (name, icon, color, is_income, sort_order)
+      SELECT * FROM (VALUES
+        ('Venue Rental', 'building', '#8B5CF6', false, 1),
+        ('Catering & Bar', 'utensils', '#F59E0B', false, 2),
+        ('Entertainment & DJ', 'music', '#EC4899', false, 3),
+        ('Decor & Production', 'sparkles', '#10B981', false, 4),
+        ('Staffing', 'users', '#3B82F6', false, 5),
+        ('Security', 'shield', '#EF4444', false, 6),
+        ('Marketing & Promo', 'megaphone', '#6366F1', false, 7),
+        ('Photography & Video', 'camera', '#14B8A6', false, 8),
+        ('Permits & Insurance', 'file-text', '#64748B', false, 9),
+        ('Transportation', 'truck', '#78716C', false, 10),
+        ('Miscellaneous', 'package', '#A1A1AA', false, 11),
+        ('Ticket Sales', 'ticket', '#22C55E', true, 12),
+        ('Table Reservations', 'layout', '#D4AF37', true, 13),
+        ('Sponsorships', 'handshake', '#0EA5E9', true, 14),
+        ('Bar Revenue', 'wine', '#A855F7', true, 15)
+      ) AS t(name, icon, color, is_income, sort_order)
+      WHERE NOT EXISTS (SELECT 1 FROM budget_categories LIMIT 1);
+    `);
+
+    // Create budgets table - Budget per event
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS budgets (
+        id SERIAL PRIMARY KEY,
+        event_id INTEGER REFERENCES events(id) ON DELETE CASCADE,
+        name VARCHAR(255) NOT NULL,
+        total_budget DECIMAL(12,2) DEFAULT 0,
+        total_spent DECIMAL(12,2) DEFAULT 0,
+        total_income DECIMAL(12,2) DEFAULT 0,
+        currency VARCHAR(10) DEFAULT 'USD',
+        status VARCHAR(50) DEFAULT 'draft',
+        notes TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_budgets_event ON budgets(event_id);
+    `);
+
+    // Create budget_items table - Individual budget line items
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS budget_items (
+        id SERIAL PRIMARY KEY,
+        budget_id INTEGER REFERENCES budgets(id) ON DELETE CASCADE,
+        category_id INTEGER REFERENCES budget_categories(id) ON DELETE SET NULL,
+        description VARCHAR(255) NOT NULL,
+        vendor_name VARCHAR(255),
+        estimated_amount DECIMAL(12,2) DEFAULT 0,
+        actual_amount DECIMAL(12,2),
+        is_paid BOOLEAN DEFAULT false,
+        paid_date DATE,
+        payment_method VARCHAR(50),
+        receipt_url TEXT,
+        notes TEXT,
+        status VARCHAR(50) DEFAULT 'pending',
+        due_date DATE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_budget_items_budget ON budget_items(budget_id);
+      CREATE INDEX IF NOT EXISTS idx_budget_items_category ON budget_items(category_id);
+    `);
+
+    // Create vendors table - Vendor/Provider management
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS vendors (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(255) NOT NULL,
+        category VARCHAR(100),
+        contact_name VARCHAR(255),
+        email VARCHAR(255),
+        phone VARCHAR(100),
+        website TEXT,
+        address TEXT,
+        city VARCHAR(100),
+        rating INTEGER DEFAULT 0,
+        notes TEXT,
+        is_preferred BOOLEAN DEFAULT false,
+        total_spent DECIMAL(12,2) DEFAULT 0,
+        events_count INTEGER DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_vendors_category ON vendors(category);
+      CREATE INDEX IF NOT EXISTS idx_vendors_rating ON vendors(rating DESC);
+    `);
+
+    console.log('Database tables initialized successfully (guests, email_events, tickets, activity_log, sponsors, events, budgets, vendors)');
   } catch (error) {
     console.error('Error initializing database:', error);
   } finally {
@@ -2083,6 +2300,822 @@ app.delete('/api/v1/sponsors/:id', async (req, res) => {
   }
 });
 
+// ============================================
+// EVENTS ENDPOINTS - Multi-Event Management
+// ============================================
+
+// Helper to transform event row
+const transformEvent = (row) => ({
+  id: row.id,
+  name: row.name,
+  slug: row.slug,
+  description: row.description,
+  eventType: row.event_type,
+  venueName: row.venue_name,
+  venueAddress: row.venue_address,
+  venueCity: row.venue_city,
+  venueCapacity: row.venue_capacity,
+  eventDate: row.event_date,
+  startTime: row.start_time,
+  endTime: row.end_time,
+  doorsOpen: row.doors_open,
+  status: row.status,
+  coverImage: row.cover_image,
+  theme: row.theme,
+  dressCode: row.dress_code,
+  ageRestriction: row.age_restriction,
+  ticketLink: row.ticket_link,
+  isPublic: row.is_public,
+  isFeatured: row.is_featured,
+  expectedAttendance: row.expected_attendance,
+  actualAttendance: row.actual_attendance,
+  notes: row.notes,
+  createdAt: row.created_at,
+  updatedAt: row.updated_at,
+});
+
+// GET /api/v1/events - Get all events with optional filters
+app.get('/api/v1/events', async (req, res) => {
+  try {
+    const { status, upcoming, featured, limit = 50 } = req.query;
+    let query = 'SELECT * FROM events';
+    const conditions = [];
+    const values = [];
+    let paramCount = 1;
+
+    if (status) {
+      conditions.push(`status = $${paramCount}`);
+      values.push(status);
+      paramCount++;
+    }
+    if (upcoming === 'true') {
+      conditions.push(`event_date >= CURRENT_DATE`);
+    }
+    if (featured === 'true') {
+      conditions.push(`is_featured = true`);
+    }
+
+    if (conditions.length > 0) {
+      query += ' WHERE ' + conditions.join(' AND ');
+    }
+    query += ' ORDER BY event_date DESC';
+    query += ` LIMIT $${paramCount}`;
+    values.push(parseInt(limit));
+
+    const result = await pool.query(query, values);
+    res.json({
+      events: result.rows.map(transformEvent),
+      total: result.rows.length,
+    });
+  } catch (error) {
+    console.error('Error fetching events:', error);
+    res.status(500).json({ error: 'Failed to fetch events' });
+  }
+});
+
+// GET /api/v1/events/calendar - Get events for calendar view
+app.get('/api/v1/events/calendar', async (req, res) => {
+  try {
+    const { month, year } = req.query;
+    const currentYear = year || new Date().getFullYear();
+    const currentMonth = month || new Date().getMonth() + 1;
+
+    const result = await pool.query(
+      `SELECT id, name, event_date, status, event_type, venue_name, is_featured
+       FROM events
+       WHERE EXTRACT(YEAR FROM event_date) = $1
+       AND EXTRACT(MONTH FROM event_date) = $2
+       ORDER BY event_date`,
+      [currentYear, currentMonth]
+    );
+
+    res.json({
+      events: result.rows.map(row => ({
+        id: row.id,
+        name: row.name,
+        eventDate: row.event_date,
+        status: row.status,
+        eventType: row.event_type,
+        venueName: row.venue_name,
+        isFeatured: row.is_featured,
+      })),
+      month: currentMonth,
+      year: currentYear,
+    });
+  } catch (error) {
+    console.error('Error fetching calendar events:', error);
+    res.status(500).json({ error: 'Failed to fetch calendar events' });
+  }
+});
+
+// GET /api/v1/events/stats - Get event statistics
+app.get('/api/v1/events/stats', async (req, res) => {
+  try {
+    const stats = await pool.query(`
+      SELECT
+        COUNT(*) as total,
+        COUNT(*) FILTER (WHERE status = 'planning') as planning,
+        COUNT(*) FILTER (WHERE status = 'confirmed') as confirmed,
+        COUNT(*) FILTER (WHERE status = 'in_progress') as in_progress,
+        COUNT(*) FILTER (WHERE status = 'completed') as completed,
+        COUNT(*) FILTER (WHERE status = 'cancelled') as cancelled,
+        COUNT(*) FILTER (WHERE event_date >= CURRENT_DATE) as upcoming,
+        COUNT(*) FILTER (WHERE event_date < CURRENT_DATE) as past,
+        COALESCE(SUM(expected_attendance), 0) as total_expected,
+        COALESCE(SUM(actual_attendance), 0) as total_actual
+      FROM events
+    `);
+
+    const thisMonth = await pool.query(`
+      SELECT COUNT(*) as count FROM events
+      WHERE EXTRACT(YEAR FROM event_date) = EXTRACT(YEAR FROM CURRENT_DATE)
+      AND EXTRACT(MONTH FROM event_date) = EXTRACT(MONTH FROM CURRENT_DATE)
+    `);
+
+    res.json({
+      ...stats.rows[0],
+      thisMonth: parseInt(thisMonth.rows[0].count),
+    });
+  } catch (error) {
+    console.error('Error fetching event stats:', error);
+    res.status(500).json({ error: 'Failed to fetch event stats' });
+  }
+});
+
+// GET /api/v1/events/:id - Get single event with details
+app.get('/api/v1/events/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query('SELECT * FROM events WHERE id = $1', [id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Event not found' });
+    }
+
+    // Get related data counts
+    const [guestsCount, ticketsCount, sponsorsCount, budgetSum] = await Promise.all([
+      pool.query('SELECT COUNT(*) FROM guests WHERE event_id = $1', [id]),
+      pool.query('SELECT COUNT(*) FROM tickets WHERE event_ref_id = $1', [id]),
+      pool.query('SELECT COUNT(*) FROM sponsors WHERE event_id = $1', [id]),
+      pool.query('SELECT COALESCE(SUM(total_budget), 0) as budget FROM budgets WHERE event_id = $1', [id]),
+    ]);
+
+    res.json({
+      ...transformEvent(result.rows[0]),
+      guestsCount: parseInt(guestsCount.rows[0].count),
+      ticketsCount: parseInt(ticketsCount.rows[0].count),
+      sponsorsCount: parseInt(sponsorsCount.rows[0].count),
+      totalBudget: parseFloat(budgetSum.rows[0].budget),
+    });
+  } catch (error) {
+    console.error('Error fetching event:', error);
+    res.status(500).json({ error: 'Failed to fetch event' });
+  }
+});
+
+// POST /api/v1/events - Create new event
+app.post('/api/v1/events', async (req, res) => {
+  try {
+    const {
+      name, description, eventType, venueName, venueAddress, venueCity, venueCapacity,
+      eventDate, startTime, endTime, doorsOpen, status, coverImage, theme, dressCode,
+      ageRestriction, ticketLink, isPublic, isFeatured, expectedAttendance, notes
+    } = req.body;
+
+    if (!name || !eventDate) {
+      return res.status(400).json({ error: 'Name and event date are required' });
+    }
+
+    // Generate slug from name
+    const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') + '-' + Date.now().toString(36);
+
+    const result = await pool.query(
+      `INSERT INTO events (
+        name, slug, description, event_type, venue_name, venue_address, venue_city, venue_capacity,
+        event_date, start_time, end_time, doors_open, status, cover_image, theme, dress_code,
+        age_restriction, ticket_link, is_public, is_featured, expected_attendance, notes
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
+      RETURNING *`,
+      [
+        name, slug, description, eventType || 'party', venueName, venueAddress, venueCity, venueCapacity,
+        eventDate, startTime, endTime, doorsOpen, status || 'planning', coverImage, theme, dressCode,
+        ageRestriction, ticketLink, isPublic || false, isFeatured || false, expectedAttendance, notes
+      ]
+    );
+
+    console.log(`✅ New event created: ${name} on ${eventDate}`);
+    res.status(201).json(transformEvent(result.rows[0]));
+  } catch (error) {
+    console.error('Error creating event:', error);
+    res.status(500).json({ error: 'Failed to create event' });
+  }
+});
+
+// PUT /api/v1/events/:id - Update event
+app.put('/api/v1/events/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updates = req.body;
+
+    // Build dynamic update query
+    const fields = [];
+    const values = [];
+    let paramCount = 1;
+
+    const fieldMap = {
+      name: 'name', description: 'description', eventType: 'event_type',
+      venueName: 'venue_name', venueAddress: 'venue_address', venueCity: 'venue_city',
+      venueCapacity: 'venue_capacity', eventDate: 'event_date', startTime: 'start_time',
+      endTime: 'end_time', doorsOpen: 'doors_open', status: 'status',
+      coverImage: 'cover_image', theme: 'theme', dressCode: 'dress_code',
+      ageRestriction: 'age_restriction', ticketLink: 'ticket_link', isPublic: 'is_public',
+      isFeatured: 'is_featured', expectedAttendance: 'expected_attendance',
+      actualAttendance: 'actual_attendance', notes: 'notes'
+    };
+
+    for (const [key, dbField] of Object.entries(fieldMap)) {
+      if (updates[key] !== undefined) {
+        fields.push(`${dbField} = $${paramCount}`);
+        values.push(updates[key]);
+        paramCount++;
+      }
+    }
+
+    if (fields.length === 0) {
+      return res.status(400).json({ error: 'No fields to update' });
+    }
+
+    fields.push(`updated_at = CURRENT_TIMESTAMP`);
+    values.push(id);
+
+    const result = await pool.query(
+      `UPDATE events SET ${fields.join(', ')} WHERE id = $${paramCount} RETURNING *`,
+      values
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Event not found' });
+    }
+
+    res.json(transformEvent(result.rows[0]));
+  } catch (error) {
+    console.error('Error updating event:', error);
+    res.status(500).json({ error: 'Failed to update event' });
+  }
+});
+
+// DELETE /api/v1/events/:id - Delete event
+app.delete('/api/v1/events/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query('DELETE FROM events WHERE id = $1 RETURNING *', [id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Event not found' });
+    }
+
+    res.status(204).send();
+  } catch (error) {
+    console.error('Error deleting event:', error);
+    res.status(500).json({ error: 'Failed to delete event' });
+  }
+});
+
+// POST /api/v1/events/:id/duplicate - Duplicate event
+app.post('/api/v1/events/:id/duplicate', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { newDate, newName } = req.body;
+
+    const original = await pool.query('SELECT * FROM events WHERE id = $1', [id]);
+    if (original.rows.length === 0) {
+      return res.status(404).json({ error: 'Event not found' });
+    }
+
+    const event = original.rows[0];
+    const name = newName || `${event.name} (Copy)`;
+    const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-') + '-' + Date.now().toString(36);
+
+    const result = await pool.query(
+      `INSERT INTO events (
+        name, slug, description, event_type, venue_name, venue_address, venue_city, venue_capacity,
+        start_time, end_time, doors_open, status, cover_image, theme, dress_code,
+        age_restriction, ticket_link, is_public, expected_attendance, notes, event_date
+      ) SELECT $1, $2, description, event_type, venue_name, venue_address, venue_city, venue_capacity,
+        start_time, end_time, doors_open, 'planning', cover_image, theme, dress_code,
+        age_restriction, ticket_link, false, expected_attendance, notes, $3
+      FROM events WHERE id = $4
+      RETURNING *`,
+      [name, slug, newDate || event.event_date, id]
+    );
+
+    console.log(`✅ Event duplicated: ${name}`);
+    res.status(201).json(transformEvent(result.rows[0]));
+  } catch (error) {
+    console.error('Error duplicating event:', error);
+    res.status(500).json({ error: 'Failed to duplicate event' });
+  }
+});
+
+// ============================================
+// EVENT TIMELINE ENDPOINTS - Run of Show
+// ============================================
+
+// GET /api/v1/events/:eventId/timeline
+app.get('/api/v1/events/:eventId/timeline', async (req, res) => {
+  try {
+    const { eventId } = req.params;
+    const result = await pool.query(
+      'SELECT * FROM event_timeline WHERE event_id = $1 ORDER BY time, sort_order',
+      [eventId]
+    );
+    res.json({ timeline: result.rows });
+  } catch (error) {
+    console.error('Error fetching timeline:', error);
+    res.status(500).json({ error: 'Failed to fetch timeline' });
+  }
+});
+
+// POST /api/v1/events/:eventId/timeline
+app.post('/api/v1/events/:eventId/timeline', async (req, res) => {
+  try {
+    const { eventId } = req.params;
+    const { time, title, description, responsible, location, isCritical, notes, sortOrder } = req.body;
+
+    const result = await pool.query(
+      `INSERT INTO event_timeline (event_id, time, title, description, responsible, location, is_critical, notes, sort_order)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
+      [eventId, time, title, description, responsible, location, isCritical || false, notes, sortOrder || 0]
+    );
+
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    console.error('Error adding timeline item:', error);
+    res.status(500).json({ error: 'Failed to add timeline item' });
+  }
+});
+
+// PUT /api/v1/events/:eventId/timeline/:id
+app.put('/api/v1/events/:eventId/timeline/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { time, title, description, responsible, location, isCritical, status, notes, sortOrder } = req.body;
+
+    const result = await pool.query(
+      `UPDATE event_timeline SET
+        time = COALESCE($1, time),
+        title = COALESCE($2, title),
+        description = COALESCE($3, description),
+        responsible = COALESCE($4, responsible),
+        location = COALESCE($5, location),
+        is_critical = COALESCE($6, is_critical),
+        status = COALESCE($7, status),
+        notes = COALESCE($8, notes),
+        sort_order = COALESCE($9, sort_order)
+       WHERE id = $10 RETURNING *`,
+      [time, title, description, responsible, location, isCritical, status, notes, sortOrder, id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Timeline item not found' });
+    }
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error updating timeline item:', error);
+    res.status(500).json({ error: 'Failed to update timeline item' });
+  }
+});
+
+// DELETE /api/v1/events/:eventId/timeline/:id
+app.delete('/api/v1/events/:eventId/timeline/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    await pool.query('DELETE FROM event_timeline WHERE id = $1', [id]);
+    res.status(204).send();
+  } catch (error) {
+    console.error('Error deleting timeline item:', error);
+    res.status(500).json({ error: 'Failed to delete timeline item' });
+  }
+});
+
+// ============================================
+// EVENT CHECKLIST ENDPOINTS
+// ============================================
+
+// GET /api/v1/events/:eventId/checklist
+app.get('/api/v1/events/:eventId/checklist', async (req, res) => {
+  try {
+    const { eventId } = req.params;
+    const result = await pool.query(
+      'SELECT * FROM event_checklist WHERE event_id = $1 ORDER BY category, sort_order',
+      [eventId]
+    );
+
+    // Group by category
+    const grouped = result.rows.reduce((acc, item) => {
+      if (!acc[item.category]) acc[item.category] = [];
+      acc[item.category].push(item);
+      return acc;
+    }, {});
+
+    const stats = {
+      total: result.rows.length,
+      completed: result.rows.filter(i => i.is_completed).length,
+      percentage: result.rows.length > 0 ? Math.round((result.rows.filter(i => i.is_completed).length / result.rows.length) * 100) : 0,
+    };
+
+    res.json({ checklist: grouped, items: result.rows, stats });
+  } catch (error) {
+    console.error('Error fetching checklist:', error);
+    res.status(500).json({ error: 'Failed to fetch checklist' });
+  }
+});
+
+// POST /api/v1/events/:eventId/checklist
+app.post('/api/v1/events/:eventId/checklist', async (req, res) => {
+  try {
+    const { eventId } = req.params;
+    const { category, item, dueDate, priority, notes } = req.body;
+
+    const result = await pool.query(
+      `INSERT INTO event_checklist (event_id, category, item, due_date, priority, notes)
+       VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+      [eventId, category, item, dueDate, priority || 'medium', notes]
+    );
+
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    console.error('Error adding checklist item:', error);
+    res.status(500).json({ error: 'Failed to add checklist item' });
+  }
+});
+
+// PUT /api/v1/events/:eventId/checklist/:id
+app.put('/api/v1/events/:eventId/checklist/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { isCompleted, completedBy, item, category, dueDate, priority, notes } = req.body;
+
+    const result = await pool.query(
+      `UPDATE event_checklist SET
+        is_completed = COALESCE($1, is_completed),
+        completed_by = CASE WHEN $1 = true THEN $2 ELSE completed_by END,
+        completed_at = CASE WHEN $1 = true THEN CURRENT_TIMESTAMP ELSE completed_at END,
+        item = COALESCE($3, item),
+        category = COALESCE($4, category),
+        due_date = COALESCE($5, due_date),
+        priority = COALESCE($6, priority),
+        notes = COALESCE($7, notes)
+       WHERE id = $8 RETURNING *`,
+      [isCompleted, completedBy, item, category, dueDate, priority, notes, id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Checklist item not found' });
+    }
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error updating checklist item:', error);
+    res.status(500).json({ error: 'Failed to update checklist item' });
+  }
+});
+
+// DELETE /api/v1/events/:eventId/checklist/:id
+app.delete('/api/v1/events/:eventId/checklist/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    await pool.query('DELETE FROM event_checklist WHERE id = $1', [id]);
+    res.status(204).send();
+  } catch (error) {
+    console.error('Error deleting checklist item:', error);
+    res.status(500).json({ error: 'Failed to delete checklist item' });
+  }
+});
+
+// ============================================
+// BUDGET ENDPOINTS - Budget Tracker
+// ============================================
+
+// GET /api/v1/budget-categories - Get all budget categories
+app.get('/api/v1/budget-categories', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM budget_categories ORDER BY sort_order');
+    res.json({ categories: result.rows });
+  } catch (error) {
+    console.error('Error fetching budget categories:', error);
+    res.status(500).json({ error: 'Failed to fetch budget categories' });
+  }
+});
+
+// GET /api/v1/events/:eventId/budget - Get budget for event
+app.get('/api/v1/events/:eventId/budget', async (req, res) => {
+  try {
+    const { eventId } = req.params;
+
+    // Get or create budget for event
+    let budget = await pool.query('SELECT * FROM budgets WHERE event_id = $1', [eventId]);
+
+    if (budget.rows.length === 0) {
+      // Get event name for budget
+      const event = await pool.query('SELECT name FROM events WHERE id = $1', [eventId]);
+      const eventName = event.rows[0]?.name || 'Event';
+
+      budget = await pool.query(
+        `INSERT INTO budgets (event_id, name) VALUES ($1, $2) RETURNING *`,
+        [eventId, `${eventName} Budget`]
+      );
+    }
+
+    const budgetId = budget.rows[0].id;
+
+    // Get all budget items with category info
+    const items = await pool.query(
+      `SELECT bi.*, bc.name as category_name, bc.icon, bc.color, bc.is_income
+       FROM budget_items bi
+       LEFT JOIN budget_categories bc ON bi.category_id = bc.id
+       WHERE bi.budget_id = $1
+       ORDER BY bc.sort_order, bi.created_at`,
+      [budgetId]
+    );
+
+    // Calculate totals
+    const expenses = items.rows.filter(i => !i.is_income);
+    const income = items.rows.filter(i => i.is_income);
+
+    const totalEstimatedExpenses = expenses.reduce((sum, i) => sum + parseFloat(i.estimated_amount || 0), 0);
+    const totalActualExpenses = expenses.reduce((sum, i) => sum + parseFloat(i.actual_amount || 0), 0);
+    const totalEstimatedIncome = income.reduce((sum, i) => sum + parseFloat(i.estimated_amount || 0), 0);
+    const totalActualIncome = income.reduce((sum, i) => sum + parseFloat(i.actual_amount || 0), 0);
+
+    // Group by category
+    const byCategory = items.rows.reduce((acc, item) => {
+      const catName = item.category_name || 'Uncategorized';
+      if (!acc[catName]) {
+        acc[catName] = {
+          name: catName,
+          icon: item.icon,
+          color: item.color,
+          isIncome: item.is_income,
+          items: [],
+          totalEstimated: 0,
+          totalActual: 0,
+        };
+      }
+      acc[catName].items.push(item);
+      acc[catName].totalEstimated += parseFloat(item.estimated_amount || 0);
+      acc[catName].totalActual += parseFloat(item.actual_amount || 0);
+      return acc;
+    }, {});
+
+    res.json({
+      budget: budget.rows[0],
+      items: items.rows,
+      byCategory: Object.values(byCategory),
+      summary: {
+        totalBudget: parseFloat(budget.rows[0].total_budget),
+        totalEstimatedExpenses,
+        totalActualExpenses,
+        totalEstimatedIncome,
+        totalActualIncome,
+        estimatedProfit: totalEstimatedIncome - totalEstimatedExpenses,
+        actualProfit: totalActualIncome - totalActualExpenses,
+        budgetRemaining: parseFloat(budget.rows[0].total_budget) - totalActualExpenses,
+        paidCount: items.rows.filter(i => i.is_paid).length,
+        pendingCount: items.rows.filter(i => !i.is_paid && !i.is_income).length,
+      },
+    });
+  } catch (error) {
+    console.error('Error fetching budget:', error);
+    res.status(500).json({ error: 'Failed to fetch budget' });
+  }
+});
+
+// PUT /api/v1/events/:eventId/budget - Update budget settings
+app.put('/api/v1/events/:eventId/budget', async (req, res) => {
+  try {
+    const { eventId } = req.params;
+    const { totalBudget, name, notes, status } = req.body;
+
+    const result = await pool.query(
+      `UPDATE budgets SET
+        total_budget = COALESCE($1, total_budget),
+        name = COALESCE($2, name),
+        notes = COALESCE($3, notes),
+        status = COALESCE($4, status),
+        updated_at = CURRENT_TIMESTAMP
+       WHERE event_id = $5 RETURNING *`,
+      [totalBudget, name, notes, status, eventId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Budget not found' });
+    }
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error updating budget:', error);
+    res.status(500).json({ error: 'Failed to update budget' });
+  }
+});
+
+// POST /api/v1/events/:eventId/budget/items - Add budget item
+app.post('/api/v1/events/:eventId/budget/items', async (req, res) => {
+  try {
+    const { eventId } = req.params;
+    const { categoryId, description, vendorName, estimatedAmount, actualAmount, isPaid, paidDate, paymentMethod, notes, dueDate } = req.body;
+
+    // Get budget ID
+    const budget = await pool.query('SELECT id FROM budgets WHERE event_id = $1', [eventId]);
+    if (budget.rows.length === 0) {
+      return res.status(404).json({ error: 'Budget not found for this event' });
+    }
+    const budgetId = budget.rows[0].id;
+
+    const result = await pool.query(
+      `INSERT INTO budget_items (budget_id, category_id, description, vendor_name, estimated_amount, actual_amount, is_paid, paid_date, payment_method, notes, due_date)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
+      [budgetId, categoryId, description, vendorName, estimatedAmount || 0, actualAmount, isPaid || false, paidDate, paymentMethod, notes, dueDate]
+    );
+
+    // Get category info
+    if (categoryId) {
+      const category = await pool.query('SELECT * FROM budget_categories WHERE id = $1', [categoryId]);
+      result.rows[0].category = category.rows[0];
+    }
+
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    console.error('Error adding budget item:', error);
+    res.status(500).json({ error: 'Failed to add budget item' });
+  }
+});
+
+// PUT /api/v1/budget/items/:id - Update budget item
+app.put('/api/v1/budget/items/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { categoryId, description, vendorName, estimatedAmount, actualAmount, isPaid, paidDate, paymentMethod, notes, status, dueDate, receiptUrl } = req.body;
+
+    const result = await pool.query(
+      `UPDATE budget_items SET
+        category_id = COALESCE($1, category_id),
+        description = COALESCE($2, description),
+        vendor_name = COALESCE($3, vendor_name),
+        estimated_amount = COALESCE($4, estimated_amount),
+        actual_amount = COALESCE($5, actual_amount),
+        is_paid = COALESCE($6, is_paid),
+        paid_date = COALESCE($7, paid_date),
+        payment_method = COALESCE($8, payment_method),
+        notes = COALESCE($9, notes),
+        status = COALESCE($10, status),
+        due_date = COALESCE($11, due_date),
+        receipt_url = COALESCE($12, receipt_url),
+        updated_at = CURRENT_TIMESTAMP
+       WHERE id = $13 RETURNING *`,
+      [categoryId, description, vendorName, estimatedAmount, actualAmount, isPaid, paidDate, paymentMethod, notes, status, dueDate, receiptUrl, id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Budget item not found' });
+    }
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error updating budget item:', error);
+    res.status(500).json({ error: 'Failed to update budget item' });
+  }
+});
+
+// DELETE /api/v1/budget/items/:id - Delete budget item
+app.delete('/api/v1/budget/items/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    await pool.query('DELETE FROM budget_items WHERE id = $1', [id]);
+    res.status(204).send();
+  } catch (error) {
+    console.error('Error deleting budget item:', error);
+    res.status(500).json({ error: 'Failed to delete budget item' });
+  }
+});
+
+// ============================================
+// VENDORS ENDPOINTS - Vendor Management
+// ============================================
+
+// GET /api/v1/vendors - Get all vendors
+app.get('/api/v1/vendors', async (req, res) => {
+  try {
+    const { category, preferred } = req.query;
+    let query = 'SELECT * FROM vendors';
+    const conditions = [];
+    const values = [];
+    let paramCount = 1;
+
+    if (category) {
+      conditions.push(`category = $${paramCount}`);
+      values.push(category);
+      paramCount++;
+    }
+    if (preferred === 'true') {
+      conditions.push('is_preferred = true');
+    }
+
+    if (conditions.length > 0) {
+      query += ' WHERE ' + conditions.join(' AND ');
+    }
+    query += ' ORDER BY is_preferred DESC, rating DESC, name';
+
+    const result = await pool.query(query, values);
+    res.json({ vendors: result.rows, total: result.rows.length });
+  } catch (error) {
+    console.error('Error fetching vendors:', error);
+    res.status(500).json({ error: 'Failed to fetch vendors' });
+  }
+});
+
+// GET /api/v1/vendors/:id - Get single vendor
+app.get('/api/v1/vendors/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query('SELECT * FROM vendors WHERE id = $1', [id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Vendor not found' });
+    }
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error fetching vendor:', error);
+    res.status(500).json({ error: 'Failed to fetch vendor' });
+  }
+});
+
+// POST /api/v1/vendors - Create vendor
+app.post('/api/v1/vendors', async (req, res) => {
+  try {
+    const { name, category, contactName, email, phone, website, address, city, rating, notes, isPreferred } = req.body;
+
+    if (!name) {
+      return res.status(400).json({ error: 'Vendor name is required' });
+    }
+
+    const result = await pool.query(
+      `INSERT INTO vendors (name, category, contact_name, email, phone, website, address, city, rating, notes, is_preferred)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
+      [name, category, contactName, email, phone, website, address, city, rating || 0, notes, isPreferred || false]
+    );
+
+    console.log(`✅ New vendor created: ${name}`);
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    console.error('Error creating vendor:', error);
+    res.status(500).json({ error: 'Failed to create vendor' });
+  }
+});
+
+// PUT /api/v1/vendors/:id - Update vendor
+app.put('/api/v1/vendors/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, category, contactName, email, phone, website, address, city, rating, notes, isPreferred } = req.body;
+
+    const result = await pool.query(
+      `UPDATE vendors SET
+        name = COALESCE($1, name),
+        category = COALESCE($2, category),
+        contact_name = COALESCE($3, contact_name),
+        email = COALESCE($4, email),
+        phone = COALESCE($5, phone),
+        website = COALESCE($6, website),
+        address = COALESCE($7, address),
+        city = COALESCE($8, city),
+        rating = COALESCE($9, rating),
+        notes = COALESCE($10, notes),
+        is_preferred = COALESCE($11, is_preferred),
+        updated_at = CURRENT_TIMESTAMP
+       WHERE id = $12 RETURNING *`,
+      [name, category, contactName, email, phone, website, address, city, rating, notes, isPreferred, id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Vendor not found' });
+    }
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error updating vendor:', error);
+    res.status(500).json({ error: 'Failed to update vendor' });
+  }
+});
+
+// DELETE /api/v1/vendors/:id - Delete vendor
+app.delete('/api/v1/vendors/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    await pool.query('DELETE FROM vendors WHERE id = $1', [id]);
+    res.status(204).send();
+  } catch (error) {
+    console.error('Error deleting vendor:', error);
+    res.status(500).json({ error: 'Failed to delete vendor' });
+  }
+});
+
 // Start server
 const startServer = async () => {
   await initDatabase();
@@ -2120,6 +3153,43 @@ const startServer = async () => {
     GET    /api/v1/activity         - Get activity log
     POST   /api/v1/activity         - Log activity
     DELETE /api/v1/activity         - Clear activity log
+
+    Events Endpoints (Multi-Event Management):
+    GET    /api/v1/events           - List all events
+    GET    /api/v1/events/calendar  - Calendar view
+    GET    /api/v1/events/stats     - Event statistics
+    GET    /api/v1/events/:id       - Get single event
+    POST   /api/v1/events           - Create event
+    PUT    /api/v1/events/:id       - Update event
+    DELETE /api/v1/events/:id       - Delete event
+    POST   /api/v1/events/:id/duplicate - Duplicate event
+
+    Event Timeline (Run of Show):
+    GET    /api/v1/events/:id/timeline    - Get timeline
+    POST   /api/v1/events/:id/timeline    - Add timeline item
+    PUT    /api/v1/events/:id/timeline/:itemId - Update item
+    DELETE /api/v1/events/:id/timeline/:itemId - Delete item
+
+    Event Checklist:
+    GET    /api/v1/events/:id/checklist   - Get checklist
+    POST   /api/v1/events/:id/checklist   - Add checklist item
+    PUT    /api/v1/events/:id/checklist/:itemId - Update item
+    DELETE /api/v1/events/:id/checklist/:itemId - Delete item
+
+    Budget Endpoints (Budget Tracker):
+    GET    /api/v1/budget-categories      - Get categories
+    GET    /api/v1/events/:id/budget      - Get event budget
+    PUT    /api/v1/events/:id/budget      - Update budget
+    POST   /api/v1/events/:id/budget/items - Add budget item
+    PUT    /api/v1/budget/items/:id       - Update budget item
+    DELETE /api/v1/budget/items/:id       - Delete budget item
+
+    Vendors Endpoints:
+    GET    /api/v1/vendors           - List vendors
+    GET    /api/v1/vendors/:id       - Get vendor
+    POST   /api/v1/vendors           - Create vendor
+    PUT    /api/v1/vendors/:id       - Update vendor
+    DELETE /api/v1/vendors/:id       - Delete vendor
 
     Resend Webhook URL: https://berry.merktop.com/api/webhooks/resend
 

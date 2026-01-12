@@ -36,7 +36,7 @@ const categoryToStatus = (category: GuestCategory): string => {
 
 type GuestCategory = 'pending' | 'A' | 'B' | 'C' | 'rejected';
 type GuestStatus = 'pending' | 'approved' | 'declined' | 'rejected';
-type ViewType = 'overview' | 'guests' | 'emails' | 'vip' | 'priority' | 'standard' | 'analytics' | 'activity' | 'automation' | 'checkin' | 'models' | 'tables' | 'tickets' | 'sponsors';
+type ViewType = 'overview' | 'guests' | 'emails' | 'vip' | 'priority' | 'standard' | 'analytics' | 'activity' | 'automation' | 'checkin' | 'models' | 'tables' | 'tickets' | 'sponsors' | 'events' | 'budget' | 'vendors';
 type ThemeMode = 'dark' | 'light';
 
 interface Purchase {
@@ -196,6 +196,128 @@ interface Sponsor {
   contractSigned: boolean;
   paymentStatus: 'pending' | 'partial' | 'complete';
   benefits: string[];
+  createdAt: string;
+}
+
+// Event Management Interfaces
+interface Event {
+  id: number;
+  name: string;
+  slug: string;
+  description?: string;
+  eventType: string;
+  venueName?: string;
+  venueAddress?: string;
+  venueCity?: string;
+  venueCapacity?: number;
+  eventDate: string;
+  startTime?: string;
+  endTime?: string;
+  doorsOpen?: string;
+  status: 'planning' | 'confirmed' | 'in_progress' | 'completed' | 'cancelled';
+  coverImage?: string;
+  theme?: string;
+  dressCode?: string;
+  ageRestriction?: string;
+  ticketLink?: string;
+  isPublic: boolean;
+  isFeatured: boolean;
+  expectedAttendance?: number;
+  actualAttendance?: number;
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+  guestsCount?: number;
+  ticketsCount?: number;
+  sponsorsCount?: number;
+  totalBudget?: number;
+}
+
+interface EventTimeline {
+  id: number;
+  eventId: number;
+  time: string;
+  title: string;
+  description?: string;
+  responsible?: string;
+  location?: string;
+  isCritical: boolean;
+  status: string;
+  notes?: string;
+  sortOrder: number;
+}
+
+interface EventChecklist {
+  id: number;
+  eventId: number;
+  category: string;
+  item: string;
+  isCompleted: boolean;
+  completedBy?: string;
+  completedAt?: string;
+  dueDate?: string;
+  priority: 'low' | 'medium' | 'high';
+  notes?: string;
+}
+
+// Budget Interfaces
+interface BudgetCategory {
+  id: number;
+  name: string;
+  icon: string;
+  color: string;
+  isIncome: boolean;
+  sortOrder: number;
+}
+
+interface Budget {
+  id: number;
+  eventId: number;
+  name: string;
+  totalBudget: number;
+  totalSpent: number;
+  totalIncome: number;
+  currency: string;
+  status: string;
+  notes?: string;
+}
+
+interface BudgetItem {
+  id: number;
+  budgetId: number;
+  categoryId: number;
+  categoryName?: string;
+  icon?: string;
+  color?: string;
+  isIncome?: boolean;
+  description: string;
+  vendorName?: string;
+  estimatedAmount: number;
+  actualAmount?: number;
+  isPaid: boolean;
+  paidDate?: string;
+  paymentMethod?: string;
+  receiptUrl?: string;
+  notes?: string;
+  status: string;
+  dueDate?: string;
+}
+
+interface Vendor {
+  id: number;
+  name: string;
+  category?: string;
+  contactName?: string;
+  email?: string;
+  phone?: string;
+  website?: string;
+  address?: string;
+  city?: string;
+  rating: number;
+  notes?: string;
+  isPreferred: boolean;
+  totalSpent: number;
+  eventsCount: number;
   createdAt: string;
 }
 
@@ -377,7 +499,8 @@ const styles = `
     font-weight: bold;
   }
 
-  * {
+  /* Transitions only on interactive elements - not global * selector */
+  button, a, input, select, textarea, .btn-hover, .nav-hover, .stat-hover, .row-hover {
     transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
   }
 
@@ -415,12 +538,44 @@ const styles = `
     animation: grow 0.5s ease forwards;
   }
 
+  /* Responsive padding using CSS custom properties */
+  :root {
+    --page-padding: clamp(16px, 4vw, 32px);
+    --header-padding: clamp(12px, 3vw, 32px);
+    --content-gap: clamp(12px, 2vw, 16px);
+  }
+
+  .page-content {
+    padding: var(--page-padding) !important;
+  }
+
+  .header-content {
+    padding: 16px var(--header-padding) !important;
+  }
+
+  /* Large tablets / small laptops */
   @media (max-width: 1024px) {
     .hide-tablet {
       display: none !important;
     }
+
+    .stats-grid {
+      grid-template-columns: repeat(3, 1fr) !important;
+    }
   }
 
+  /* Tablets */
+  @media (max-width: 900px) {
+    .stats-grid {
+      grid-template-columns: repeat(2, 1fr) !important;
+    }
+
+    .chart-grid {
+      grid-template-columns: 1fr !important;
+    }
+  }
+
+  /* Mobile landscape / small tablets */
   @media (max-width: 768px) {
     .mobile-menu-btn {
       display: flex !important;
@@ -452,26 +607,37 @@ const styles = `
       display: none !important;
     }
 
-    .stats-grid {
-      grid-template-columns: repeat(2, 1fr) !important;
-    }
-
     .category-grid {
-      grid-template-columns: 1fr !important;
-    }
-
-    .chart-grid {
       grid-template-columns: 1fr !important;
     }
 
     .filter-row {
       flex-direction: column !important;
     }
+
+    /* Header buttons responsive */
+    .header-content > div:last-child {
+      flex-wrap: wrap;
+      gap: 8px !important;
+    }
   }
 
+  /* Mobile portrait */
   @media (max-width: 480px) {
     .stats-grid {
       grid-template-columns: 1fr !important;
+    }
+
+    .category-grid {
+      gap: 12px !important;
+    }
+  }
+
+  /* Very small screens */
+  @media (max-width: 320px) {
+    :root {
+      --page-padding: 12px;
+      --header-padding: 12px;
     }
   }
 `;
@@ -523,6 +689,28 @@ function App() {
   const [sponsorStats, setSponsorStats] = useState({ total: 0, pending: 0, active: 0, revenue: 0 });
   const [selectedSponsor, setSelectedSponsor] = useState<Sponsor | null>(null);
   const [showFlyerGenerator, setShowFlyerGenerator] = useState(false);
+
+  // Events state
+  const [events, setEvents] = useState<Event[]>([]);
+  const [eventStats, setEventStats] = useState({ total: 0, planning: 0, confirmed: 0, completed: 0, upcoming: 0, thisMonth: 0 });
+  const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
+  const [showEventForm, setShowEventForm] = useState(false);
+  const [eventFormData, setEventFormData] = useState({ name: '', eventDate: '', eventType: 'party', venueName: '', venueCity: '', expectedAttendance: '', dressCode: '', theme: '', notes: '' });
+  const [calendarMonth, setCalendarMonth] = useState(new Date().getMonth() + 1);
+  const [calendarYear, setCalendarYear] = useState(new Date().getFullYear());
+
+  // Budget state
+  const [budgetCategories, setBudgetCategories] = useState<BudgetCategory[]>([]);
+  const [currentBudget, setCurrentBudget] = useState<Budget | null>(null);
+  const [budgetItems, setBudgetItems] = useState<BudgetItem[]>([]);
+  const [budgetSummary, setBudgetSummary] = useState({ totalBudget: 0, totalEstimatedExpenses: 0, totalActualExpenses: 0, totalEstimatedIncome: 0, totalActualIncome: 0, estimatedProfit: 0, actualProfit: 0, budgetRemaining: 0, paidCount: 0, pendingCount: 0 });
+  const [showBudgetItemForm, setShowBudgetItemForm] = useState(false);
+  const [budgetItemFormData, setBudgetItemFormData] = useState({ categoryId: '', description: '', vendorName: '', estimatedAmount: '', actualAmount: '', isPaid: false, dueDate: '', notes: '' });
+
+  // Vendors state
+  const [vendors, setVendors] = useState<Vendor[]>([]);
+  const [showVendorForm, setShowVendorForm] = useState(false);
+  const [vendorFormData, setVendorFormData] = useState({ name: '', category: '', contactName: '', email: '', phone: '', website: '', city: '', notes: '', isPreferred: false });
 
   // Collapsible menu state
   const [expandedMenus, setExpandedMenus] = useState<Set<string>>(new Set(['main', 'intelligence']));
@@ -740,6 +928,182 @@ function App() {
     });
   }, [updateSponsor]);
 
+  // Fetch Events
+  const fetchEvents = useCallback(async () => {
+    try {
+      const [eventsRes, statsRes] = await Promise.all([
+        fetch(`${API_URL}/events`),
+        fetch(`${API_URL}/events/stats`)
+      ]);
+      const eventsData = await eventsRes.json();
+      const statsData = await statsRes.json();
+      setEvents(eventsData.events || []);
+      setEventStats({
+        total: parseInt(statsData.total) || 0,
+        planning: parseInt(statsData.planning) || 0,
+        confirmed: parseInt(statsData.confirmed) || 0,
+        completed: parseInt(statsData.completed) || 0,
+        upcoming: parseInt(statsData.upcoming) || 0,
+        thisMonth: parseInt(statsData.thisMonth) || 0,
+      });
+    } catch (error) {
+      console.error('Error fetching events:', error);
+    }
+  }, []);
+
+  // Create Event
+  const createEvent = useCallback(async () => {
+    if (!eventFormData.name || !eventFormData.eventDate) {
+      addToast('Name and date are required', 'error');
+      return;
+    }
+    try {
+      const res = await fetch(`${API_URL}/events`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: eventFormData.name,
+          eventDate: eventFormData.eventDate,
+          eventType: eventFormData.eventType,
+          venueName: eventFormData.venueName,
+          venueCity: eventFormData.venueCity,
+          expectedAttendance: eventFormData.expectedAttendance ? parseInt(eventFormData.expectedAttendance) : null,
+          dressCode: eventFormData.dressCode,
+          theme: eventFormData.theme,
+          notes: eventFormData.notes,
+        }),
+      });
+      if (res.ok) {
+        const newEvent = await res.json();
+        setEvents(prev => [newEvent, ...prev]);
+        setShowEventForm(false);
+        setEventFormData({ name: '', eventDate: '', eventType: 'party', venueName: '', venueCity: '', expectedAttendance: '', dressCode: '', theme: '', notes: '' });
+        addToast('Event created successfully!', 'success');
+        fetchEvents();
+      }
+    } catch (error) {
+      console.error('Error creating event:', error);
+      addToast('Failed to create event', 'error');
+    }
+  }, [eventFormData, fetchEvents]);
+
+  // Update Event Status
+  const updateEventStatus = useCallback(async (id: number, status: string) => {
+    try {
+      const res = await fetch(`${API_URL}/events/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status }),
+      });
+      if (res.ok) {
+        fetchEvents();
+        addToast(`Event ${status}`, 'success');
+      }
+    } catch (error) {
+      console.error('Error updating event:', error);
+    }
+  }, [fetchEvents]);
+
+  // Fetch Budget for Event
+  const fetchBudget = useCallback(async (eventId: number) => {
+    try {
+      const [budgetRes, categoriesRes] = await Promise.all([
+        fetch(`${API_URL}/events/${eventId}/budget`),
+        fetch(`${API_URL}/budget-categories`)
+      ]);
+      const budgetData = await budgetRes.json();
+      const categoriesData = await categoriesRes.json();
+      setCurrentBudget(budgetData.budget);
+      setBudgetItems(budgetData.items || []);
+      setBudgetSummary(budgetData.summary);
+      setBudgetCategories(categoriesData.categories || []);
+    } catch (error) {
+      console.error('Error fetching budget:', error);
+    }
+  }, []);
+
+  // Add Budget Item
+  const addBudgetItem = useCallback(async () => {
+    if (!selectedEvent || !budgetItemFormData.description) {
+      addToast('Description is required', 'error');
+      return;
+    }
+    try {
+      const res = await fetch(`${API_URL}/events/${selectedEvent.id}/budget/items`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          categoryId: budgetItemFormData.categoryId ? parseInt(budgetItemFormData.categoryId) : null,
+          description: budgetItemFormData.description,
+          vendorName: budgetItemFormData.vendorName,
+          estimatedAmount: budgetItemFormData.estimatedAmount ? parseFloat(budgetItemFormData.estimatedAmount) : 0,
+          actualAmount: budgetItemFormData.actualAmount ? parseFloat(budgetItemFormData.actualAmount) : null,
+          isPaid: budgetItemFormData.isPaid,
+          dueDate: budgetItemFormData.dueDate || null,
+          notes: budgetItemFormData.notes,
+        }),
+      });
+      if (res.ok) {
+        fetchBudget(selectedEvent.id);
+        setShowBudgetItemForm(false);
+        setBudgetItemFormData({ categoryId: '', description: '', vendorName: '', estimatedAmount: '', actualAmount: '', isPaid: false, dueDate: '', notes: '' });
+        addToast('Budget item added!', 'success');
+      }
+    } catch (error) {
+      console.error('Error adding budget item:', error);
+      addToast('Failed to add budget item', 'error');
+    }
+  }, [selectedEvent, budgetItemFormData, fetchBudget]);
+
+  // Toggle Budget Item Paid
+  const toggleBudgetItemPaid = useCallback(async (itemId: number, isPaid: boolean) => {
+    try {
+      await fetch(`${API_URL}/budget/items/${itemId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isPaid, paidDate: isPaid ? new Date().toISOString().split('T')[0] : null }),
+      });
+      if (selectedEvent) fetchBudget(selectedEvent.id);
+    } catch (error) {
+      console.error('Error updating budget item:', error);
+    }
+  }, [selectedEvent, fetchBudget]);
+
+  // Fetch Vendors
+  const fetchVendors = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_URL}/vendors`);
+      const data = await res.json();
+      setVendors(data.vendors || []);
+    } catch (error) {
+      console.error('Error fetching vendors:', error);
+    }
+  }, []);
+
+  // Create Vendor
+  const createVendor = useCallback(async () => {
+    if (!vendorFormData.name) {
+      addToast('Vendor name is required', 'error');
+      return;
+    }
+    try {
+      const res = await fetch(`${API_URL}/vendors`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(vendorFormData),
+      });
+      if (res.ok) {
+        fetchVendors();
+        setShowVendorForm(false);
+        setVendorFormData({ name: '', category: '', contactName: '', email: '', phone: '', website: '', city: '', notes: '', isPreferred: false });
+        addToast('Vendor added!', 'success');
+      }
+    } catch (error) {
+      console.error('Error creating vendor:', error);
+      addToast('Failed to add vendor', 'error');
+    }
+  }, [vendorFormData, fetchVendors]);
+
   // Flyer ref for html-to-image
   const flyerRef = useRef<HTMLDivElement>(null);
 
@@ -769,7 +1133,10 @@ function App() {
     if (activeView === 'tables') fetchTables();
     if (activeView === 'tickets') fetchTickets();
     if (activeView === 'sponsors') fetchSponsors();
-  }, [activeView, fetchModels, fetchTables, fetchTickets, fetchSponsors]);
+    if (activeView === 'events') fetchEvents();
+    if (activeView === 'vendors') fetchVendors();
+    if (activeView === 'budget' && selectedEvent) fetchBudget(selectedEvent.id);
+  }, [activeView, fetchModels, fetchTables, fetchTickets, fetchSponsors, fetchEvents, fetchVendors, fetchBudget, selectedEvent]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -1308,7 +1675,8 @@ function App() {
           <button
             className="mobile-menu-btn"
             onClick={closeSidebar}
-            style={{ display: 'none', background: 'none', border: 'none', color: '#888', fontSize: 24, cursor: 'pointer', padding: 4 }}
+            aria-label="Close menu"
+            style={{ display: 'none', background: 'none', border: 'none', color: '#888', fontSize: 24, cursor: 'pointer', padding: '10px', minWidth: 44, minHeight: 44 }}
           >
             ×
           </button>
@@ -1373,6 +1741,17 @@ function App() {
           >
             <NavItem label="Sponsors" active={activeView === 'sponsors'} icon="◆" count={sponsorStats.total} onClick={() => navigateTo('sponsors')} />
           </CollapsibleMenu>
+
+          <CollapsibleMenu
+            title="Event Management"
+            expanded={expandedMenus.has('eventmgmt')}
+            onToggle={() => toggleMenu('eventmgmt')}
+            count={eventStats.upcoming}
+          >
+            <NavItem label="All Events" active={activeView === 'events'} icon="📅" count={eventStats.total} onClick={() => navigateTo('events')} />
+            <NavItem label="Budget" active={activeView === 'budget'} icon="💰" onClick={() => navigateTo('budget')} />
+            <NavItem label="Vendors" active={activeView === 'vendors'} icon="🏢" count={vendors.length} onClick={() => navigateTo('vendors')} />
+          </CollapsibleMenu>
         </nav>
 
         {/* Settings Row */}
@@ -1417,13 +1796,14 @@ function App() {
             <button
               className="mobile-menu-btn"
               onClick={() => setSidebarOpen(true)}
-              style={{ display: 'none', background: '#1a1a1a', border: 'none', color: '#fff', fontSize: 20, cursor: 'pointer', padding: '8px 12px', borderRadius: 8, flexShrink: 0 }}
+              aria-label="Open menu"
+              style={{ display: 'none', background: '#1a1a1a', border: 'none', color: '#fff', fontSize: 20, cursor: 'pointer', padding: '12px 14px', borderRadius: 8, flexShrink: 0, minWidth: 44, minHeight: 44 }}
             >
               ☰
             </button>
             <div style={{ animation: 'fadeIn 0.3s ease', minWidth: 0 }}>
-              <h1 style={{ fontSize: 24, fontWeight: 600, margin: 0, letterSpacing: '-0.4px' }}>{getViewTitle()}</h1>
-              <p style={{ fontSize: 15, color: '#666', margin: '4px 0 0' }}>{getViewSubtitle()}</p>
+              <h1 style={{ fontSize: 'clamp(18px, 4vw, 24px)', fontWeight: 600, margin: 0, letterSpacing: '-0.4px' }}>{getViewTitle()}</h1>
+              <p style={{ fontSize: 'clamp(13px, 2vw, 15px)', color: '#666', margin: '4px 0 0' }}>{getViewSubtitle()}</p>
             </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -1435,8 +1815,9 @@ function App() {
             {/* Keyboard shortcuts hint */}
             <button
               onClick={() => addToast('Shortcuts: N=New, R=Refresh, T=Theme, Esc=Close, G+O/G/E/A/C=Navigate', 'info')}
-              style={{ background: '#1a1a1a', border: '1px solid #333', color: '#666', padding: '4px 8px', borderRadius: 4, fontSize: 12, cursor: 'pointer' }}
+              style={{ background: '#1a1a1a', border: '1px solid #333', color: '#666', padding: '8px 12px', borderRadius: 4, fontSize: 12, cursor: 'pointer', minHeight: 36 }}
               title="Keyboard shortcuts"
+              aria-label="Show keyboard shortcuts"
             >
               ⌘K
             </button>
@@ -1521,9 +1902,9 @@ function App() {
 
         {/* Search & Filters Bar */}
         {(activeView === 'guests' || activeView === 'vip' || activeView === 'priority' || activeView === 'standard' || activeView === 'emails') && (
-          <div style={{ padding: '16px 32px', borderBottom: '1px solid #1a1a1a', background: '#050505' }}>
+          <div className="header-content" style={{ borderBottom: '1px solid #1a1a1a', background: '#050505' }}>
             <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-              <div style={{ position: 'relative', flex: 1, minWidth: 200 }}>
+              <div style={{ position: 'relative', flex: 1, minWidth: 'min(200px, 100%)' }}>
                 <span style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', color: '#666', fontSize: 16 }}>⌕</span>
                 <input
                   type="text"
@@ -3045,6 +3426,363 @@ function App() {
                 </div>
               )}
             </div>
+          </div>
+        )}
+
+        {/* ========== EVENTS VIEW ========== */}
+        {activeView === 'events' && (
+          <div className="page-content" style={{ padding: 32, animation: 'fadeIn 0.3s ease' }}>
+            {/* Stats Row */}
+            <div className="stats-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 16, marginBottom: 24 }}>
+              {[
+                { label: 'Total Events', value: eventStats.total, color: '#fff' },
+                { label: 'Upcoming', value: eventStats.upcoming, color: '#22c55e' },
+                { label: 'This Month', value: eventStats.thisMonth, color: '#3b82f6' },
+                { label: 'Planning', value: eventStats.planning, color: '#f59e0b' },
+                { label: 'Confirmed', value: eventStats.confirmed, color: '#a78bfa' },
+                { label: 'Completed', value: eventStats.completed, color: '#6b7280' },
+              ].map((stat, i) => (
+                <div key={i} style={{ background: '#0a0a0a', border: '1px solid #1a1a1a', borderRadius: 12, padding: 16 }}>
+                  <div style={{ fontSize: 12, color: '#666', marginBottom: 4 }}>{stat.label}</div>
+                  <div style={{ fontSize: 28, fontWeight: 700, color: stat.color }}>{stat.value}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* Action Bar */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+              <h2 style={{ fontSize: 20, fontWeight: 600, margin: 0 }}>All Events</h2>
+              <button
+                onClick={() => setShowEventForm(true)}
+                className="btn-hover"
+                style={{ background: '#d4af37', color: '#000', border: 'none', padding: '10px 20px', borderRadius: 8, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8 }}
+              >
+                + New Event
+              </button>
+            </div>
+
+            {/* Events Grid */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 16 }}>
+              {events.map(event => (
+                <div
+                  key={event.id}
+                  onClick={() => { setSelectedEvent(event); navigateTo('budget'); }}
+                  className="row-hover"
+                  style={{
+                    background: '#0a0a0a',
+                    border: `1px solid ${event.status === 'confirmed' ? '#22c55e40' : event.status === 'planning' ? '#f59e0b40' : '#1a1a1a'}`,
+                    borderRadius: 12,
+                    padding: 20,
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease',
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
+                    <div>
+                      <h3 style={{ fontSize: 16, fontWeight: 600, margin: 0 }}>{event.name}</h3>
+                      <div style={{ fontSize: 13, color: '#666', marginTop: 4 }}>{event.venueName || 'Venue TBD'} {event.venueCity && `• ${event.venueCity}`}</div>
+                    </div>
+                    <span style={{
+                      padding: '4px 10px',
+                      borderRadius: 20,
+                      fontSize: 11,
+                      fontWeight: 600,
+                      textTransform: 'uppercase',
+                      background: event.status === 'confirmed' ? '#22c55e20' : event.status === 'planning' ? '#f59e0b20' : event.status === 'completed' ? '#6b728020' : '#ef444420',
+                      color: event.status === 'confirmed' ? '#22c55e' : event.status === 'planning' ? '#f59e0b' : event.status === 'completed' ? '#9ca3af' : '#ef4444',
+                    }}>
+                      {event.status}
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', gap: 16, fontSize: 13, color: '#888' }}>
+                    <span>📅 {new Date(event.eventDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                    {event.startTime && <span>🕐 {event.startTime}</span>}
+                    {event.expectedAttendance && <span>👥 {event.expectedAttendance}</span>}
+                  </div>
+                  {event.theme && <div style={{ marginTop: 10, fontSize: 12, color: '#d4af37' }}>Theme: {event.theme}</div>}
+                  <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); updateEventStatus(event.id, 'confirmed'); }}
+                      style={{ flex: 1, padding: '8px', background: '#22c55e20', border: 'none', borderRadius: 6, color: '#22c55e', fontSize: 12, cursor: 'pointer' }}
+                    >
+                      Confirm
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setSelectedEvent(event); navigateTo('budget'); }}
+                      style={{ flex: 1, padding: '8px', background: '#d4af3720', border: 'none', borderRadius: 6, color: '#d4af37', fontSize: 12, cursor: 'pointer' }}
+                    >
+                      Budget
+                    </button>
+                  </div>
+                </div>
+              ))}
+              {events.length === 0 && (
+                <div style={{ gridColumn: '1 / -1', padding: 60, textAlign: 'center', background: '#0a0a0a', borderRadius: 12, border: '1px solid #1a1a1a' }}>
+                  <div style={{ fontSize: 48, marginBottom: 12 }}>📅</div>
+                  <div style={{ color: '#666', fontSize: 15 }}>No events yet</div>
+                  <div style={{ color: '#444', fontSize: 13, marginTop: 8 }}>Create your first event to get started</div>
+                </div>
+              )}
+            </div>
+
+            {/* Create Event Modal */}
+            {showEventForm && (
+              <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.9)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200, padding: 16 }} onClick={() => setShowEventForm(false)}>
+                <div style={{ background: '#0a0a0a', border: '1px solid #1a1a1a', borderRadius: 16, padding: 32, width: '100%', maxWidth: 500, animation: 'slideUp 0.3s ease' }} onClick={e => e.stopPropagation()}>
+                  <h2 style={{ fontSize: 20, fontWeight: 600, margin: '0 0 24px' }}>Create New Event</h2>
+                  <div style={{ display: 'grid', gap: 16 }}>
+                    <input placeholder="Event Name *" value={eventFormData.name} onChange={e => setEventFormData(p => ({ ...p, name: e.target.value }))} style={{ background: '#111', border: '1px solid #222', borderRadius: 8, padding: '12px 16px', color: '#fff', fontSize: 14 }} />
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                      <input type="date" value={eventFormData.eventDate} onChange={e => setEventFormData(p => ({ ...p, eventDate: e.target.value }))} style={{ background: '#111', border: '1px solid #222', borderRadius: 8, padding: '12px 16px', color: '#fff', fontSize: 14 }} />
+                      <select value={eventFormData.eventType} onChange={e => setEventFormData(p => ({ ...p, eventType: e.target.value }))} style={{ background: '#111', border: '1px solid #222', borderRadius: 8, padding: '12px 16px', color: '#fff', fontSize: 14 }}>
+                        <option value="party">Party</option>
+                        <option value="corporate">Corporate</option>
+                        <option value="concert">Concert</option>
+                        <option value="festival">Festival</option>
+                        <option value="private">Private</option>
+                      </select>
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                      <input placeholder="Venue Name" value={eventFormData.venueName} onChange={e => setEventFormData(p => ({ ...p, venueName: e.target.value }))} style={{ background: '#111', border: '1px solid #222', borderRadius: 8, padding: '12px 16px', color: '#fff', fontSize: 14 }} />
+                      <input placeholder="City" value={eventFormData.venueCity} onChange={e => setEventFormData(p => ({ ...p, venueCity: e.target.value }))} style={{ background: '#111', border: '1px solid #222', borderRadius: 8, padding: '12px 16px', color: '#fff', fontSize: 14 }} />
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                      <input placeholder="Expected Attendance" type="number" value={eventFormData.expectedAttendance} onChange={e => setEventFormData(p => ({ ...p, expectedAttendance: e.target.value }))} style={{ background: '#111', border: '1px solid #222', borderRadius: 8, padding: '12px 16px', color: '#fff', fontSize: 14 }} />
+                      <input placeholder="Dress Code" value={eventFormData.dressCode} onChange={e => setEventFormData(p => ({ ...p, dressCode: e.target.value }))} style={{ background: '#111', border: '1px solid #222', borderRadius: 8, padding: '12px 16px', color: '#fff', fontSize: 14 }} />
+                    </div>
+                    <input placeholder="Theme (optional)" value={eventFormData.theme} onChange={e => setEventFormData(p => ({ ...p, theme: e.target.value }))} style={{ background: '#111', border: '1px solid #222', borderRadius: 8, padding: '12px 16px', color: '#fff', fontSize: 14 }} />
+                    <textarea placeholder="Notes" value={eventFormData.notes} onChange={e => setEventFormData(p => ({ ...p, notes: e.target.value }))} rows={3} style={{ background: '#111', border: '1px solid #222', borderRadius: 8, padding: '12px 16px', color: '#fff', fontSize: 14, resize: 'vertical' }} />
+                    <div style={{ display: 'flex', gap: 12 }}>
+                      <button onClick={() => setShowEventForm(false)} style={{ flex: 1, padding: '12px', background: '#1a1a1a', border: 'none', borderRadius: 8, color: '#fff', cursor: 'pointer' }}>Cancel</button>
+                      <button onClick={createEvent} style={{ flex: 1, padding: '12px', background: '#d4af37', border: 'none', borderRadius: 8, color: '#000', fontWeight: 600, cursor: 'pointer' }}>Create Event</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ========== BUDGET VIEW ========== */}
+        {activeView === 'budget' && (
+          <div className="page-content" style={{ padding: 32, animation: 'fadeIn 0.3s ease' }}>
+            {selectedEvent ? (
+              <>
+                {/* Event Header */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+                  <div>
+                    <button onClick={() => { setSelectedEvent(null); navigateTo('events'); }} style={{ background: 'none', border: 'none', color: '#666', cursor: 'pointer', fontSize: 13, marginBottom: 8 }}>← Back to Events</button>
+                    <h2 style={{ fontSize: 24, fontWeight: 600, margin: 0 }}>{selectedEvent.name}</h2>
+                    <div style={{ color: '#666', marginTop: 4 }}>{new Date(selectedEvent.eventDate).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</div>
+                  </div>
+                  <button onClick={() => setShowBudgetItemForm(true)} className="btn-hover" style={{ background: '#22c55e', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: 8, fontWeight: 600, cursor: 'pointer' }}>+ Add Item</button>
+                </div>
+
+                {/* Budget Summary Cards */}
+                <div className="stats-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 24 }}>
+                  <div style={{ background: '#0a0a0a', border: '1px solid #1a1a1a', borderRadius: 12, padding: 20 }}>
+                    <div style={{ fontSize: 12, color: '#666', marginBottom: 8 }}>Total Budget</div>
+                    <div style={{ fontSize: 28, fontWeight: 700, color: '#fff' }}>${budgetSummary.totalBudget.toLocaleString()}</div>
+                  </div>
+                  <div style={{ background: '#0a0a0a', border: '1px solid #1a1a1a', borderRadius: 12, padding: 20 }}>
+                    <div style={{ fontSize: 12, color: '#666', marginBottom: 8 }}>Expenses (Est / Actual)</div>
+                    <div style={{ fontSize: 20, fontWeight: 700, color: '#ef4444' }}>
+                      ${budgetSummary.totalEstimatedExpenses.toLocaleString()} / ${budgetSummary.totalActualExpenses.toLocaleString()}
+                    </div>
+                  </div>
+                  <div style={{ background: '#0a0a0a', border: '1px solid #1a1a1a', borderRadius: 12, padding: 20 }}>
+                    <div style={{ fontSize: 12, color: '#666', marginBottom: 8 }}>Income (Est / Actual)</div>
+                    <div style={{ fontSize: 20, fontWeight: 700, color: '#22c55e' }}>
+                      ${budgetSummary.totalEstimatedIncome.toLocaleString()} / ${budgetSummary.totalActualIncome.toLocaleString()}
+                    </div>
+                  </div>
+                  <div style={{ background: '#0a0a0a', border: '1px solid #1a1a1a', borderRadius: 12, padding: 20 }}>
+                    <div style={{ fontSize: 12, color: '#666', marginBottom: 8 }}>Projected Profit</div>
+                    <div style={{ fontSize: 28, fontWeight: 700, color: budgetSummary.estimatedProfit >= 0 ? '#22c55e' : '#ef4444' }}>
+                      ${budgetSummary.estimatedProfit.toLocaleString()}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Budget Items Table */}
+                <div style={{ background: '#0a0a0a', border: '1px solid #1a1a1a', borderRadius: 12, overflow: 'hidden' }}>
+                  <div style={{ padding: '16px 20px', borderBottom: '1px solid #1a1a1a', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>Budget Items</h3>
+                    <div style={{ fontSize: 13, color: '#666' }}>{budgetSummary.paidCount} paid • {budgetSummary.pendingCount} pending</div>
+                  </div>
+                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                    <thead>
+                      <tr style={{ background: '#111' }}>
+                        <th style={{ textAlign: 'left', padding: '12px 16px', fontSize: 12, color: '#666', fontWeight: 500 }}>Category</th>
+                        <th style={{ textAlign: 'left', padding: '12px 16px', fontSize: 12, color: '#666', fontWeight: 500 }}>Description</th>
+                        <th style={{ textAlign: 'left', padding: '12px 16px', fontSize: 12, color: '#666', fontWeight: 500 }}>Vendor</th>
+                        <th style={{ textAlign: 'right', padding: '12px 16px', fontSize: 12, color: '#666', fontWeight: 500 }}>Estimated</th>
+                        <th style={{ textAlign: 'right', padding: '12px 16px', fontSize: 12, color: '#666', fontWeight: 500 }}>Actual</th>
+                        <th style={{ textAlign: 'center', padding: '12px 16px', fontSize: 12, color: '#666', fontWeight: 500 }}>Paid</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {budgetItems.map(item => (
+                        <tr key={item.id} className="row-hover" style={{ borderBottom: '1px solid #1a1a1a' }}>
+                          <td style={{ padding: '14px 16px' }}>
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 10px', background: `${item.color}20`, borderRadius: 20, fontSize: 12, color: item.color }}>
+                              {item.categoryName || 'Other'}
+                            </span>
+                          </td>
+                          <td style={{ padding: '14px 16px', color: '#fff' }}>{item.description}</td>
+                          <td style={{ padding: '14px 16px', color: '#888' }}>{item.vendorName || '-'}</td>
+                          <td style={{ padding: '14px 16px', textAlign: 'right', color: item.isIncome ? '#22c55e' : '#fff' }}>
+                            {item.isIncome ? '+' : ''}${item.estimatedAmount.toLocaleString()}
+                          </td>
+                          <td style={{ padding: '14px 16px', textAlign: 'right', color: item.actualAmount ? (item.isIncome ? '#22c55e' : '#fff') : '#444' }}>
+                            {item.actualAmount ? `${item.isIncome ? '+' : ''}$${item.actualAmount.toLocaleString()}` : '-'}
+                          </td>
+                          <td style={{ padding: '14px 16px', textAlign: 'center' }}>
+                            <input
+                              type="checkbox"
+                              checked={item.isPaid}
+                              onChange={() => toggleBudgetItemPaid(item.id, !item.isPaid)}
+                              className="checkbox-custom"
+                              style={{ cursor: 'pointer' }}
+                            />
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {budgetItems.length === 0 && (
+                    <div style={{ padding: 40, textAlign: 'center' }}>
+                      <div style={{ fontSize: 32, marginBottom: 8 }}>💰</div>
+                      <div style={{ color: '#666' }}>No budget items yet</div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Add Budget Item Modal */}
+                {showBudgetItemForm && (
+                  <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.9)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200, padding: 16 }} onClick={() => setShowBudgetItemForm(false)}>
+                    <div style={{ background: '#0a0a0a', border: '1px solid #1a1a1a', borderRadius: 16, padding: 32, width: '100%', maxWidth: 450, animation: 'slideUp 0.3s ease' }} onClick={e => e.stopPropagation()}>
+                      <h2 style={{ fontSize: 20, fontWeight: 600, margin: '0 0 24px' }}>Add Budget Item</h2>
+                      <div style={{ display: 'grid', gap: 16 }}>
+                        <select value={budgetItemFormData.categoryId} onChange={e => setBudgetItemFormData(p => ({ ...p, categoryId: e.target.value }))} style={{ background: '#111', border: '1px solid #222', borderRadius: 8, padding: '12px 16px', color: '#fff', fontSize: 14 }}>
+                          <option value="">Select Category</option>
+                          {budgetCategories.map(c => (
+                            <option key={c.id} value={c.id}>{c.isIncome ? '💵 ' : ''}{c.name}</option>
+                          ))}
+                        </select>
+                        <input placeholder="Description *" value={budgetItemFormData.description} onChange={e => setBudgetItemFormData(p => ({ ...p, description: e.target.value }))} style={{ background: '#111', border: '1px solid #222', borderRadius: 8, padding: '12px 16px', color: '#fff', fontSize: 14 }} />
+                        <input placeholder="Vendor Name" value={budgetItemFormData.vendorName} onChange={e => setBudgetItemFormData(p => ({ ...p, vendorName: e.target.value }))} style={{ background: '#111', border: '1px solid #222', borderRadius: 8, padding: '12px 16px', color: '#fff', fontSize: 14 }} />
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                          <input placeholder="Estimated Amount" type="number" value={budgetItemFormData.estimatedAmount} onChange={e => setBudgetItemFormData(p => ({ ...p, estimatedAmount: e.target.value }))} style={{ background: '#111', border: '1px solid #222', borderRadius: 8, padding: '12px 16px', color: '#fff', fontSize: 14 }} />
+                          <input placeholder="Actual Amount" type="number" value={budgetItemFormData.actualAmount} onChange={e => setBudgetItemFormData(p => ({ ...p, actualAmount: e.target.value }))} style={{ background: '#111', border: '1px solid #222', borderRadius: 8, padding: '12px 16px', color: '#fff', fontSize: 14 }} />
+                        </div>
+                        <input type="date" placeholder="Due Date" value={budgetItemFormData.dueDate} onChange={e => setBudgetItemFormData(p => ({ ...p, dueDate: e.target.value }))} style={{ background: '#111', border: '1px solid #222', borderRadius: 8, padding: '12px 16px', color: '#fff', fontSize: 14 }} />
+                        <label style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#888' }}>
+                          <input type="checkbox" checked={budgetItemFormData.isPaid} onChange={e => setBudgetItemFormData(p => ({ ...p, isPaid: e.target.checked }))} /> Mark as Paid
+                        </label>
+                        <div style={{ display: 'flex', gap: 12 }}>
+                          <button onClick={() => setShowBudgetItemForm(false)} style={{ flex: 1, padding: '12px', background: '#1a1a1a', border: 'none', borderRadius: 8, color: '#fff', cursor: 'pointer' }}>Cancel</button>
+                          <button onClick={addBudgetItem} style={{ flex: 1, padding: '12px', background: '#22c55e', border: 'none', borderRadius: 8, color: '#fff', fontWeight: 600, cursor: 'pointer' }}>Add Item</button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </>
+            ) : (
+              <div style={{ padding: 60, textAlign: 'center' }}>
+                <div style={{ fontSize: 48, marginBottom: 16 }}>💰</div>
+                <h2 style={{ fontSize: 20, marginBottom: 8 }}>Select an Event</h2>
+                <p style={{ color: '#666', marginBottom: 24 }}>Choose an event to manage its budget</p>
+                <button onClick={() => navigateTo('events')} style={{ background: '#d4af37', color: '#000', border: 'none', padding: '12px 24px', borderRadius: 8, fontWeight: 600, cursor: 'pointer' }}>View Events</button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ========== VENDORS VIEW ========== */}
+        {activeView === 'vendors' && (
+          <div className="page-content" style={{ padding: 32, animation: 'fadeIn 0.3s ease' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+              <h2 style={{ fontSize: 20, fontWeight: 600, margin: 0 }}>Vendors & Providers</h2>
+              <button onClick={() => setShowVendorForm(true)} className="btn-hover" style={{ background: '#3b82f6', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: 8, fontWeight: 600, cursor: 'pointer' }}>+ Add Vendor</button>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 16 }}>
+              {vendors.map(vendor => (
+                <div key={vendor.id} style={{ background: '#0a0a0a', border: `1px solid ${vendor.isPreferred ? '#d4af3740' : '#1a1a1a'}`, borderRadius: 12, padding: 20 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <h3 style={{ fontSize: 16, fontWeight: 600, margin: 0 }}>{vendor.name}</h3>
+                        {vendor.isPreferred && <span style={{ fontSize: 10, padding: '2px 6px', background: '#d4af3720', color: '#d4af37', borderRadius: 4 }}>PREFERRED</span>}
+                      </div>
+                      <div style={{ fontSize: 13, color: '#d4af37', marginTop: 2 }}>{vendor.category || 'General'}</div>
+                    </div>
+                    <div style={{ display: 'flex', gap: 2 }}>
+                      {[1, 2, 3, 4, 5].map(star => (
+                        <span key={star} style={{ color: star <= vendor.rating ? '#d4af37' : '#333' }}>★</span>
+                      ))}
+                    </div>
+                  </div>
+                  <div style={{ fontSize: 13, color: '#888', marginBottom: 8 }}>
+                    {vendor.contactName && <div>👤 {vendor.contactName}</div>}
+                    {vendor.email && <div>✉ {vendor.email}</div>}
+                    {vendor.phone && <div>📱 {vendor.phone}</div>}
+                    {vendor.city && <div>📍 {vendor.city}</div>}
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 12, paddingTop: 12, borderTop: '1px solid #1a1a1a' }}>
+                    <span style={{ fontSize: 12, color: '#666' }}>{vendor.eventsCount} events</span>
+                    <span style={{ fontSize: 12, color: '#22c55e' }}>${vendor.totalSpent.toLocaleString()} total</span>
+                  </div>
+                </div>
+              ))}
+              {vendors.length === 0 && (
+                <div style={{ gridColumn: '1 / -1', padding: 60, textAlign: 'center', background: '#0a0a0a', borderRadius: 12, border: '1px solid #1a1a1a' }}>
+                  <div style={{ fontSize: 48, marginBottom: 12 }}>🏢</div>
+                  <div style={{ color: '#666', fontSize: 15 }}>No vendors yet</div>
+                  <div style={{ color: '#444', fontSize: 13, marginTop: 8 }}>Add your first vendor to track partnerships</div>
+                </div>
+              )}
+            </div>
+
+            {/* Add Vendor Modal */}
+            {showVendorForm && (
+              <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.9)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200, padding: 16 }} onClick={() => setShowVendorForm(false)}>
+                <div style={{ background: '#0a0a0a', border: '1px solid #1a1a1a', borderRadius: 16, padding: 32, width: '100%', maxWidth: 450, animation: 'slideUp 0.3s ease' }} onClick={e => e.stopPropagation()}>
+                  <h2 style={{ fontSize: 20, fontWeight: 600, margin: '0 0 24px' }}>Add Vendor</h2>
+                  <div style={{ display: 'grid', gap: 16 }}>
+                    <input placeholder="Vendor Name *" value={vendorFormData.name} onChange={e => setVendorFormData(p => ({ ...p, name: e.target.value }))} style={{ background: '#111', border: '1px solid #222', borderRadius: 8, padding: '12px 16px', color: '#fff', fontSize: 14 }} />
+                    <select value={vendorFormData.category} onChange={e => setVendorFormData(p => ({ ...p, category: e.target.value }))} style={{ background: '#111', border: '1px solid #222', borderRadius: 8, padding: '12px 16px', color: '#fff', fontSize: 14 }}>
+                      <option value="">Select Category</option>
+                      <option value="Venue">Venue</option>
+                      <option value="Catering">Catering</option>
+                      <option value="DJ/Entertainment">DJ/Entertainment</option>
+                      <option value="Decor">Decor</option>
+                      <option value="Photography">Photography</option>
+                      <option value="Security">Security</option>
+                      <option value="Staffing">Staffing</option>
+                      <option value="Marketing">Marketing</option>
+                      <option value="Other">Other</option>
+                    </select>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                      <input placeholder="Contact Name" value={vendorFormData.contactName} onChange={e => setVendorFormData(p => ({ ...p, contactName: e.target.value }))} style={{ background: '#111', border: '1px solid #222', borderRadius: 8, padding: '12px 16px', color: '#fff', fontSize: 14 }} />
+                      <input placeholder="City" value={vendorFormData.city} onChange={e => setVendorFormData(p => ({ ...p, city: e.target.value }))} style={{ background: '#111', border: '1px solid #222', borderRadius: 8, padding: '12px 16px', color: '#fff', fontSize: 14 }} />
+                    </div>
+                    <input placeholder="Email" type="email" value={vendorFormData.email} onChange={e => setVendorFormData(p => ({ ...p, email: e.target.value }))} style={{ background: '#111', border: '1px solid #222', borderRadius: 8, padding: '12px 16px', color: '#fff', fontSize: 14 }} />
+                    <input placeholder="Phone" value={vendorFormData.phone} onChange={e => setVendorFormData(p => ({ ...p, phone: e.target.value }))} style={{ background: '#111', border: '1px solid #222', borderRadius: 8, padding: '12px 16px', color: '#fff', fontSize: 14 }} />
+                    <input placeholder="Website" value={vendorFormData.website} onChange={e => setVendorFormData(p => ({ ...p, website: e.target.value }))} style={{ background: '#111', border: '1px solid #222', borderRadius: 8, padding: '12px 16px', color: '#fff', fontSize: 14 }} />
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#888' }}>
+                      <input type="checkbox" checked={vendorFormData.isPreferred} onChange={e => setVendorFormData(p => ({ ...p, isPreferred: e.target.checked }))} /> Mark as Preferred Vendor
+                    </label>
+                    <div style={{ display: 'flex', gap: 12 }}>
+                      <button onClick={() => setShowVendorForm(false)} style={{ flex: 1, padding: '12px', background: '#1a1a1a', border: 'none', borderRadius: 8, color: '#fff', cursor: 'pointer' }}>Cancel</button>
+                      <button onClick={createVendor} style={{ flex: 1, padding: '12px', background: '#3b82f6', border: 'none', borderRadius: 8, color: '#fff', fontWeight: 600, cursor: 'pointer' }}>Add Vendor</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </main>
