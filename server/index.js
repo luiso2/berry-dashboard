@@ -44,9 +44,17 @@ const initDatabase = async () => {
         password_hash VARCHAR(255) NOT NULL,
         name VARCHAR(255),
         company VARCHAR(255),
+        reset_token VARCHAR(255),
+        reset_token_expires TIMESTAMP,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
+    `);
+
+    // Add reset token columns if they don't exist (for existing databases)
+    await client.query(`
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token VARCHAR(255);
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token_expires TIMESTAMP;
     `);
 
     // Create oauth_tokens table
@@ -1026,6 +1034,92 @@ app.post('/oauth/token', async (req, res) => {
   } catch (error) {
     console.error('OAuth token error:', error);
     res.status(500).json({ error: 'server_error' });
+  }
+});
+
+// OAuth: Forgot Password endpoint
+app.post('/oauth/forgot-password', async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      return res.status(400).json({ error: 'Email is required' });
+    }
+
+    // Check if user exists
+    const userResult = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
+
+    if (userResult.rows.length === 0) {
+      // Don't reveal if email exists or not for security
+      return res.json({ success: true, message: 'If an account exists with this email, a reset link will be sent.' });
+    }
+
+    const user = userResult.rows[0];
+
+    // Generate reset token
+    const resetToken = require('crypto').randomBytes(32).toString('hex');
+    const resetExpires = new Date(Date.now() + 3600000); // 1 hour from now
+
+    // Store reset token in database
+    await pool.query(
+      'UPDATE users SET reset_token = $1, reset_token_expires = $2 WHERE id = $3',
+      [resetToken, resetExpires, user.id]
+    );
+
+    // In production, send email with reset link
+    // For now, log the token for development
+    console.log(`Password reset requested for ${email}. Token: ${resetToken}`);
+
+    // TODO: Send email with reset link
+    // const resetLink = `${process.env.FRONTEND_URL}/reset-password?token=${resetToken}`;
+    // await sendEmail(email, 'Password Reset', `Click here to reset: ${resetLink}`);
+
+    res.json({ success: true, message: 'If an account exists with this email, a reset link will be sent.' });
+  } catch (error) {
+    console.error('Forgot password error:', error);
+    res.status(500).json({ error: 'Failed to process request' });
+  }
+});
+
+// OAuth: Reset Password endpoint
+app.post('/oauth/reset-password', async (req, res) => {
+  try {
+    const { token, password } = req.body;
+
+    if (!token || !password) {
+      return res.status(400).json({ error: 'Token and password are required' });
+    }
+
+    if (password.length < 8) {
+      return res.status(400).json({ error: 'Password must be at least 8 characters' });
+    }
+
+    // Find user with valid reset token
+    const userResult = await pool.query(
+      'SELECT * FROM users WHERE reset_token = $1 AND reset_token_expires > NOW()',
+      [token]
+    );
+
+    if (userResult.rows.length === 0) {
+      return res.status(400).json({ error: 'Invalid or expired reset token' });
+    }
+
+    const user = userResult.rows[0];
+
+    // Hash new password
+    const bcrypt = require('bcryptjs');
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    // Update password and clear reset token
+    await pool.query(
+      'UPDATE users SET password_hash = $1, reset_token = NULL, reset_token_expires = NULL WHERE id = $2',
+      [hashedPassword, user.id]
+    );
+
+    res.json({ success: true, message: 'Password has been reset successfully' });
+  } catch (error) {
+    console.error('Reset password error:', error);
+    res.status(500).json({ error: 'Failed to reset password' });
   }
 });
 
