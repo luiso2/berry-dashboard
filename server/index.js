@@ -3551,9 +3551,21 @@ app.post('/api/v1/gpt/sponsors', async (req, res) => {
 // ============================================
 // UNIFIED GPT SESSION ENDPOINT
 // Single endpoint that routes to all GPT handlers
+// Accepts flat structure: { endpoint, action, name, eventDate, ... }
 // ============================================
 app.post('/api/v1/gpt/session', async (req, res) => {
-  const { endpoint, action, ...rest } = req.body;
+  const {
+    endpoint,
+    action,
+    // ID fields
+    eventId, guestId, staffId, vendorId, modelId, sponsorId, reservationId, ticketId, itemId, assignmentId,
+    // Filter fields
+    filters,
+    // Data wrapper (optional - for backwards compatibility)
+    data,
+    // All other fields are treated as data
+    ...restFields
+  } = req.body;
 
   if (!endpoint) {
     return res.status(400).json({
@@ -3591,9 +3603,21 @@ app.post('/api/v1/gpt/session', async (req, res) => {
     return app._router.handle(req, res, () => {});
   }
 
-  // For other endpoints, forward the request with action
+  // Build the data object - merge explicit data with flat fields
+  const mergedData = { ...(data || {}), ...restFields };
+
+  // Build forwarded body with proper structure
   req.url = targetPath;
-  req.body = { action, ...rest };
+  req.body = {
+    action,
+    eventId, guestId, staffId, vendorId, modelId, sponsorId, reservationId, ticketId, itemId, assignmentId,
+    filters,
+    data: Object.keys(mergedData).length > 0 ? mergedData : undefined
+  };
+
+  // Clean undefined values
+  Object.keys(req.body).forEach(key => req.body[key] === undefined && delete req.body[key]);
+
   return app._router.handle(req, res, () => {});
 });
 
