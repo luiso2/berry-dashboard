@@ -36,7 +36,7 @@ const categoryToStatus = (category: GuestCategory): string => {
 
 type GuestCategory = 'pending' | 'A' | 'B' | 'C' | 'rejected';
 type GuestStatus = 'pending' | 'approved' | 'declined' | 'rejected';
-type ViewType = 'overview' | 'guests' | 'emails' | 'vip' | 'priority' | 'standard' | 'analytics' | 'activity' | 'automation' | 'checkin' | 'models' | 'tables' | 'tickets' | 'sponsors' | 'events' | 'budget' | 'vendors' | 'staff' | 'client-portal';
+type ViewType = 'overview' | 'guests' | 'emails' | 'vip' | 'priority' | 'standard' | 'analytics' | 'activity' | 'automation' | 'checkin' | 'models' | 'tables' | 'tickets' | 'sponsors' | 'events' | 'budget' | 'vendors' | 'staff' | 'client-portal' | 'monitoring';
 type ThemeMode = 'dark' | 'light';
 
 interface Purchase {
@@ -330,6 +330,37 @@ interface ClientAccess {
   isActive: boolean;
   createdAt: string;
   portalUrl?: string;
+}
+
+interface HealthStatus {
+  status: 'healthy' | 'degraded' | 'critical' | 'unknown';
+  timestamp: string;
+  uptime: number;
+  responseTime: number;
+  components: {
+    database: { status: string; responseTime?: number; message?: string; error?: string };
+    tables: { status: string; total: number; existing: number; missing: string[] };
+    data: { status: string; counts: Record<string, number | string> };
+    memory: { status: string; heapUsed: string; heapTotal: string; percentage: number };
+    email: { status: string; from: string; adminEmail: string };
+    environment: { status: string; nodeEnv: string; port: number; missingVariables: string[] };
+  };
+  issues: string[];
+}
+
+interface ServerStatus {
+  status: string;
+  lastCheck: string | null;
+  server: {
+    nodeVersion: string;
+    platform: string;
+    pid: number;
+    uptime: { days: number; hours: number; minutes: number; seconds: number };
+    uptimeSeconds: number;
+  };
+  memory: { heapUsed: string; heapTotal: string; external: string; rss: string };
+  database: { totalConnections: number; idleConnections: number; waitingClients: number };
+  config: { port: number; environment: string; emailConfigured: boolean; databaseConfigured: boolean };
 }
 
 // Instagram-based AI Score Calculator
@@ -738,6 +769,12 @@ function App() {
     clientName: '', clientEmail: '', expiresInDays: '30',
     viewBudget: true, viewTimeline: true, viewStaff: false, viewVendors: false
   });
+
+  // Monitoring state
+  const [healthStatus, setHealthStatus] = useState<HealthStatus | null>(null);
+  const [serverStatus, setServerStatus] = useState<ServerStatus | null>(null);
+  const [isLoadingHealth, setIsLoadingHealth] = useState(false);
+  const [lastHealthCheck, setLastHealthCheck] = useState<string | null>(null);
 
   // Collapsible menu state
   const [expandedMenus, setExpandedMenus] = useState<Set<string>>(new Set(['main', 'intelligence']));
@@ -1266,6 +1303,63 @@ function App() {
     }
   }, [selectedEvent, fetchClientAccesses]);
 
+  // Fetch Health Status
+  const fetchHealthStatus = useCallback(async () => {
+    setIsLoadingHealth(true);
+    try {
+      const [healthRes, statusRes] = await Promise.all([
+        fetch(`${API_URL}/health/deep`),
+        fetch(`${API_URL}/health/status`)
+      ]);
+
+      if (healthRes.ok) {
+        const healthData = await healthRes.json();
+        setHealthStatus(healthData);
+        setLastHealthCheck(new Date().toISOString());
+      }
+
+      if (statusRes.ok) {
+        const statusData = await statusRes.json();
+        setServerStatus(statusData);
+      }
+    } catch (error) {
+      console.error('Error fetching health status:', error);
+      setHealthStatus({
+        status: 'critical',
+        timestamp: new Date().toISOString(),
+        uptime: 0,
+        responseTime: 0,
+        components: {
+          database: { status: 'error', error: 'Unable to connect' },
+          tables: { status: 'unknown', total: 0, existing: 0, missing: [] },
+          data: { status: 'unknown', counts: {} },
+          memory: { status: 'unknown', heapUsed: '0 MB', heapTotal: '0 MB', percentage: 0 },
+          email: { status: 'unknown', from: '', adminEmail: '' },
+          environment: { status: 'unknown', nodeEnv: '', port: 0, missingVariables: [] }
+        },
+        issues: ['Backend server is unreachable']
+      });
+    } finally {
+      setIsLoadingHealth(false);
+    }
+  }, []);
+
+  // Send Test Alert
+  const sendTestAlert = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_URL}/health/test-alert`, { method: 'POST' });
+      const data = await res.json();
+      if (data.success) {
+        addToast('Test alert sent to admin email!', 'success');
+      } else {
+        addToast('Failed to send test alert', 'error');
+      }
+    } catch (error) {
+      console.error('Error sending test alert:', error);
+      addToast('Failed to send test alert', 'error');
+    }
+  }, []);
+
   // Flyer ref for html-to-image
   const flyerRef = useRef<HTMLDivElement>(null);
 
@@ -1299,7 +1393,8 @@ function App() {
     if (activeView === 'vendors') fetchVendors();
     if (activeView === 'staff') fetchStaff();
     if (activeView === 'budget' && selectedEvent) fetchBudget(selectedEvent.id);
-  }, [activeView, fetchModels, fetchTables, fetchTickets, fetchSponsors, fetchEvents, fetchVendors, fetchStaff, fetchBudget, selectedEvent]);
+    if (activeView === 'monitoring') fetchHealthStatus();
+  }, [activeView, fetchModels, fetchTables, fetchTickets, fetchSponsors, fetchEvents, fetchVendors, fetchStaff, fetchBudget, fetchHealthStatus, selectedEvent]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -1915,6 +2010,11 @@ function App() {
             <NavItem label="Budget" active={activeView === 'budget'} icon="💰" onClick={() => navigateTo('budget')} />
             <NavItem label="Vendors" active={activeView === 'vendors'} icon="🏢" count={vendors.length} onClick={() => navigateTo('vendors')} />
             <NavItem label="Staff" active={activeView === 'staff'} icon="👥" count={staffStats.total} onClick={() => navigateTo('staff')} />
+          </CollapsibleMenu>
+
+          {/* System Menu */}
+          <CollapsibleMenu title="SYSTEM" expanded={expandedMenus.has('system')} onToggle={() => toggleMenu('system')}>
+            <NavItem label="Monitoring" active={activeView === 'monitoring'} icon="📊" onClick={() => navigateTo('monitoring')} />
           </CollapsibleMenu>
         </nav>
 
@@ -4327,6 +4427,243 @@ function App() {
                 </div>
               </div>
             )}
+          </div>
+        )}
+
+        {/* ============================================ */}
+        {/* MONITORING VIEW */}
+        {/* ============================================ */}
+        {activeView === 'monitoring' && (
+          <div className="page-content" style={{ padding: 32, animation: 'fadeIn 0.3s ease' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+              <div>
+                <h2 style={{ fontSize: 20, fontWeight: 600, margin: 0 }}>System Monitoring</h2>
+                <p style={{ fontSize: 13, color: '#666', margin: '4px 0 0' }}>
+                  {lastHealthCheck ? `Last check: ${new Date(lastHealthCheck).toLocaleTimeString()}` : 'No health check yet'}
+                </p>
+              </div>
+              <div style={{ display: 'flex', gap: 12 }}>
+                <button
+                  onClick={fetchHealthStatus}
+                  disabled={isLoadingHealth}
+                  className="btn-hover"
+                  style={{ background: '#3b82f6', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: 8, fontWeight: 600, cursor: 'pointer', opacity: isLoadingHealth ? 0.6 : 1 }}
+                >
+                  {isLoadingHealth ? 'Checking...' : 'Refresh Status'}
+                </button>
+                <button
+                  onClick={sendTestAlert}
+                  className="btn-hover"
+                  style={{ background: '#f59e0b', color: '#000', border: 'none', padding: '10px 20px', borderRadius: 8, fontWeight: 600, cursor: 'pointer' }}
+                >
+                  Send Test Alert
+                </button>
+              </div>
+            </div>
+
+            {/* Overall Status */}
+            <div style={{
+              background: healthStatus?.status === 'healthy' ? '#22c55e20' : healthStatus?.status === 'degraded' ? '#f59e0b20' : '#ef444420',
+              border: `1px solid ${healthStatus?.status === 'healthy' ? '#22c55e40' : healthStatus?.status === 'degraded' ? '#f59e0b40' : '#ef444440'}`,
+              borderRadius: 12,
+              padding: 24,
+              marginBottom: 24,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 16
+            }}>
+              <div style={{
+                fontSize: 48,
+                width: 80, height: 80,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                background: '#0a0a0a',
+                borderRadius: 12
+              }}>
+                {healthStatus?.status === 'healthy' ? '✅' : healthStatus?.status === 'degraded' ? '⚠️' : '❌'}
+              </div>
+              <div>
+                <div style={{ fontSize: 24, fontWeight: 700, textTransform: 'capitalize', color: healthStatus?.status === 'healthy' ? '#22c55e' : healthStatus?.status === 'degraded' ? '#f59e0b' : '#ef4444' }}>
+                  {healthStatus?.status || 'Unknown'}
+                </div>
+                <div style={{ fontSize: 14, color: '#888', marginTop: 4 }}>
+                  {healthStatus ? `Response time: ${healthStatus.responseTime}ms • Uptime: ${Math.floor(healthStatus.uptime / 60)} minutes` : 'Click "Refresh Status" to check system health'}
+                </div>
+              </div>
+            </div>
+
+            {/* Issues Alert */}
+            {healthStatus?.issues && healthStatus.issues.length > 0 && (
+              <div style={{ background: '#ef444420', border: '1px solid #ef444440', borderRadius: 12, padding: 20, marginBottom: 24 }}>
+                <h3 style={{ fontSize: 16, fontWeight: 600, color: '#ef4444', margin: '0 0 12px', display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span>⚠️</span> Issues Detected ({healthStatus.issues.length})
+                </h3>
+                <ul style={{ margin: 0, paddingLeft: 20, color: '#fca5a5' }}>
+                  {healthStatus.issues.map((issue, idx) => (
+                    <li key={idx} style={{ marginBottom: 4 }}>{issue}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {/* Component Status Grid */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, marginBottom: 24 }}>
+              {/* Database */}
+              <div style={{ background: '#0a0a0a', border: '1px solid #1a1a1a', borderRadius: 12, padding: 20 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                  <span style={{ fontSize: 14, color: '#666' }}>Database</span>
+                  <span style={{
+                    fontSize: 11, padding: '3px 8px', borderRadius: 4,
+                    background: healthStatus?.components?.database?.status === 'healthy' ? '#22c55e20' : '#ef444420',
+                    color: healthStatus?.components?.database?.status === 'healthy' ? '#22c55e' : '#ef4444'
+                  }}>
+                    {healthStatus?.components?.database?.status?.toUpperCase() || 'UNKNOWN'}
+                  </span>
+                </div>
+                <div style={{ fontSize: 24, fontWeight: 700, marginBottom: 4 }}>
+                  {healthStatus?.components?.database?.responseTime ? `${healthStatus.components.database.responseTime}ms` : '--'}
+                </div>
+                <div style={{ fontSize: 12, color: '#666' }}>
+                  {healthStatus?.components?.database?.message || healthStatus?.components?.database?.error || 'No data'}
+                </div>
+              </div>
+
+              {/* Tables */}
+              <div style={{ background: '#0a0a0a', border: '1px solid #1a1a1a', borderRadius: 12, padding: 20 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                  <span style={{ fontSize: 14, color: '#666' }}>Tables</span>
+                  <span style={{
+                    fontSize: 11, padding: '3px 8px', borderRadius: 4,
+                    background: healthStatus?.components?.tables?.status === 'healthy' ? '#22c55e20' : '#f59e0b20',
+                    color: healthStatus?.components?.tables?.status === 'healthy' ? '#22c55e' : '#f59e0b'
+                  }}>
+                    {healthStatus?.components?.tables?.status?.toUpperCase() || 'UNKNOWN'}
+                  </span>
+                </div>
+                <div style={{ fontSize: 24, fontWeight: 700, marginBottom: 4 }}>
+                  {healthStatus?.components?.tables?.existing || 0} / {healthStatus?.components?.tables?.total || 0}
+                </div>
+                <div style={{ fontSize: 12, color: '#666' }}>
+                  {healthStatus?.components?.tables?.missing?.length ? `Missing: ${healthStatus.components.tables.missing.join(', ')}` : 'All tables present'}
+                </div>
+              </div>
+
+              {/* Memory */}
+              <div style={{ background: '#0a0a0a', border: '1px solid #1a1a1a', borderRadius: 12, padding: 20 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                  <span style={{ fontSize: 14, color: '#666' }}>Memory</span>
+                  <span style={{
+                    fontSize: 11, padding: '3px 8px', borderRadius: 4,
+                    background: healthStatus?.components?.memory?.status === 'healthy' ? '#22c55e20' : '#f59e0b20',
+                    color: healthStatus?.components?.memory?.status === 'healthy' ? '#22c55e' : '#f59e0b'
+                  }}>
+                    {healthStatus?.components?.memory?.percentage || 0}%
+                  </span>
+                </div>
+                <div style={{ fontSize: 24, fontWeight: 700, marginBottom: 4 }}>
+                  {healthStatus?.components?.memory?.heapUsed || '--'}
+                </div>
+                <div style={{ fontSize: 12, color: '#666' }}>
+                  of {healthStatus?.components?.memory?.heapTotal || '--'} total
+                </div>
+              </div>
+            </div>
+
+            {/* Server Info & Data Counts */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+              {/* Server Info */}
+              <div style={{ background: '#0a0a0a', border: '1px solid #1a1a1a', borderRadius: 12, padding: 20 }}>
+                <h3 style={{ fontSize: 14, color: '#888', marginBottom: 16, textTransform: 'uppercase', letterSpacing: 1 }}>Server Info</h3>
+                {serverStatus ? (
+                  <div style={{ display: 'grid', gap: 12, fontSize: 14 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: '#666' }}>Node Version</span>
+                      <span>{serverStatus.server?.nodeVersion || '--'}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: '#666' }}>Platform</span>
+                      <span>{serverStatus.server?.platform || '--'}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: '#666' }}>Uptime</span>
+                      <span>
+                        {serverStatus.server?.uptime ?
+                          `${serverStatus.server.uptime.days}d ${serverStatus.server.uptime.hours}h ${serverStatus.server.uptime.minutes}m` :
+                          '--'
+                        }
+                      </span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: '#666' }}>Environment</span>
+                      <span style={{ textTransform: 'capitalize' }}>{serverStatus.config?.environment || '--'}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: '#666' }}>Port</span>
+                      <span>{serverStatus.config?.port || '--'}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: '#666' }}>Email Service</span>
+                      <span style={{ color: serverStatus.config?.emailConfigured ? '#22c55e' : '#ef4444' }}>
+                        {serverStatus.config?.emailConfigured ? 'Configured' : 'Not Configured'}
+                      </span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: '#666' }}>DB Connections</span>
+                      <span>{serverStatus.database?.totalConnections || 0} total, {serverStatus.database?.idleConnections || 0} idle</span>
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ color: '#666', textAlign: 'center', padding: 20 }}>Click "Refresh Status" to load server info</div>
+                )}
+              </div>
+
+              {/* Data Counts */}
+              <div style={{ background: '#0a0a0a', border: '1px solid #1a1a1a', borderRadius: 12, padding: 20 }}>
+                <h3 style={{ fontSize: 14, color: '#888', marginBottom: 16, textTransform: 'uppercase', letterSpacing: 1 }}>Data Counts</h3>
+                {healthStatus?.components?.data?.counts ? (
+                  <div style={{ display: 'grid', gap: 12, fontSize: 14 }}>
+                    {Object.entries(healthStatus.components.data.counts).map(([table, count]) => (
+                      <div key={table} style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span style={{ color: '#666', textTransform: 'capitalize' }}>{table}</span>
+                        <span style={{ fontWeight: 600 }}>{count === 'error' ? <span style={{ color: '#ef4444' }}>Error</span> : count}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div style={{ color: '#666', textAlign: 'center', padding: 20 }}>No data available</div>
+                )}
+              </div>
+            </div>
+
+            {/* API Endpoints Info */}
+            <div style={{ marginTop: 24, background: '#0a0a0a', border: '1px solid #1a1a1a', borderRadius: 12, padding: 20 }}>
+              <h3 style={{ fontSize: 14, color: '#888', marginBottom: 16, textTransform: 'uppercase', letterSpacing: 1 }}>Health Endpoints</h3>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 12, fontSize: 13 }}>
+                <div style={{ padding: 12, background: '#111', borderRadius: 8 }}>
+                  <span style={{ color: '#22c55e' }}>GET</span> <span style={{ color: '#888' }}>/api/v1/health/deep</span>
+                  <div style={{ fontSize: 11, color: '#666', marginTop: 4 }}>Full health check with all components</div>
+                </div>
+                <div style={{ padding: 12, background: '#111', borderRadius: 8 }}>
+                  <span style={{ color: '#22c55e' }}>GET</span> <span style={{ color: '#888' }}>/api/v1/health/status</span>
+                  <div style={{ fontSize: 11, color: '#666', marginTop: 4 }}>Server status and configuration</div>
+                </div>
+                <div style={{ padding: 12, background: '#111', borderRadius: 8 }}>
+                  <span style={{ color: '#22c55e' }}>GET</span> <span style={{ color: '#888' }}>/api/v1/health/live</span>
+                  <div style={{ fontSize: 11, color: '#666', marginTop: 4 }}>Liveness probe for load balancers</div>
+                </div>
+                <div style={{ padding: 12, background: '#111', borderRadius: 8 }}>
+                  <span style={{ color: '#22c55e' }}>GET</span> <span style={{ color: '#888' }}>/api/v1/health/ready</span>
+                  <div style={{ fontSize: 11, color: '#666', marginTop: 4 }}>Readiness probe (DB connected)</div>
+                </div>
+                <div style={{ padding: 12, background: '#111', borderRadius: 8 }}>
+                  <span style={{ color: '#3b82f6' }}>POST</span> <span style={{ color: '#888' }}>/api/v1/health/test-alert</span>
+                  <div style={{ fontSize: 11, color: '#666', marginTop: 4 }}>Send test alert to admin email</div>
+                </div>
+                <div style={{ padding: 12, background: '#111', borderRadius: 8 }}>
+                  <span style={{ color: '#22c55e' }}>GET</span> <span style={{ color: '#888' }}>/api/v1/health/test-apis</span>
+                  <div style={{ fontSize: 11, color: '#666', marginTop: 4 }}>Test all API endpoints</div>
+                </div>
+              </div>
+            </div>
           </div>
         )}
       </main>

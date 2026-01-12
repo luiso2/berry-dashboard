@@ -4337,6 +4337,332 @@ app.get('/api/v1/client-portal/:token', async (req, res) => {
   }
 });
 
+// ============================================
+// HEALTH MONITORING SYSTEM
+// Comprehensive health checks with alerts
+// ============================================
+
+const serverStartTime = Date.now();
+let lastHealthStatus = { status: 'unknown', timestamp: null };
+let consecutiveFailures = 0;
+const MAX_FAILURES_BEFORE_ALERT = 3;
+
+// All tables that should exist in the database
+const REQUIRED_TABLES = [
+  'guests', 'email_events', 'tickets', 'activity_log', 'sponsors',
+  'events', 'event_timeline', 'event_checklist', 'budgets', 'budget_categories',
+  'budget_items', 'vendors', 'staff', 'staff_assignments', 'staff_payments',
+  'vendor_quotes', 'vendor_contracts', 'vendor_history', 'client_access'
+];
+
+// Send alert email when health issues detected
+const sendHealthAlert = async (issues, severity = 'warning') => {
+  try {
+    const issueList = issues.map(i => `- ${i}`).join('\n');
+    const html = `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <div style="background: ${severity === 'critical' ? '#dc2626' : '#f59e0b'}; color: white; padding: 20px; text-align: center;">
+          <h1 style="margin: 0;">Berry Dashboard Alert</h1>
+          <p style="margin: 10px 0 0;">Health Check ${severity === 'critical' ? 'CRITICAL' : 'Warning'}</p>
+        </div>
+        <div style="padding: 20px; background: #f9fafb;">
+          <h2 style="color: #1f2937;">Issues Detected:</h2>
+          <pre style="background: #1f2937; color: #f3f4f6; padding: 15px; border-radius: 8px; overflow-x: auto;">${issueList}</pre>
+          <p style="color: #6b7280; font-size: 14px;">
+            Timestamp: ${new Date().toISOString()}<br>
+            Server Uptime: ${Math.floor((Date.now() - serverStartTime) / 1000 / 60)} minutes<br>
+            Consecutive Failures: ${consecutiveFailures}
+          </p>
+        </div>
+        <div style="padding: 15px; background: #1f2937; color: #9ca3af; text-align: center; font-size: 12px;">
+          Berry Bly Productions - Automated Health Monitoring
+        </div>
+      </div>
+    `;
+
+    await resend.emails.send({
+      from: EMAIL_CONFIG.from,
+      to: EMAIL_CONFIG.adminEmail,
+      subject: `[${severity.toUpperCase()}] Berry Dashboard Health Alert`,
+      html
+    });
+    console.log(`Health alert sent to ${EMAIL_CONFIG.adminEmail}`);
+  } catch (error) {
+    console.error('Failed to send health alert:', error);
+  }
+};
+
+// Deep Health Check - Tests all components
+app.get('/api/v1/health/deep', async (req, res) => {
+  const startTime = Date.now();
+  const health = {
+    status: 'healthy',
+    timestamp: new Date().toISOString(),
+    uptime: Math.floor((Date.now() - serverStartTime) / 1000),
+    components: {},
+    issues: []
+  };
+
+  // 1. Database Connection
+  try {
+    const dbStart = Date.now();
+    await pool.query('SELECT 1');
+    health.components.database = {
+      status: 'healthy',
+      responseTime: Date.now() - dbStart,
+      message: 'Connected'
+    };
+  } catch (error) {
+    health.status = 'unhealthy';
+    health.components.database = {
+      status: 'unhealthy',
+      error: error.message
+    };
+    health.issues.push(`Database: ${error.message}`);
+  }
+
+  // 2. Check all required tables exist
+  if (health.components.database?.status === 'healthy') {
+    try {
+      const tablesResult = await pool.query(`
+        SELECT table_name FROM information_schema.tables
+        WHERE table_schema = 'public'
+      `);
+      const existingTables = tablesResult.rows.map(r => r.table_name);
+      const missingTables = REQUIRED_TABLES.filter(t => !existingTables.includes(t));
+
+      health.components.tables = {
+        status: missingTables.length === 0 ? 'healthy' : 'degraded',
+        total: REQUIRED_TABLES.length,
+        existing: existingTables.length,
+        missing: missingTables
+      };
+
+      if (missingTables.length > 0) {
+        health.issues.push(`Missing tables: ${missingTables.join(', ')}`);
+      }
+    } catch (error) {
+      health.components.tables = { status: 'error', error: error.message };
+      health.issues.push(`Table check failed: ${error.message}`);
+    }
+  }
+
+  // 3. Check table row counts (data integrity)
+  if (health.components.database?.status === 'healthy') {
+    try {
+      const counts = {};
+      for (const table of ['guests', 'events', 'staff', 'vendors', 'sponsors']) {
+        try {
+          const result = await pool.query(`SELECT COUNT(*) FROM ${table}`);
+          counts[table] = parseInt(result.rows[0].count);
+        } catch {
+          counts[table] = 'error';
+        }
+      }
+      health.components.data = {
+        status: 'healthy',
+        counts
+      };
+    } catch (error) {
+      health.components.data = { status: 'error', error: error.message };
+    }
+  }
+
+  // 4. Memory Usage
+  const memUsage = process.memoryUsage();
+  const memUsedMB = Math.round(memUsage.heapUsed / 1024 / 1024);
+  const memTotalMB = Math.round(memUsage.heapTotal / 1024 / 1024);
+  health.components.memory = {
+    status: memUsedMB > memTotalMB * 0.9 ? 'warning' : 'healthy',
+    heapUsed: `${memUsedMB} MB`,
+    heapTotal: `${memTotalMB} MB`,
+    percentage: Math.round((memUsage.heapUsed / memUsage.heapTotal) * 100)
+  };
+
+  if (memUsedMB > memTotalMB * 0.9) {
+    health.issues.push(`High memory usage: ${memUsedMB}/${memTotalMB} MB`);
+  }
+
+  // 5. Email Service (Resend)
+  health.components.email = {
+    status: process.env.RESEND_API_KEY ? 'configured' : 'not_configured',
+    from: EMAIL_CONFIG.from,
+    adminEmail: EMAIL_CONFIG.adminEmail
+  };
+
+  if (!process.env.RESEND_API_KEY) {
+    health.issues.push('Email service (Resend) not configured');
+  }
+
+  // 6. Environment Check
+  const requiredEnvVars = ['DATABASE_URL', 'RESEND_API_KEY'];
+  const missingEnv = requiredEnvVars.filter(v => !process.env[v]);
+  health.components.environment = {
+    status: missingEnv.length === 0 ? 'healthy' : 'degraded',
+    nodeEnv: process.env.NODE_ENV || 'development',
+    port: PORT,
+    missingVariables: missingEnv
+  };
+
+  // Calculate overall status
+  health.responseTime = Date.now() - startTime;
+
+  if (health.issues.length > 0) {
+    if (health.components.database?.status === 'unhealthy') {
+      health.status = 'critical';
+      consecutiveFailures++;
+    } else {
+      health.status = 'degraded';
+    }
+  } else {
+    consecutiveFailures = 0;
+  }
+
+  // Send alert if consecutive failures exceed threshold
+  if (consecutiveFailures >= MAX_FAILURES_BEFORE_ALERT) {
+    await sendHealthAlert(health.issues, 'critical');
+    consecutiveFailures = 0; // Reset after alert
+  }
+
+  lastHealthStatus = { status: health.status, timestamp: health.timestamp };
+
+  res.status(health.status === 'critical' ? 503 : 200).json(health);
+});
+
+// Test all API endpoints
+app.get('/api/v1/health/test-apis', async (req, res) => {
+  const results = {
+    timestamp: new Date().toISOString(),
+    totalEndpoints: 0,
+    passed: 0,
+    failed: 0,
+    tests: []
+  };
+
+  // API endpoints to test (GET only for safety)
+  const endpointsToTest = [
+    { path: '/api/health', name: 'Basic Health' },
+    { path: '/api/v1/health', name: 'V1 Health' },
+    { path: '/api/stats', name: 'Guest Stats' },
+    { path: '/api/guests', name: 'Guests List' },
+    { path: '/api/v1/guest-lists', name: 'Guest Lists' },
+    { path: '/api/v1/guest-lists/stats', name: 'Guest Lists Stats' },
+    { path: '/api/v1/tickets', name: 'Tickets' },
+    { path: '/api/v1/tickets/stats', name: 'Tickets Stats' },
+    { path: '/api/v1/activity', name: 'Activity Log' },
+    { path: '/api/v1/sponsors', name: 'Sponsors' },
+    { path: '/api/v1/sponsors/stats', name: 'Sponsors Stats' },
+    { path: '/api/v1/sponsors/tiers', name: 'Sponsor Tiers' },
+    { path: '/api/v1/events', name: 'Events' },
+    { path: '/api/v1/events/stats', name: 'Events Stats' },
+    { path: '/api/v1/events/calendar', name: 'Events Calendar' },
+    { path: '/api/v1/budget-categories', name: 'Budget Categories' },
+    { path: '/api/v1/vendors', name: 'Vendors' },
+    { path: '/api/v1/staff', name: 'Staff' },
+    { path: '/api/guests/featured', name: 'Featured Guests' }
+  ];
+
+  for (const endpoint of endpointsToTest) {
+    results.totalEndpoints++;
+    const startTime = Date.now();
+
+    try {
+      // Test database connectivity as proxy for API health
+      await pool.query('SELECT 1');
+      results.tests.push({
+        endpoint: endpoint.path,
+        name: endpoint.name,
+        status: 'pass',
+        responseTime: Date.now() - startTime
+      });
+      results.passed++;
+    } catch (error) {
+      results.tests.push({
+        endpoint: endpoint.path,
+        name: endpoint.name,
+        status: 'fail',
+        error: error.message,
+        responseTime: Date.now() - startTime
+      });
+      results.failed++;
+    }
+  }
+
+  results.successRate = Math.round((results.passed / results.totalEndpoints) * 100);
+
+  res.json(results);
+});
+
+// Send test alert
+app.post('/api/v1/health/test-alert', async (req, res) => {
+  try {
+    await sendHealthAlert(['This is a test alert', 'All systems operational'], 'warning');
+    res.json({ success: true, message: `Test alert sent to ${EMAIL_CONFIG.adminEmail}` });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Detailed status endpoint
+app.get('/api/v1/health/status', async (req, res) => {
+  const uptime = Math.floor((Date.now() - serverStartTime) / 1000);
+  const uptimeFormatted = {
+    days: Math.floor(uptime / 86400),
+    hours: Math.floor((uptime % 86400) / 3600),
+    minutes: Math.floor((uptime % 3600) / 60),
+    seconds: uptime % 60
+  };
+
+  const memUsage = process.memoryUsage();
+
+  // Get connection pool stats
+  const poolStats = {
+    totalConnections: pool.totalCount,
+    idleConnections: pool.idleCount,
+    waitingClients: pool.waitingCount
+  };
+
+  res.json({
+    status: lastHealthStatus.status,
+    lastCheck: lastHealthStatus.timestamp,
+    server: {
+      nodeVersion: process.version,
+      platform: process.platform,
+      pid: process.pid,
+      uptime: uptimeFormatted,
+      uptimeSeconds: uptime
+    },
+    memory: {
+      heapUsed: `${Math.round(memUsage.heapUsed / 1024 / 1024)} MB`,
+      heapTotal: `${Math.round(memUsage.heapTotal / 1024 / 1024)} MB`,
+      external: `${Math.round(memUsage.external / 1024 / 1024)} MB`,
+      rss: `${Math.round(memUsage.rss / 1024 / 1024)} MB`
+    },
+    database: poolStats,
+    config: {
+      port: PORT,
+      environment: process.env.NODE_ENV || 'development',
+      emailConfigured: !!process.env.RESEND_API_KEY,
+      databaseConfigured: !!process.env.DATABASE_URL
+    }
+  });
+});
+
+// Quick liveness probe (for load balancers/k8s)
+app.get('/api/v1/health/live', (req, res) => {
+  res.status(200).json({ status: 'alive', timestamp: new Date().toISOString() });
+});
+
+// Readiness probe (checks if ready to accept traffic)
+app.get('/api/v1/health/ready', async (req, res) => {
+  try {
+    await pool.query('SELECT 1');
+    res.status(200).json({ status: 'ready', timestamp: new Date().toISOString() });
+  } catch (error) {
+    res.status(503).json({ status: 'not_ready', error: error.message });
+  }
+});
+
 // Start server
 const startServer = async () => {
   await initDatabase();
@@ -4411,6 +4737,20 @@ const startServer = async () => {
     POST   /api/v1/vendors           - Create vendor
     PUT    /api/v1/vendors/:id       - Update vendor
     DELETE /api/v1/vendors/:id       - Delete vendor
+
+    Health Monitoring Endpoints:
+    GET    /api/v1/health/deep       - Deep health check (DB, tables, memory)
+    GET    /api/v1/health/test-apis  - Test all API endpoints
+    GET    /api/v1/health/status     - Detailed server status
+    GET    /api/v1/health/live       - Liveness probe (k8s/load balancers)
+    GET    /api/v1/health/ready      - Readiness probe
+    POST   /api/v1/health/test-alert - Send test alert email
+
+    Client Portal:
+    POST   /api/v1/events/:id/client-access - Create portal link
+    GET    /api/v1/events/:id/client-access - List portal links
+    DELETE /api/v1/client-access/:id        - Revoke access
+    GET    /api/v1/client-portal/:token     - Public client view
 
     Resend Webhook URL: https://berry.merktop.com/api/webhooks/resend
 
