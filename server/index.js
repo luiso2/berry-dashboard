@@ -3372,6 +3372,19 @@ app.delete('/api/v1/budget/items/:id', async (req, res) => {
 // GET /api/v1/vendors - Get all vendors
 app.get('/api/v1/vendors', async (req, res) => {
   try {
+    // Check if vendors table exists
+    const tableCheck = await pool.query(`
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables
+        WHERE table_name = 'vendors'
+      )
+    `);
+
+    if (!tableCheck.rows[0].exists) {
+      // Return empty array if table doesn't exist
+      return res.json({ vendors: [], total: 0 });
+    }
+
     const { category, preferred } = req.query;
     let query = 'SELECT * FROM vendors';
     const conditions = [];
@@ -3419,6 +3432,18 @@ app.get('/api/v1/vendors/:id', async (req, res) => {
 // POST /api/v1/vendors - Create vendor
 app.post('/api/v1/vendors', async (req, res) => {
   try {
+    // Check if vendors table exists
+    const tableCheck = await pool.query(`
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables
+        WHERE table_name = 'vendors'
+      )
+    `);
+
+    if (!tableCheck.rows[0].exists) {
+      return res.status(503).json({ error: 'Vendors feature not available - table does not exist' });
+    }
+
     const { name, category, contactName, email, phone, website, address, city, rating, notes, isPreferred } = req.body;
 
     if (!name) {
