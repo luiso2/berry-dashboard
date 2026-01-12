@@ -26,11 +26,11 @@ export default function ForgotPassword() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 flex">
+    <div className="min-h-screen bg-gradient-to-br black flex">
       {/* Left Side - Branding */}
       <div className="hidden lg:flex lg:w-1/2 flex-col justify-between p-12">
         <Link to="/" className="flex items-center gap-3">
-          <div className="w-12 h-12 bg-gradient-to-br from-purple-500 to-pink-500 rounded-xl flex items-center justify-center">
+          <div className="w-12 h-12 bg-gradient-to-br from-amber-500 to-yellow-600 rounded-xl flex items-center justify-center">
             <span className="text-white font-bold text-2xl">B</span>
           </div>
           <span className="text-white font-bold text-2xl">Berry Bly</span>
@@ -53,7 +53,7 @@ export default function ForgotPassword() {
               { icon: '3', text: 'Create a new secure password' },
             ].map((item, i) => (
               <div key={i} className="flex items-center gap-3 text-white/80">
-                <span className="w-8 h-8 bg-purple-500/20 rounded-full flex items-center justify-center text-purple-400 text-sm font-bold">
+                <span className="w-8 h-8 bg-amber-500/20 rounded-full flex items-center justify-center text-amber-400 text-sm font-bold">
                   {item.icon}
                 </span>
                 {item.text}
@@ -72,7 +72,7 @@ export default function ForgotPassword() {
         <div className="w-full max-w-md">
           {/* Mobile Logo */}
           <Link to="/" className="lg:hidden flex items-center gap-3 mb-8 justify-center">
-            <div className="w-10 h-10 bg-gradient-to-br from-purple-500 to-pink-500 rounded-xl flex items-center justify-center">
+            <div className="w-10 h-10 bg-gradient-to-br from-amber-500 to-yellow-600 rounded-xl flex items-center justify-center">
               <span className="text-white font-bold text-xl">B</span>
             </div>
             <span className="text-white font-bold text-xl">Berry Bly</span>
@@ -88,7 +88,7 @@ export default function ForgotPassword() {
                 </div>
                 <h2 className="text-2xl font-bold text-white mb-2">Check Your Email</h2>
                 <p className="text-white/60 mb-6">
-                  We've sent a password reset link to <span className="text-purple-400">{email}</span>
+                  We've sent a password reset link to <span className="text-amber-400">{email}</span>
                 </p>
                 <p className="text-white/40 text-sm mb-6">
                   Didn't receive the email? Check your spam folder or try again.
@@ -102,7 +102,7 @@ export default function ForgotPassword() {
                   </button>
                   <Link
                     to="/login"
-                    className="block w-full bg-gradient-to-r from-purple-500 to-pink-500 text-white py-3 rounded-xl font-semibold text-center hover:shadow-lg hover:shadow-purple-500/25 transition-all"
+                    className="block w-full bg-gradient-to-r from-amber-500 to-yellow-600 text-black py-3 rounded-xl font-semibold text-center hover:shadow-lg hover:shadow-amber-500/25 transition-all"
                   >
                     Back to Sign In
                   </Link>
@@ -111,8 +111,8 @@ export default function ForgotPassword() {
             ) : (
               <>
                 <div className="text-center mb-8">
-                  <div className="w-16 h-16 bg-purple-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
-                    <svg className="w-8 h-8 text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <div className="w-16 h-16 bg-amber-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <svg className="w-8 h-8 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
                     </svg>
                   </div>
@@ -135,7 +135,7 @@ export default function ForgotPassword() {
                       type="email"
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
-                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/30 focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 transition-all"
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/30 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 transition-all"
                       placeholder="you@company.com"
                       required
                     />
@@ -144,7 +144,7 @@ export default function ForgotPassword() {
                   <button
                     type="submit"
                     disabled={isLoading}
-                    className="w-full bg-gradient-to-r from-purple-500 to-pink-500 text-white py-3 rounded-xl font-semibold hover:shadow-lg hover:shadow-purple-500/25 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="w-full bg-gradient-to-r from-amber-500 to-yellow-600 text-black py-3 rounded-xl font-semibold hover:shadow-lg hover:shadow-amber-500/25 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {isLoading ? (
                       <span className="flex items-center justify-center gap-2">

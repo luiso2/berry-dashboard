@@ -13,15 +13,15 @@ export default function Landing() {
   }, [user, navigate]);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900">
+    <div className="min-h-screen bg-black">
       {/* Navigation */}
       <nav className="fixed top-0 w-full z-50 bg-black/20 backdrop-blur-xl border-b border-white/10">
         <div className="max-w-7xl mx-auto px-6 py-4 flex justify-between items-center">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-gradient-to-br from-purple-500 to-pink-500 rounded-xl flex items-center justify-center">
-              <span className="text-white font-bold text-xl">B</span>
+            <div className="w-10 h-10 bg-gradient-to-br from-amber-500 to-yellow-600 rounded-xl flex items-center justify-center">
+              <span className="text-black font-bold text-xl">B</span>
             </div>
-            <span className="text-white font-bold text-xl">Berry Bly</span>
+            <span className="text-amber-400 font-bold text-xl">Berry Bly</span>
           </div>
           <div className="flex items-center gap-4">
             <button
@@ -32,7 +32,7 @@ export default function Landing() {
             </button>
             <button
               onClick={() => navigate('/register')}
-              className="bg-gradient-to-r from-purple-500 to-pink-500 text-white px-6 py-2 rounded-full font-medium hover:shadow-lg hover:shadow-purple-500/25 transition-all"
+              className="bg-gradient-to-r from-amber-500 to-yellow-600 text-black px-6 py-2 rounded-full font-medium hover:shadow-lg hover:shadow-amber-500/25 transition-all"
             >
               Get Started
             </button>
@@ -43,14 +43,14 @@ export default function Landing() {
       {/* Hero Section */}
       <section className="pt-32 pb-20 px-6">
         <div className="max-w-7xl mx-auto text-center">
-          <div className="inline-flex items-center gap-2 bg-white/10 backdrop-blur-sm px-4 py-2 rounded-full mb-8">
-            <span className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></span>
-            <span className="text-white/80 text-sm">Trusted by 500+ Event Planners</span>
+          <div className="inline-flex items-center gap-2 bg-amber-500/10 backdrop-blur-sm px-4 py-2 rounded-full mb-8 border border-amber-500/20">
+            <span className="w-2 h-2 bg-amber-400 rounded-full animate-pulse"></span>
+            <span className="text-amber-200/80 text-sm">Trusted by 500+ Event Planners</span>
           </div>
 
           <h1 className="text-5xl md:text-7xl font-bold text-white mb-6 leading-tight">
             The Ultimate
-            <span className="bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent"> Event </span>
+            <span className="bg-gradient-to-r from-amber-400 to-yellow-500 bg-clip-text text-transparent"> Event </span>
             <br />
             Management Platform
           </h1>
@@ -63,13 +63,13 @@ export default function Landing() {
           <div className="flex flex-col sm:flex-row gap-4 justify-center mb-16">
             <button
               onClick={() => navigate('/register')}
-              className="bg-gradient-to-r from-purple-500 to-pink-500 text-white px-8 py-4 rounded-full font-semibold text-lg hover:shadow-xl hover:shadow-purple-500/30 transition-all transform hover:scale-105"
+              className="bg-gradient-to-r from-amber-500 to-yellow-600 text-black px-8 py-4 rounded-full font-semibold text-lg hover:shadow-xl hover:shadow-amber-500/30 transition-all transform hover:scale-105"
             >
               Start Free Trial
             </button>
             <button
               onClick={() => navigate('/login')}
-              className="bg-white/10 backdrop-blur-sm text-white px-8 py-4 rounded-full font-semibold text-lg border border-white/20 hover:bg-white/20 transition-all"
+              className="bg-white/5 backdrop-blur-sm text-amber-400 px-8 py-4 rounded-full font-semibold text-lg border border-amber-500/30 hover:bg-amber-500/10 transition-all"
             >
               View Demo
             </button>
@@ -77,22 +77,22 @@ export default function Landing() {
 
           {/* Dashboard Preview */}
           <div className="relative max-w-5xl mx-auto">
-            <div className="absolute inset-0 bg-gradient-to-r from-purple-500/30 to-pink-500/30 blur-3xl"></div>
-            <div className="relative bg-slate-800/50 backdrop-blur-xl rounded-2xl border border-white/10 p-4 shadow-2xl">
+            <div className="absolute inset-0 bg-gradient-to-r from-amber-500/20 to-yellow-600/20 blur-3xl"></div>
+            <div className="relative bg-zinc-900/80 backdrop-blur-xl rounded-2xl border border-amber-500/20 p-4 shadow-2xl">
               <div className="flex items-center gap-2 mb-4">
                 <div className="w-3 h-3 rounded-full bg-red-500"></div>
                 <div className="w-3 h-3 rounded-full bg-yellow-500"></div>
                 <div className="w-3 h-3 rounded-full bg-green-500"></div>
               </div>
-              <div className="bg-slate-900/80 rounded-xl p-6">
+              <div className="bg-black/60 rounded-xl p-6">
                 <div className="grid grid-cols-4 gap-4 mb-6">
                   {[
-                    { label: 'Total Events', value: '24', color: 'from-blue-500 to-cyan-500' },
-                    { label: 'Guests', value: '1,847', color: 'from-purple-500 to-pink-500' },
-                    { label: 'Revenue', value: '$89K', color: 'from-green-500 to-emerald-500' },
-                    { label: 'Sponsors', value: '12', color: 'from-orange-500 to-red-500' },
+                    { label: 'Total Events', value: '24', color: 'from-amber-400 to-yellow-500' },
+                    { label: 'Guests', value: '1,847', color: 'from-amber-500 to-orange-500' },
+                    { label: 'Revenue', value: '$89K', color: 'from-yellow-400 to-amber-500' },
+                    { label: 'Sponsors', value: '12', color: 'from-orange-400 to-amber-500' },
                   ].map((stat, i) => (
-                    <div key={i} className="bg-slate-800/50 rounded-xl p-4 border border-white/5">
+                    <div key={i} className="bg-zinc-800/50 rounded-xl p-4 border border-amber-500/10">
                       <div className={`text-2xl font-bold bg-gradient-to-r ${stat.color} bg-clip-text text-transparent`}>
                         {stat.value}
                       </div>
@@ -101,8 +101,8 @@ export default function Landing() {
                   ))}
                 </div>
                 <div className="grid grid-cols-3 gap-4">
-                  <div className="col-span-2 bg-slate-800/50 rounded-xl p-4 border border-white/5 h-32"></div>
-                  <div className="bg-slate-800/50 rounded-xl p-4 border border-white/5 h-32"></div>
+                  <div className="col-span-2 bg-zinc-800/50 rounded-xl p-4 border border-amber-500/10 h-32"></div>
+                  <div className="bg-zinc-800/50 rounded-xl p-4 border border-amber-500/10 h-32"></div>
                 </div>
               </div>
             </div>
@@ -155,10 +155,10 @@ export default function Landing() {
             ].map((feature, i) => (
               <div
                 key={i}
-                className="bg-white/5 backdrop-blur-sm rounded-2xl p-6 border border-white/10 hover:border-purple-500/50 transition-all group"
+                className="bg-zinc-900/50 backdrop-blur-sm rounded-2xl p-6 border border-amber-500/10 hover:border-amber-500/40 transition-all group"
               >
                 <div className="text-4xl mb-4">{feature.icon}</div>
-                <h3 className="text-xl font-semibold text-white mb-2 group-hover:text-purple-400 transition-colors">
+                <h3 className="text-xl font-semibold text-white mb-2 group-hover:text-amber-400 transition-colors">
                   {feature.title}
                 </h3>
                 <p className="text-white/60">{feature.description}</p>
@@ -171,7 +171,7 @@ export default function Landing() {
       {/* CTA Section */}
       <section className="py-20 px-6">
         <div className="max-w-4xl mx-auto text-center">
-          <div className="bg-gradient-to-r from-purple-500/20 to-pink-500/20 backdrop-blur-xl rounded-3xl p-12 border border-white/10">
+          <div className="bg-gradient-to-r from-amber-500/10 to-yellow-600/10 backdrop-blur-xl rounded-3xl p-12 border border-amber-500/20">
             <h2 className="text-4xl font-bold text-white mb-4">
               Ready to Transform Your Events?
             </h2>
@@ -180,23 +180,23 @@ export default function Landing() {
             </p>
             <button
               onClick={() => navigate('/register')}
-              className="bg-gradient-to-r from-purple-500 to-pink-500 text-white px-10 py-4 rounded-full font-semibold text-lg hover:shadow-xl hover:shadow-purple-500/30 transition-all transform hover:scale-105"
+              className="bg-gradient-to-r from-amber-500 to-yellow-600 text-black px-10 py-4 rounded-full font-semibold text-lg hover:shadow-xl hover:shadow-amber-500/30 transition-all transform hover:scale-105"
             >
               Start Your Free Trial
             </button>
-            <p className="text-white/40 text-sm mt-4">No credit card required</p>
+            <p className="text-amber-200/40 text-sm mt-4">No credit card required</p>
           </div>
         </div>
       </section>
 
       {/* Footer */}
-      <footer className="py-10 px-6 border-t border-white/10">
+      <footer className="py-10 px-6 border-t border-amber-500/10">
         <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 bg-gradient-to-br from-purple-500 to-pink-500 rounded-lg flex items-center justify-center">
-              <span className="text-white font-bold">B</span>
+            <div className="w-8 h-8 bg-gradient-to-br from-amber-500 to-yellow-600 rounded-lg flex items-center justify-center">
+              <span className="text-black font-bold">B</span>
             </div>
-            <span className="text-white/60">Berry Bly Productions</span>
+            <span className="text-amber-200/60">Berry Bly Productions</span>
           </div>
           <div className="text-white/40 text-sm">
             © 2025 Berry Bly Productions. All rights reserved.
