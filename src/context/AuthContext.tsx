@@ -1,9 +1,10 @@
 import { createContext, useContext, useState, useEffect } from 'react';
 import type { ReactNode } from 'react';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'https://berry-dashboard-api-production.up.railway.app/api/v1';
-// OAuth endpoints are at root, not under /api/v1
-const AUTH_URL = API_BASE.replace('/api/v1', '');
+// Base URL for the API - OAuth endpoints are at root level
+const API_HOST = 'https://berry-dashboard-api-production.up.railway.app';
+const API_URL = `${API_HOST}/api/v1`;
+const AUTH_URL = API_HOST; // OAuth endpoints at /oauth/*, not /api/v1/oauth/*
 
 interface User {
   id: number;
