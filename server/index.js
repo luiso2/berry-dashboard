@@ -2713,20 +2713,58 @@ app.get('/api/v1/events/:id', async (req, res) => {
       return res.status(404).json({ error: 'Event not found' });
     }
 
-    // Get related data counts
-    const [guestsCount, ticketsCount, sponsorsCount, budgetSum] = await Promise.all([
-      pool.query('SELECT COUNT(*) FROM guests WHERE event_id = $1', [id]),
-      pool.query('SELECT COUNT(*) FROM tickets WHERE event_ref_id = $1', [id]),
-      pool.query('SELECT COUNT(*) FROM sponsors WHERE event_id = $1', [id]),
-      pool.query('SELECT COALESCE(SUM(total_budget), 0) as budget FROM budgets WHERE event_id = $1', [id]),
-    ]);
+    // Get related data counts with graceful handling for missing tables
+    let guestsCount = 0, ticketsCount = 0, sponsorsCount = 0, budgetSum = 0;
+
+    // Check which tables exist
+    const tablesCheck = await pool.query(`
+      SELECT table_name FROM information_schema.tables
+      WHERE table_name IN ('guests', 'guest_lists', 'tickets', 'sponsors', 'budgets')
+    `);
+    const existingTables = tablesCheck.rows.map(r => r.table_name);
+
+    // Query each table only if it exists
+    const queries = [];
+
+    if (existingTables.includes('guest_lists')) {
+      queries.push(pool.query('SELECT COUNT(*) FROM guest_lists WHERE event_id = $1', [id]).then(r => { guestsCount = parseInt(r.rows[0].count); }));
+    } else if (existingTables.includes('guests')) {
+      queries.push(pool.query('SELECT COUNT(*) FROM guests WHERE event_id = $1', [id]).then(r => { guestsCount = parseInt(r.rows[0].count); }));
+    }
+
+    if (existingTables.includes('tickets')) {
+      // Try event_ref_id first, fallback to event_id
+      queries.push(
+        pool.query('SELECT COUNT(*) FROM tickets WHERE event_ref_id = $1 OR event_id::text = $1', [id])
+          .then(r => { ticketsCount = parseInt(r.rows[0].count); })
+          .catch(() => { ticketsCount = 0; })
+      );
+    }
+
+    if (existingTables.includes('sponsors')) {
+      queries.push(
+        pool.query('SELECT COUNT(*) FROM sponsors WHERE event_id = $1', [id])
+          .then(r => { sponsorsCount = parseInt(r.rows[0].count); })
+          .catch(() => { sponsorsCount = 0; })
+      );
+    }
+
+    if (existingTables.includes('budgets')) {
+      queries.push(
+        pool.query('SELECT COALESCE(SUM(total_budget), 0) as budget FROM budgets WHERE event_id = $1', [id])
+          .then(r => { budgetSum = parseFloat(r.rows[0].budget); })
+          .catch(() => { budgetSum = 0; })
+      );
+    }
+
+    await Promise.all(queries);
 
     res.json({
       ...transformEvent(result.rows[0]),
-      guestsCount: parseInt(guestsCount.rows[0].count),
-      ticketsCount: parseInt(ticketsCount.rows[0].count),
-      sponsorsCount: parseInt(sponsorsCount.rows[0].count),
-      totalBudget: parseFloat(budgetSum.rows[0].budget),
+      guestsCount,
+      ticketsCount,
+      sponsorsCount,
+      totalBudget: budgetSum,
     });
   } catch (error) {
     console.error('Error fetching event:', error);
@@ -3283,6 +3321,55 @@ app.put('/api/v1/events/:eventId/budget', async (req, res) => {
   } catch (error) {
     console.error('Error updating budget:', error);
     res.status(500).json({ error: 'Failed to update budget' });
+  }
+});
+
+// GET /api/v1/events/:eventId/budget/items - Get all budget items for an event
+app.get('/api/v1/events/:eventId/budget/items', async (req, res) => {
+  try {
+    const { eventId } = req.params;
+
+    // Check if required tables exist
+    const tablesCheck = await pool.query(`
+      SELECT table_name FROM information_schema.tables
+      WHERE table_name IN ('budgets', 'budget_items', 'budget_categories')
+    `);
+    const existingTables = tablesCheck.rows.map(r => r.table_name);
+
+    if (!existingTables.includes('budgets') || !existingTables.includes('budget_items')) {
+      return res.json({ items: [], total: 0 });
+    }
+
+    // Get budget ID for this event
+    const budget = await pool.query('SELECT id FROM budgets WHERE event_id = $1', [eventId]);
+    if (budget.rows.length === 0) {
+      return res.json({ items: [], total: 0 });
+    }
+    const budgetId = budget.rows[0].id;
+
+    // Get all budget items with optional category info
+    let query = `
+      SELECT bi.*
+      FROM budget_items bi
+      WHERE bi.budget_id = $1
+      ORDER BY bi.created_at DESC
+    `;
+
+    if (existingTables.includes('budget_categories')) {
+      query = `
+        SELECT bi.*, bc.name as category_name, bc.icon as category_icon, bc.color as category_color, bc.is_income
+        FROM budget_items bi
+        LEFT JOIN budget_categories bc ON bi.category_id = bc.id
+        WHERE bi.budget_id = $1
+        ORDER BY bi.created_at DESC
+      `;
+    }
+
+    const result = await pool.query(query, [budgetId]);
+    res.json({ items: result.rows, total: result.rows.length });
+  } catch (error) {
+    console.error('Error fetching budget items:', error);
+    res.status(500).json({ error: 'Failed to fetch budget items' });
   }
 });
 
