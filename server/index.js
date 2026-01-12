@@ -9,6 +9,9 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import yaml from 'js-yaml';
 
+// API Version - for tracking deployments
+const API_VERSION = '3.0.1-gpt';
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -1491,10 +1494,15 @@ app.get('/api/v1/stats', async (req, res) => {
 app.get('/api/v1/health', async (req, res) => {
   try {
     await pool.query('SELECT 1');
-    res.json({ status: 'ok', database: 'connected', timestamp: new Date().toISOString() });
+    res.json({ status: 'ok', database: 'connected', version: API_VERSION, timestamp: new Date().toISOString() });
   } catch (error) {
-    res.json({ status: 'error', database: 'disconnected', timestamp: new Date().toISOString() });
+    res.json({ status: 'error', database: 'disconnected', version: API_VERSION, timestamp: new Date().toISOString() });
   }
+});
+
+// Version endpoint for tracking deployments
+app.get('/api/v1/version', (_req, res) => {
+  res.json({ version: API_VERSION, timestamp: new Date().toISOString() });
 });
 
 // NOTE: All guest-lists routes are in the PROXY ROUTES section below
