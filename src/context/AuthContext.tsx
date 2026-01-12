@@ -1,7 +1,9 @@
 import { createContext, useContext, useState, useEffect } from 'react';
 import type { ReactNode } from 'react';
 
-const API_URL = import.meta.env.VITE_API_URL || 'https://berry-dashboard-api-production.up.railway.app';
+const API_BASE = import.meta.env.VITE_API_URL || 'https://berry-dashboard-api-production.up.railway.app/api/v1';
+// OAuth endpoints are at root, not under /api/v1
+const AUTH_URL = API_BASE.replace('/api/v1', '');
 
 interface User {
   id: number;
@@ -41,7 +43,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = async (email: string, password: string) => {
     try {
-      const response = await fetch(`${API_URL}/oauth/login`, {
+      const response = await fetch(`${AUTH_URL}/oauth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({
@@ -71,7 +73,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const register = async (email: string, password: string, name: string, company?: string) => {
     try {
-      const response = await fetch(`${API_URL}/oauth/register`, {
+      const response = await fetch(`${AUTH_URL}/oauth/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({
@@ -110,7 +112,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const forgotPassword = async (email: string) => {
     try {
-      const response = await fetch(`${API_URL}/oauth/forgot-password`, {
+      const response = await fetch(`${AUTH_URL}/oauth/forgot-password`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email })
