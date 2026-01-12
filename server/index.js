@@ -819,6 +819,19 @@ const hashPassword = (password) => {
 // Generate random token
 const generateToken = () => crypto.randomBytes(32).toString('hex');
 
+// OAuth: Allowed redirect URIs (whitelist)
+const ALLOWED_REDIRECT_URIS = [
+  'https://chat.openai.com/aip/g-faca3a52350bea551c80533e84c5eff01cc9dbcd/oauth/callback',
+  'https://chat.openai.com', // ChatGPT base
+  'https://chatgpt.com', // Alternative ChatGPT domain
+];
+
+// Helper to validate redirect URI
+const isValidRedirectUri = (uri) => {
+  if (!uri) return true; // Allow empty for frontend
+  return ALLOWED_REDIRECT_URIS.some(allowed => uri.startsWith(allowed) || uri.includes('chat.openai.com') || uri.includes('chatgpt.com') || uri.includes('localhost'));
+};
+
 // OAuth: Authorization page (GET /oauth/authorize)
 app.get('/oauth/authorize', async (req, res) => {
   const { client_id, redirect_uri, state, response_type } = req.query;
