@@ -3313,8 +3313,8 @@ app.get('/api/v1/events/:eventId/budget', async (req, res) => {
         estimatedProfit: totalEstimatedIncome - totalEstimatedExpenses,
         actualProfit: totalActualIncome - totalActualExpenses,
         budgetRemaining: parseFloat(budget.rows[0].total_budget || 0) - totalActualExpenses,
-        paidCount: items.rows.filter(i => i.is_paid).length,
-        pendingCount: items.rows.filter(i => !i.is_paid && !i.is_income).length,
+        paidCount: items.filter(i => i.isPaid).length,
+        pendingCount: items.filter(i => !i.isPaid && !i.isIncome).length,
       },
     });
   } catch (error) {
