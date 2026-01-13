@@ -1469,10 +1469,16 @@ function App() {
   const syncIntegration = async (provider: string, options?: Record<string, string>) => {
     setIntegrationLoading(provider);
     try {
+      // Add userId for per-user integrations
+      const syncOptions = {
+        ...options,
+        userId: user?.id
+      };
+
       const res = await fetch(`${API_URL}/integrations/${provider}/sync`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(options || {})
+        body: JSON.stringify(syncOptions)
       });
       const data = await res.json();
       if (data.success) {

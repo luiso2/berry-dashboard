@@ -13,7 +13,7 @@ import yaml from 'js-yaml';
 import cookieParser from 'cookie-parser';
 
 // API Version - for tracking deployments
-const API_VERSION = '3.6.0-per-user-integrations';
+const API_VERSION = '3.6.1-fix-sync-per-user';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -8311,14 +8311,32 @@ app.post('/api/v1/auth/eventbrite/disconnect', async (req, res) => {
 // POST /api/v1/integrations/eventbrite/sync - Sync events from Eventbrite
 app.post('/api/v1/integrations/eventbrite/sync', async (req, res) => {
   try {
-    const result = await pool.query('SELECT * FROM integrations WHERE provider = $1', ['eventbrite']);
-    const saved = result.rows[0];
+    const { userId } = req.body;
+    let apiKey = null;
 
-    if (!saved?.api_key_encrypted || saved.status !== 'connected') {
-      return res.status(400).json({ error: 'Eventbrite not connected' });
+    // Check user_integrations first (per-user)
+    if (userId) {
+      const userResult = await pool.query(
+        'SELECT * FROM user_integrations WHERE user_id = $1 AND provider = $2 AND status = $3',
+        [userId, 'eventbrite', 'connected']
+      );
+      if (userResult.rows.length > 0) {
+        apiKey = decryptApiKey(userResult.rows[0].api_key_encrypted);
+      }
     }
 
-    const apiKey = decryptApiKey(saved.api_key_encrypted);
+    // Fallback to global integrations
+    if (!apiKey) {
+      const result = await pool.query('SELECT * FROM integrations WHERE provider = $1', ['eventbrite']);
+      const saved = result.rows[0];
+      if (saved?.api_key_encrypted && saved.status === 'connected') {
+        apiKey = decryptApiKey(saved.api_key_encrypted);
+      }
+    }
+
+    if (!apiKey) {
+      return res.status(400).json({ error: 'Eventbrite not connected. Please connect your Eventbrite account first.' });
+    }
 
     // Get user's organizations
     const orgResponse = await fetch('https://www.eventbriteapi.com/v3/users/me/organizations/', {
