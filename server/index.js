@@ -7769,9 +7769,10 @@ app.post('/api/v1/integrations/eventbrite/sync', async (req, res) => {
           const nextId = maxIdResult.rows[0].next_id;
 
           try {
+            // Use 'nightlife' as default category (only 'corporate' and 'nightlife' are valid)
             await pool.query(`
               INSERT INTO events (id, title, description, date, time, status, category, external_id, external_source, eventbrite_url)
-              VALUES ($1, $2, $3, $4, $5, $6, 'eventbrite', $7, 'eventbrite', $8)
+              VALUES ($1, $2, $3, $4, $5, $6, 'nightlife', $7, 'eventbrite', $8)
             `, [
               nextId.toString(),
               event.name?.text || 'Untitled Event',
@@ -7790,7 +7791,7 @@ app.post('/api/v1/integrations/eventbrite/sync', async (req, res) => {
             try {
               await pool.query(`
                 INSERT INTO events (id, title, date, status, category)
-                VALUES ($1, $2, $3, $4, 'eventbrite')
+                VALUES ($1, $2, $3, $4, 'nightlife')
               `, [
                 nextId.toString(),
                 event.name?.text || 'Untitled Event',
