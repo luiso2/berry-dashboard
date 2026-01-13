@@ -7725,26 +7725,24 @@ app.post('/api/v1/integrations/eventbrite/sync', async (req, res) => {
         const eventStatus = event.status === 'live' ? 'upcoming' : (event.status === 'ended' ? 'past' : 'planning');
 
         if (existingEvent.rows.length > 0) {
-          // Update existing event
+          // Update existing event (use berry-bly schema: title, date, time, venue, category)
           await pool.query(`
             UPDATE events SET
-              name = $1,
+              title = $1,
               description = $2,
-              event_date = $3,
-              start_time = $4,
-              end_time = $5,
-              status = $6,
-              eventbrite_url = $7,
-              ticket_types = $8,
-              cover_image = $9,
+              date = $3,
+              time = $4,
+              status = $5,
+              eventbrite_url = $6,
+              ticket_types = $7,
+              flyer_url = $8,
               updated_at = NOW()
-            WHERE external_id = $10 AND external_source = 'eventbrite'
+            WHERE external_id = $9 AND external_source = 'eventbrite'
           `, [
             event.name?.text || 'Untitled Event',
             event.description?.text || '',
             eventDate,
             startTime,
-            endTime,
             eventStatus,
             event.url || '',
             JSON.stringify(ticketTypes),
@@ -7752,16 +7750,15 @@ app.post('/api/v1/integrations/eventbrite/sync', async (req, res) => {
             event.id
           ]);
         } else {
-          // Insert new event
+          // Insert new event (use berry-bly schema: title, date, time, venue, category)
           await pool.query(`
-            INSERT INTO events (name, description, event_date, start_time, end_time, status, external_id, external_source, eventbrite_url, ticket_types, cover_image, event_type)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, 'eventbrite', $8, $9, $10, 'eventbrite')
+            INSERT INTO events (title, description, date, time, status, external_id, external_source, eventbrite_url, ticket_types, flyer_url, category)
+            VALUES ($1, $2, $3, $4, $5, $6, 'eventbrite', $7, $8, $9, 'eventbrite')
           `, [
             event.name?.text || 'Untitled Event',
             event.description?.text || '',
             eventDate,
             startTime,
-            endTime,
             eventStatus,
             event.id,
             event.url || '',
