@@ -1143,7 +1143,10 @@ function App() {
   // Integrations state
   const [integrations, setIntegrations] = useState<Integration[]>([]);
   const [selectedIntegration, setSelectedIntegration] = useState<Integration | null>(null);
-  const [integrationFormData, setIntegrationFormData] = useState({ apiKey: '', apiSecret: '', serverPrefix: '' });
+  const [integrationFormData, setIntegrationFormData] = useState({ apiKey: '', apiSecret: '', serverPrefix: '', phoneNumber: '', messagingProfileId: '' });
+  const [showSmsModal, setShowSmsModal] = useState(false);
+  const [smsFormData, setSmsFormData] = useState({ to: '', message: '' });
+  const [smsSending, setSmsSending] = useState(false);
   const [integrationLoading, setIntegrationLoading] = useState<string | null>(null);
   const [mailchimpAudiences, setMailchimpAudiences] = useState<{id: string, name: string, memberCount: number}[]>([]);
 
@@ -1418,6 +1421,14 @@ function App() {
       if (provider === 'mailchimp' && integrationFormData.serverPrefix) {
         extraConfig.server_prefix = integrationFormData.serverPrefix;
       }
+      if (provider === 'telnyx') {
+        if (integrationFormData.phoneNumber) {
+          extraConfig.phone_number = integrationFormData.phoneNumber;
+        }
+        if (integrationFormData.messagingProfileId) {
+          extraConfig.messaging_profile_id = integrationFormData.messagingProfileId;
+        }
+      }
 
       const res = await fetch(`${API_URL}/integrations/${provider}/config`, {
         method: 'POST',
@@ -1433,7 +1444,7 @@ function App() {
       if (data.success) {
         addToast('Configuration saved! Click Test Connection to verify.', 'success');
         fetchIntegrations();
-        setIntegrationFormData({ apiKey: '', apiSecret: '', serverPrefix: '' });
+        setIntegrationFormData({ apiKey: '', apiSecret: '', serverPrefix: '', phoneNumber: '', messagingProfileId: '' });
       } else {
         addToast(data.error || 'Failed to save', 'error');
       }
@@ -1441,6 +1452,37 @@ function App() {
       addToast('Failed to save configuration', 'error');
     } finally {
       setIntegrationLoading(null);
+    }
+  };
+
+  // Send SMS via Telnyx
+  const sendTelnyxSms = async () => {
+    if (!smsFormData.to || !smsFormData.message) {
+      addToast('Phone number and message are required', 'error');
+      return;
+    }
+    setSmsSending(true);
+    try {
+      const res = await fetch(`${API_URL}/telnyx/send-sms`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          to: smsFormData.to,
+          message: smsFormData.message
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        addToast('SMS sent successfully!', 'success');
+        setShowSmsModal(false);
+        setSmsFormData({ to: '', message: '' });
+      } else {
+        addToast(data.error || 'Failed to send SMS', 'error');
+      }
+    } catch (error) {
+      addToast('Failed to send SMS', 'error');
+    } finally {
+      setSmsSending(false);
     }
   };
 
@@ -5774,6 +5816,52 @@ function App() {
                           />
                         </div>
                       )}
+
+                      {/* Telnyx specific fields */}
+                      {integration.provider === 'telnyx' && (
+                        <>
+                          <div style={{ marginBottom: 12 }}>
+                            <label style={{ fontSize: 12, color: '#888', display: 'block', marginBottom: 4 }}>Phone Number (From)</label>
+                            <input
+                              type="text"
+                              placeholder="+1234567890"
+                              value={selectedIntegration?.provider === integration.provider ? integrationFormData.phoneNumber : (integration.extraConfig?.phone_number || '')}
+                              onChange={(e) => {
+                                setSelectedIntegration(integration);
+                                setIntegrationFormData(prev => ({ ...prev, phoneNumber: e.target.value }));
+                              }}
+                              onFocus={() => setSelectedIntegration(integration)}
+                              style={{
+                                width: '100%',
+                                background: '#111',
+                                border: '1px solid #333',
+                                borderRadius: 8,
+                                padding: '10px 12px',
+                                fontSize: 14,
+                                color: '#fff'
+                              }}
+                            />
+                          </div>
+                          <div style={{ marginBottom: 12 }}>
+                            <label style={{ fontSize: 12, color: '#888', display: 'block', marginBottom: 4 }}>Messaging Profile ID (Optional)</label>
+                            <input
+                              type="text"
+                              placeholder="e.g., 40017e70-..."
+                              value={selectedIntegration?.provider === integration.provider ? integrationFormData.messagingProfileId : (integration.extraConfig?.messaging_profile_id || '')}
+                              onChange={(e) => setIntegrationFormData(prev => ({ ...prev, messagingProfileId: e.target.value }))}
+                              style={{
+                                width: '100%',
+                                background: '#111',
+                                border: '1px solid #333',
+                                borderRadius: 8,
+                                padding: '10px 12px',
+                                fontSize: 14,
+                                color: '#fff'
+                              }}
+                            />
+                          </div>
+                        </>
+                      )}
                     </div>
                   )}
 
@@ -5845,6 +5933,24 @@ function App() {
                       >
                         {integrationLoading === integration.provider ? 'Syncing...' :
                          integration.provider === 'eventbrite' ? 'Sync Events & Tickets' : 'Sync to Mailchimp'}
+                      </button>
+                    )}
+
+                    {/* Send SMS button - only for connected Telnyx */}
+                    {integration.status === 'connected' && integration.provider === 'telnyx' && (
+                      <button
+                        onClick={() => setShowSmsModal(true)}
+                        style={{
+                          background: '#00C08B20',
+                          color: '#00C08B',
+                          border: '1px solid #00C08B40',
+                          padding: '8px 16px',
+                          borderRadius: 6,
+                          fontSize: 13,
+                          cursor: 'pointer'
+                        }}
+                      >
+                        📱 Send SMS
                       </button>
                     )}
 
@@ -6557,6 +6663,129 @@ function App() {
               >
                 Add Guest
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Telnyx SMS Modal */}
+      {showSmsModal && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,0.9)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 300,
+            animation: 'fadeIn 0.2s ease',
+            padding: 16,
+          }}
+          onClick={() => setShowSmsModal(false)}
+        >
+          <div
+            style={{
+              background: '#0a0a0a',
+              border: '1px solid #00C08B40',
+              borderRadius: 16,
+              padding: 32,
+              width: '100%',
+              maxWidth: 450,
+              animation: 'slideUp 0.3s ease',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+              <h2 style={{ margin: 0, fontSize: 20, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{ color: '#00C08B' }}>📱</span> Send SMS via Telnyx
+              </h2>
+              <button
+                onClick={() => setShowSmsModal(false)}
+                style={{ background: 'none', border: 'none', color: '#666', fontSize: 24, cursor: 'pointer' }}
+              >
+                ×
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              <div>
+                <label style={{ fontSize: 13, color: '#888', display: 'block', marginBottom: 6 }}>Phone Number (To)</label>
+                <input
+                  type="tel"
+                  placeholder="+1234567890"
+                  value={smsFormData.to}
+                  onChange={(e) => setSmsFormData(prev => ({ ...prev, to: e.target.value }))}
+                  style={{
+                    width: '100%',
+                    background: '#111',
+                    border: '1px solid #333',
+                    borderRadius: 8,
+                    padding: '12px 14px',
+                    fontSize: 14,
+                    color: '#fff'
+                  }}
+                />
+              </div>
+
+              <div>
+                <label style={{ fontSize: 13, color: '#888', display: 'block', marginBottom: 6 }}>Message</label>
+                <textarea
+                  placeholder="Type your message here..."
+                  value={smsFormData.message}
+                  onChange={(e) => setSmsFormData(prev => ({ ...prev, message: e.target.value }))}
+                  rows={4}
+                  style={{
+                    width: '100%',
+                    background: '#111',
+                    border: '1px solid #333',
+                    borderRadius: 8,
+                    padding: '12px 14px',
+                    fontSize: 14,
+                    color: '#fff',
+                    resize: 'vertical'
+                  }}
+                />
+                <div style={{ fontSize: 11, color: '#666', marginTop: 4, textAlign: 'right' }}>
+                  {smsFormData.message.length} / 160 characters
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', gap: 12, marginTop: 8 }}>
+                <button
+                  onClick={() => setShowSmsModal(false)}
+                  style={{
+                    flex: 1,
+                    background: '#1a1a1a',
+                    border: '1px solid #333',
+                    color: '#fff',
+                    padding: '12px',
+                    borderRadius: 8,
+                    fontSize: 14,
+                    cursor: 'pointer'
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={sendTelnyxSms}
+                  disabled={smsSending || !smsFormData.to || !smsFormData.message}
+                  style={{
+                    flex: 1,
+                    background: smsSending ? '#00C08B80' : '#00C08B',
+                    border: 'none',
+                    color: '#000',
+                    padding: '12px',
+                    borderRadius: 8,
+                    fontSize: 14,
+                    fontWeight: 600,
+                    cursor: smsSending ? 'not-allowed' : 'pointer',
+                    opacity: (!smsFormData.to || !smsFormData.message) ? 0.5 : 1
+                  }}
+                >
+                  {smsSending ? 'Sending...' : '📤 Send SMS'}
+                </button>
+              </div>
             </div>
           </div>
         </div>
