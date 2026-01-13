@@ -1098,6 +1098,8 @@ function App() {
   const [orderStats, setOrderStats] = useState<OrderStats>({ total_orders: 0, total_tickets: 0, total_revenue: 0, active_orders: 0, refunded_orders: 0 });
   const [ticketView, setTicketView] = useState<'tickets' | 'orders'>('orders');
   const [syncingEventbrite, setSyncingEventbrite] = useState(false);
+  const [showTicketForm, setShowTicketForm] = useState(false);
+  const [ticketFormData, setTicketFormData] = useState({ holderName: '', holderEmail: '', ticketType: 'General', price: '0', eventId: '' });
   const [sponsors, setSponsors] = useState<Sponsor[]>([]);
   const [sponsorStats, setSponsorStats] = useState({ total: 0, pending: 0, active: 0, revenue: 0 });
   const [selectedSponsor, setSelectedSponsor] = useState<Sponsor | null>(null);
@@ -1328,6 +1330,42 @@ function App() {
       addToast('Failed to sync with Eventbrite', 'error');
     } finally {
       setSyncingEventbrite(false);
+    }
+  };
+
+  // Create a manual ticket
+  const createTicket = async () => {
+    if (!ticketFormData.holderName || !ticketFormData.holderEmail) {
+      addToast('Please fill in name and email', 'error');
+      return;
+    }
+
+    try {
+      const res = await fetch(`${API_URL}/tickets`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          holderName: ticketFormData.holderName,
+          holderEmail: ticketFormData.holderEmail,
+          ticketType: ticketFormData.ticketType || 'General',
+          price: parseInt(ticketFormData.price) || 0,
+          eventId: ticketFormData.eventId || null,
+          source: 'manual'
+        })
+      });
+
+      if (res.ok) {
+        addToast('Ticket created successfully!', 'success');
+        setShowTicketForm(false);
+        setTicketFormData({ holderName: '', holderEmail: '', ticketType: 'General', price: '0', eventId: '' });
+        fetchTickets();
+      } else {
+        const data = await res.json();
+        addToast(data.error || 'Failed to create ticket', 'error');
+      }
+    } catch (error) {
+      console.error('Error creating ticket:', error);
+      addToast('Failed to create ticket', 'error');
     }
   };
 
@@ -3858,6 +3896,24 @@ function App() {
             {/* Action Buttons */}
             <div style={{ display: 'flex', gap: 12, marginBottom: 24, flexWrap: 'wrap' }}>
               <button
+                onClick={() => setShowTicketForm(true)}
+                style={{
+                  background: '#d4af37',
+                  border: 'none',
+                  color: '#000',
+                  padding: '12px 24px',
+                  borderRadius: 8,
+                  fontSize: 14,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8
+                }}
+              >
+                + Add Ticket
+              </button>
+              <button
                 onClick={syncEventbrite}
                 disabled={syncingEventbrite}
                 style={{
@@ -4035,11 +4091,85 @@ function App() {
               {tickets.length === 0 && (
                 <div style={{ padding: 40, textAlign: 'center' }}>
                   <div style={{ color: '#333', fontSize: 48, marginBottom: 12 }}>🎫</div>
-                  <div style={{ color: '#666', fontSize: 15 }}>No tickets imported yet</div>
-                  <div style={{ color: '#444', fontSize: 13, marginTop: 8 }}>Sync from Eventbrite or import CSV to track check-ins</div>
+                  <div style={{ color: '#666', fontSize: 15 }}>No tickets yet</div>
+                  <div style={{ color: '#444', fontSize: 13, marginTop: 8 }}>Click "Add Ticket" to create one manually</div>
                 </div>
               )}
             </div>
+            )}
+
+            {/* Add Ticket Modal */}
+            {showTicketForm && (
+              <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }} onClick={() => setShowTicketForm(false)}>
+                <div style={{ background: '#111', borderRadius: 16, padding: 32, width: '100%', maxWidth: 450, border: '1px solid #333' }} onClick={e => e.stopPropagation()}>
+                  <h2 style={{ fontSize: 20, fontWeight: 600, marginBottom: 24 }}>Add New Ticket</h2>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                    <div>
+                      <label style={{ fontSize: 13, color: '#888', display: 'block', marginBottom: 6 }}>Holder Name *</label>
+                      <input
+                        type="text"
+                        value={ticketFormData.holderName}
+                        onChange={e => setTicketFormData({ ...ticketFormData, holderName: e.target.value })}
+                        placeholder="John Doe"
+                        style={{ width: '100%', padding: '12px 16px', background: '#1a1a1a', border: '1px solid #333', borderRadius: 8, color: '#fff', fontSize: 14 }}
+                      />
+                    </div>
+
+                    <div>
+                      <label style={{ fontSize: 13, color: '#888', display: 'block', marginBottom: 6 }}>Email *</label>
+                      <input
+                        type="email"
+                        value={ticketFormData.holderEmail}
+                        onChange={e => setTicketFormData({ ...ticketFormData, holderEmail: e.target.value })}
+                        placeholder="john@example.com"
+                        style={{ width: '100%', padding: '12px 16px', background: '#1a1a1a', border: '1px solid #333', borderRadius: 8, color: '#fff', fontSize: 14 }}
+                      />
+                    </div>
+
+                    <div>
+                      <label style={{ fontSize: 13, color: '#888', display: 'block', marginBottom: 6 }}>Ticket Type</label>
+                      <select
+                        value={ticketFormData.ticketType}
+                        onChange={e => setTicketFormData({ ...ticketFormData, ticketType: e.target.value })}
+                        style={{ width: '100%', padding: '12px 16px', background: '#1a1a1a', border: '1px solid #333', borderRadius: 8, color: '#fff', fontSize: 14 }}
+                      >
+                        <option value="General">General</option>
+                        <option value="VIP">VIP</option>
+                        <option value="Early Bird">Early Bird</option>
+                        <option value="Student">Student</option>
+                        <option value="Complimentary">Complimentary</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label style={{ fontSize: 13, color: '#888', display: 'block', marginBottom: 6 }}>Price ($)</label>
+                      <input
+                        type="number"
+                        value={ticketFormData.price}
+                        onChange={e => setTicketFormData({ ...ticketFormData, price: e.target.value })}
+                        placeholder="0"
+                        style={{ width: '100%', padding: '12px 16px', background: '#1a1a1a', border: '1px solid #333', borderRadius: 8, color: '#fff', fontSize: 14 }}
+                      />
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', gap: 12, marginTop: 24 }}>
+                    <button
+                      onClick={() => setShowTicketForm(false)}
+                      style={{ flex: 1, padding: '12px 24px', background: '#333', border: 'none', borderRadius: 8, color: '#fff', fontSize: 14, fontWeight: 500, cursor: 'pointer' }}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={createTicket}
+                      style={{ flex: 1, padding: '12px 24px', background: '#d4af37', border: 'none', borderRadius: 8, color: '#000', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}
+                    >
+                      Create Ticket
+                    </button>
+                  </div>
+                </div>
+              </div>
             )}
           </div>
         )}
