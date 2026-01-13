@@ -28,8 +28,48 @@ const pool = new Pool({
   ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
 });
 
+// Track initialization status
+let dbInitStatus = { started: false, completed: false, error: null, modelsFix: null };
+
+// ============================================
+// ENCRYPTION UTILITIES for API Keys
+// ============================================
+const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || crypto.randomBytes(32).toString('hex').slice(0, 32);
+const IV_LENGTH = 16;
+
+function encryptApiKey(text) {
+  if (!text) return null;
+  const iv = crypto.randomBytes(IV_LENGTH);
+  const cipher = crypto.createCipheriv('aes-256-cbc', Buffer.from(ENCRYPTION_KEY, 'utf8'), iv);
+  let encrypted = cipher.update(text, 'utf8', 'hex');
+  encrypted += cipher.final('hex');
+  return iv.toString('hex') + ':' + encrypted;
+}
+
+function decryptApiKey(text) {
+  if (!text) return null;
+  try {
+    const [ivHex, encrypted] = text.split(':');
+    const iv = Buffer.from(ivHex, 'hex');
+    const decipher = crypto.createDecipheriv('aes-256-cbc', Buffer.from(ENCRYPTION_KEY, 'utf8'), iv);
+    let decrypted = decipher.update(encrypted, 'hex', 'utf8');
+    decrypted += decipher.final('utf8');
+    return decrypted;
+  } catch (error) {
+    console.error('Decryption error:', error.message);
+    return null;
+  }
+}
+
+// Mask API key for display (show first 4 and last 4 chars)
+function maskApiKey(key) {
+  if (!key || key.length < 12) return '••••••••';
+  return key.slice(0, 4) + '••••••••' + key.slice(-4);
+}
+
 // Initialize database tables
 const initDatabase = async () => {
+  dbInitStatus.started = true;
   const client = await pool.connect();
   try {
     // ============================================
@@ -61,7 +101,7 @@ const initDatabase = async () => {
     await client.query(`
       CREATE TABLE IF NOT EXISTS oauth_tokens (
         id SERIAL PRIMARY KEY,
-        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        user_id INTEGER,
         access_token VARCHAR(255) UNIQUE NOT NULL,
         refresh_token VARCHAR(255),
         code VARCHAR(255),
@@ -112,33 +152,23 @@ const initDatabase = async () => {
       BEGIN
         -- Add user_id to guests
         IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='guests' AND column_name='user_id') THEN
-          ALTER TABLE guests ADD COLUMN user_id INTEGER REFERENCES users(id) ON DELETE CASCADE;
+          ALTER TABLE guests ADD COLUMN user_id INTEGER;
           CREATE INDEX IF NOT EXISTS idx_guests_user ON guests(user_id);
         END IF;
         -- Add user_id to events
         IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='events' AND column_name='user_id') THEN
-          ALTER TABLE events ADD COLUMN user_id INTEGER REFERENCES users(id) ON DELETE CASCADE;
+          ALTER TABLE events ADD COLUMN user_id INTEGER;
           CREATE INDEX IF NOT EXISTS idx_events_user ON events(user_id);
         END IF;
         -- Add user_id to vendors
         IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='vendors' AND column_name='user_id') THEN
-          ALTER TABLE vendors ADD COLUMN user_id INTEGER REFERENCES users(id) ON DELETE CASCADE;
+          ALTER TABLE vendors ADD COLUMN user_id INTEGER;
           CREATE INDEX IF NOT EXISTS idx_vendors_user ON vendors(user_id);
         END IF;
         -- Add user_id to sponsors
         IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='sponsors' AND column_name='user_id') THEN
-          ALTER TABLE sponsors ADD COLUMN user_id INTEGER REFERENCES users(id) ON DELETE CASCADE;
+          ALTER TABLE sponsors ADD COLUMN user_id INTEGER;
           CREATE INDEX IF NOT EXISTS idx_sponsors_user ON sponsors(user_id);
-        END IF;
-        -- Add user_id to staff
-        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='staff' AND column_name='user_id') THEN
-          ALTER TABLE staff ADD COLUMN user_id INTEGER REFERENCES users(id) ON DELETE CASCADE;
-          CREATE INDEX IF NOT EXISTS idx_staff_user ON staff(user_id);
-        END IF;
-        -- Add user_id to models
-        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='models' AND column_name='user_id') THEN
-          ALTER TABLE models ADD COLUMN user_id INTEGER REFERENCES users(id) ON DELETE CASCADE;
-          CREATE INDEX IF NOT EXISTS idx_models_user ON models(user_id);
         END IF;
       END $$;
     `);
@@ -148,7 +178,7 @@ const initDatabase = async () => {
       CREATE TABLE IF NOT EXISTS email_events (
         id SERIAL PRIMARY KEY,
         email_id VARCHAR(255),
-        guest_id INTEGER REFERENCES guests(id) ON DELETE SET NULL,
+        guest_id INTEGER,
         event_type VARCHAR(50) NOT NULL,
         recipient_email VARCHAR(255),
         subject VARCHAR(500),
@@ -276,14 +306,29 @@ const initDatabase = async () => {
       );
       CREATE INDEX IF NOT EXISTS idx_events_date ON events(date);
       CREATE INDEX IF NOT EXISTS idx_events_status ON events(status);
-      CREATE INDEX IF NOT EXISTS idx_events_slug ON events(slug);
     `);
 
+    // Ensure events table has slug column (migration for existing tables)
+    try {
+      const slugCheck = await client.query(`
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'events' AND column_name = 'slug'
+      `);
+      if (slugCheck.rows.length === 0) {
+        await client.query('ALTER TABLE events ADD COLUMN slug VARCHAR(255) UNIQUE');
+        console.log('Added slug column to events table');
+      }
+      await client.query('CREATE INDEX IF NOT EXISTS idx_events_slug ON events(slug)');
+    } catch (e) {
+      console.log('Events slug migration:', e.message);
+    }
+
     // Create event_timeline table - Run of show / production timeline
+    // Note: Creating without FK constraint due to potential type mismatch with existing events table
     await client.query(`
       CREATE TABLE IF NOT EXISTS event_timeline (
         id SERIAL PRIMARY KEY,
-        event_id INTEGER REFERENCES events(id) ON DELETE CASCADE,
+        event_id INTEGER,
         time TIME NOT NULL,
         title VARCHAR(255) NOT NULL,
         description TEXT,
@@ -302,7 +347,7 @@ const initDatabase = async () => {
     await client.query(`
       CREATE TABLE IF NOT EXISTS event_checklist (
         id SERIAL PRIMARY KEY,
-        event_id INTEGER REFERENCES events(id) ON DELETE CASCADE,
+        event_id INTEGER,
         category VARCHAR(100) NOT NULL,
         item VARCHAR(255) NOT NULL,
         is_completed BOOLEAN DEFAULT false,
@@ -317,38 +362,47 @@ const initDatabase = async () => {
       CREATE INDEX IF NOT EXISTS idx_checklist_event ON event_checklist(event_id);
     `);
 
-    // Add event_id to existing guests table
-    await client.query(`
-      DO $$
-      BEGIN
-        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='guests' AND column_name='event_id') THEN
-          ALTER TABLE guests ADD COLUMN event_id INTEGER REFERENCES events(id) ON DELETE SET NULL;
-          CREATE INDEX IF NOT EXISTS idx_guests_event ON guests(event_id);
-        END IF;
-      END $$;
-    `);
+    // Add event_id to existing guests table (no FK constraint due to type mismatch with existing events table)
+    try {
+      const guestsEventCheck = await client.query(`
+        SELECT 1 FROM information_schema.columns WHERE table_name='guests' AND column_name='event_id'
+      `);
+      if (guestsEventCheck.rows.length === 0) {
+        await client.query(`ALTER TABLE guests ADD COLUMN event_id INTEGER`);
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_guests_event ON guests(event_id)`);
+        console.log('Added event_id to guests table');
+      }
+    } catch (e) {
+      console.log('Guests event_id migration:', e.message);
+    }
 
-    // Add event_id to existing tickets table
-    await client.query(`
-      DO $$
-      BEGIN
-        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='tickets' AND column_name='event_ref_id') THEN
-          ALTER TABLE tickets ADD COLUMN event_ref_id INTEGER REFERENCES events(id) ON DELETE SET NULL;
-          CREATE INDEX IF NOT EXISTS idx_tickets_event_ref ON tickets(event_ref_id);
-        END IF;
-      END $$;
-    `);
+    // Add event_ref_id to existing tickets table
+    try {
+      const ticketsCheck = await client.query(`
+        SELECT 1 FROM information_schema.columns WHERE table_name='tickets' AND column_name='event_ref_id'
+      `);
+      if (ticketsCheck.rows.length === 0) {
+        await client.query(`ALTER TABLE tickets ADD COLUMN event_ref_id INTEGER`);
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_tickets_event_ref ON tickets(event_ref_id)`);
+        console.log('Added event_ref_id to tickets table');
+      }
+    } catch (e) {
+      console.log('Tickets event_ref_id migration:', e.message);
+    }
 
     // Add event_id to sponsors table
-    await client.query(`
-      DO $$
-      BEGIN
-        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='sponsors' AND column_name='event_id') THEN
-          ALTER TABLE sponsors ADD COLUMN event_id INTEGER REFERENCES events(id) ON DELETE SET NULL;
-          CREATE INDEX IF NOT EXISTS idx_sponsors_event ON sponsors(event_id);
-        END IF;
-      END $$;
-    `);
+    try {
+      const sponsorsCheck = await client.query(`
+        SELECT 1 FROM information_schema.columns WHERE table_name='sponsors' AND column_name='event_id'
+      `);
+      if (sponsorsCheck.rows.length === 0) {
+        await client.query(`ALTER TABLE sponsors ADD COLUMN event_id INTEGER`);
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_sponsors_event ON sponsors(event_id)`);
+        console.log('Added event_id to sponsors table');
+      }
+    } catch (e) {
+      console.log('Sponsors event_id migration:', e.message);
+    }
 
     // ============================================
     // PRIORITY HIGH #2: BUDGET TRACKER
@@ -385,7 +439,7 @@ const initDatabase = async () => {
     await client.query(`
       CREATE TABLE IF NOT EXISTS budgets (
         id SERIAL PRIMARY KEY,
-        event_id INTEGER REFERENCES events(id) ON DELETE CASCADE,
+        event_id INTEGER,
         name VARCHAR(255) NOT NULL,
         total_budget DECIMAL(12,2) DEFAULT 0,
         total_spent DECIMAL(12,2) DEFAULT 0,
@@ -403,8 +457,8 @@ const initDatabase = async () => {
     await client.query(`
       CREATE TABLE IF NOT EXISTS budget_items (
         id SERIAL PRIMARY KEY,
-        budget_id INTEGER REFERENCES budgets(id) ON DELETE CASCADE,
-        category_id INTEGER REFERENCES budget_categories(id) ON DELETE SET NULL,
+        budget_id INTEGER,
+        category_id INTEGER,
         description VARCHAR(255) NOT NULL,
         vendor_name VARCHAR(255),
         estimated_amount DECIMAL(12,2) DEFAULT 0,
@@ -455,6 +509,7 @@ const initDatabase = async () => {
     await client.query(`
       CREATE TABLE IF NOT EXISTS staff (
         id SERIAL PRIMARY KEY,
+        user_id INTEGER,
         name VARCHAR(255) NOT NULL,
         email VARCHAR(255),
         phone VARCHAR(100),
@@ -480,14 +535,15 @@ const initDatabase = async () => {
       );
       CREATE INDEX IF NOT EXISTS idx_staff_role ON staff(role);
       CREATE INDEX IF NOT EXISTS idx_staff_status ON staff(status);
+      CREATE INDEX IF NOT EXISTS idx_staff_user ON staff(user_id);
     `);
 
-    // Create staff_assignments table - Staff assigned to events
+    // Create staff_assignments table - Staff assigned to events (no FK for compatibility)
     await client.query(`
       CREATE TABLE IF NOT EXISTS staff_assignments (
         id SERIAL PRIMARY KEY,
-        staff_id INTEGER REFERENCES staff(id) ON DELETE CASCADE,
-        event_id INTEGER REFERENCES events(id) ON DELETE CASCADE,
+        staff_id INTEGER,
+        event_id INTEGER,
         role VARCHAR(100) NOT NULL,
         shift_start TIME,
         shift_end TIME,
@@ -512,13 +568,13 @@ const initDatabase = async () => {
       CREATE INDEX IF NOT EXISTS idx_assignments_status ON staff_assignments(status);
     `);
 
-    // Create staff_payments table - Payment tracking
+    // Create staff_payments table - Payment tracking (no FK for compatibility)
     await client.query(`
       CREATE TABLE IF NOT EXISTS staff_payments (
         id SERIAL PRIMARY KEY,
-        staff_id INTEGER REFERENCES staff(id) ON DELETE CASCADE,
-        assignment_id INTEGER REFERENCES staff_assignments(id) ON DELETE SET NULL,
-        event_id INTEGER REFERENCES events(id) ON DELETE SET NULL,
+        staff_id INTEGER,
+        assignment_id INTEGER,
+        event_id INTEGER,
         amount DECIMAL(10,2) NOT NULL,
         payment_type VARCHAR(50) DEFAULT 'event',
         payment_method VARCHAR(50),
@@ -540,8 +596,8 @@ const initDatabase = async () => {
     await client.query(`
       CREATE TABLE IF NOT EXISTS vendor_quotes (
         id SERIAL PRIMARY KEY,
-        vendor_id INTEGER REFERENCES vendors(id) ON DELETE CASCADE,
-        event_id INTEGER REFERENCES events(id) ON DELETE CASCADE,
+        vendor_id INTEGER,
+        event_id INTEGER,
         quote_number VARCHAR(100),
         description TEXT,
         amount DECIMAL(12,2) NOT NULL,
@@ -563,9 +619,9 @@ const initDatabase = async () => {
     await client.query(`
       CREATE TABLE IF NOT EXISTS vendor_contracts (
         id SERIAL PRIMARY KEY,
-        vendor_id INTEGER REFERENCES vendors(id) ON DELETE CASCADE,
-        event_id INTEGER REFERENCES events(id) ON DELETE CASCADE,
-        quote_id INTEGER REFERENCES vendor_quotes(id) ON DELETE SET NULL,
+        vendor_id INTEGER,
+        event_id INTEGER,
+        quote_id INTEGER,
         contract_number VARCHAR(100),
         title VARCHAR(255) NOT NULL,
         description TEXT,
@@ -595,8 +651,8 @@ const initDatabase = async () => {
     await client.query(`
       CREATE TABLE IF NOT EXISTS vendor_history (
         id SERIAL PRIMARY KEY,
-        vendor_id INTEGER REFERENCES vendors(id) ON DELETE CASCADE,
-        event_id INTEGER REFERENCES events(id) ON DELETE CASCADE,
+        vendor_id INTEGER,
+        event_id INTEGER,
         service_provided TEXT,
         amount_paid DECIMAL(12,2),
         rating INTEGER,
@@ -617,7 +673,8 @@ const initDatabase = async () => {
     await client.query(`
       CREATE TABLE IF NOT EXISTS models (
         id SERIAL PRIMARY KEY,
-        event_id INTEGER REFERENCES events(id) ON DELETE SET NULL,
+        user_id INTEGER,
+        event_id INTEGER,
         name VARCHAR(255) NOT NULL,
         email VARCHAR(255),
         phone VARCHAR(100),
@@ -631,10 +688,16 @@ const initDatabase = async () => {
         ai_score INTEGER DEFAULT 0,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      );
-      CREATE INDEX IF NOT EXISTS idx_models_status ON models(status);
-      CREATE INDEX IF NOT EXISTS idx_models_event ON models(event_id);
+      )
     `);
+    // Create indexes separately to handle existing tables with different schemas
+    try {
+      await client.query('CREATE INDEX IF NOT EXISTS idx_models_status ON models(status)');
+      await client.query('CREATE INDEX IF NOT EXISTS idx_models_event ON models(event_id)');
+    } catch (e) { console.log('Models index note:', e.message); }
+    try {
+      await client.query('CREATE INDEX IF NOT EXISTS idx_models_user ON models(user_id)');
+    } catch (e) { console.log('Models user_id index note:', e.message); }
 
     // Create table_reservations table - VIP table bookings
     await client.query(`
@@ -643,7 +706,7 @@ const initDatabase = async () => {
         table_id VARCHAR(50) NOT NULL,
         table_name VARCHAR(100) NOT NULL,
         zone VARCHAR(50) DEFAULT 'Standard',
-        event_id INTEGER REFERENCES events(id) ON DELETE CASCADE,
+        event_id INTEGER,
         customer_name VARCHAR(255) NOT NULL,
         customer_email VARCHAR(255),
         customer_phone VARCHAR(100),
@@ -669,7 +732,7 @@ const initDatabase = async () => {
     await client.query(`
       CREATE TABLE IF NOT EXISTS client_access (
         id SERIAL PRIMARY KEY,
-        event_id INTEGER REFERENCES events(id) ON DELETE CASCADE,
+        event_id INTEGER,
         client_name VARCHAR(255) NOT NULL,
         client_email VARCHAR(255) NOT NULL,
         access_token VARCHAR(100) UNIQUE NOT NULL,
@@ -683,8 +746,235 @@ const initDatabase = async () => {
       CREATE INDEX IF NOT EXISTS idx_client_event ON client_access(event_id);
     `);
 
-    console.log('Database tables initialized successfully (guests, email_events, tickets, activity_log, sponsors, events, budgets, vendors, staff, contracts, client_access)');
+    // Add user_id to staff table (after table creation)
+    try {
+      const checkStaffColumn = await client.query(`
+        SELECT column_name FROM information_schema.columns
+        WHERE table_name = 'staff' AND column_name = 'user_id'
+      `);
+      if (checkStaffColumn.rows.length === 0) {
+        console.log('Adding user_id column to staff table...');
+        await client.query(`ALTER TABLE staff ADD COLUMN user_id INTEGER`);
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_staff_user ON staff(user_id)`);
+        console.log('user_id column added to staff table successfully');
+      } else {
+        console.log('staff table already has user_id column');
+      }
+    } catch (staffMigrationError) {
+      console.log('Staff migration note:', staffMigrationError.message);
+    }
+
+    // Add user_id to models table (after table creation)
+    try {
+      const checkColumn = await client.query(`
+        SELECT column_name FROM information_schema.columns
+        WHERE table_name = 'models' AND column_name = 'user_id'
+      `);
+      if (checkColumn.rows.length === 0) {
+        console.log('Adding user_id column to models table...');
+        await client.query(`ALTER TABLE models ADD COLUMN user_id INTEGER`);
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_models_user ON models(user_id)`);
+        console.log('user_id column added to models table successfully');
+      } else {
+        console.log('models table already has user_id column');
+      }
+    } catch (migrationError) {
+      console.log('Models migration note:', migrationError.message);
+    }
+
+    // Ensure missing tables are created with individual error handling
+    const missingTableQueries = [
+      {
+        name: 'event_timeline',
+        sql: `CREATE TABLE IF NOT EXISTS event_timeline (
+          id SERIAL PRIMARY KEY,
+          event_id INTEGER,
+          time TIME NOT NULL,
+          title VARCHAR(255) NOT NULL,
+          description TEXT,
+          responsible VARCHAR(255),
+          location VARCHAR(255),
+          is_critical BOOLEAN DEFAULT false,
+          status VARCHAR(50) DEFAULT 'pending',
+          notes TEXT,
+          sort_order INTEGER DEFAULT 0,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )`
+      },
+      {
+        name: 'event_checklist',
+        sql: `CREATE TABLE IF NOT EXISTS event_checklist (
+          id SERIAL PRIMARY KEY,
+          event_id INTEGER,
+          category VARCHAR(100) NOT NULL,
+          item VARCHAR(255) NOT NULL,
+          is_completed BOOLEAN DEFAULT false,
+          completed_by VARCHAR(255),
+          completed_at TIMESTAMP,
+          due_date DATE,
+          priority VARCHAR(20) DEFAULT 'medium',
+          notes TEXT,
+          sort_order INTEGER DEFAULT 0,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )`
+      },
+      {
+        name: 'staff',
+        sql: `CREATE TABLE IF NOT EXISTS staff (
+          id SERIAL PRIMARY KEY,
+          user_id INTEGER,
+          name VARCHAR(255) NOT NULL,
+          email VARCHAR(255),
+          phone VARCHAR(100),
+          role VARCHAR(100) NOT NULL,
+          secondary_role VARCHAR(100),
+          photo_url TEXT,
+          instagram VARCHAR(255),
+          hourly_rate DECIMAL(10,2),
+          day_rate DECIMAL(10,2),
+          experience_level VARCHAR(50) DEFAULT 'intermediate',
+          skills TEXT[],
+          notes TEXT,
+          status VARCHAR(50) DEFAULT 'active',
+          rating INTEGER DEFAULT 0,
+          total_events INTEGER DEFAULT 0,
+          total_earned DECIMAL(12,2) DEFAULT 0,
+          availability JSONB DEFAULT '{"weekdays": true, "weekends": true}',
+          emergency_contact VARCHAR(255),
+          emergency_phone VARCHAR(100),
+          bank_info TEXT,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )`
+      },
+      {
+        name: 'staff_assignments',
+        sql: `CREATE TABLE IF NOT EXISTS staff_assignments (
+          id SERIAL PRIMARY KEY,
+          staff_id INTEGER,
+          event_id INTEGER,
+          role VARCHAR(100) NOT NULL,
+          shift_start TIME,
+          shift_end TIME,
+          break_duration INTEGER DEFAULT 0,
+          location VARCHAR(255),
+          uniform VARCHAR(255),
+          special_instructions TEXT,
+          rate_type VARCHAR(20) DEFAULT 'hourly',
+          rate_amount DECIMAL(10,2),
+          bonus DECIMAL(10,2) DEFAULT 0,
+          status VARCHAR(50) DEFAULT 'pending',
+          confirmed_at TIMESTAMP,
+          checked_in_at TIMESTAMP,
+          checked_out_at TIMESTAMP,
+          hours_worked DECIMAL(5,2),
+          notes TEXT,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )`
+      },
+      {
+        name: 'models',
+        sql: `CREATE TABLE IF NOT EXISTS models (
+          id SERIAL PRIMARY KEY,
+          user_id INTEGER,
+          event_id INTEGER,
+          name VARCHAR(255) NOT NULL,
+          email VARCHAR(255),
+          phone VARCHAR(100),
+          instagram VARCHAR(255),
+          photos TEXT[],
+          height VARCHAR(20),
+          experience_level VARCHAR(50) DEFAULT 'intermediate',
+          availability JSONB DEFAULT '{}',
+          notes TEXT,
+          status VARCHAR(50) DEFAULT 'pending',
+          ai_score INTEGER DEFAULT 0,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )`
+      }
+    ];
+
+    for (const table of missingTableQueries) {
+      try {
+        await client.query(table.sql);
+        console.log(`Table ${table.name} ensured`);
+      } catch (tableError) {
+        console.log(`Table ${table.name} creation note:`, tableError.message);
+      }
+    }
+
+    // Fix models table - forcefully recreate with correct schema
+    try {
+      dbInitStatus.modelsFix = 'checking';
+      // Check if models has user_id column
+      const userIdExists = await client.query(`
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'models' AND column_name = 'user_id'
+      `);
+
+      if (userIdExists.rows.length === 0) {
+        dbInitStatus.modelsFix = 'recreating';
+        console.log('Models table missing user_id, recreating...');
+        // Drop and recreate to fix schema
+        await client.query('DROP TABLE IF EXISTS models');
+        await client.query(`
+          CREATE TABLE models (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER,
+            event_id INTEGER,
+            name VARCHAR(255) NOT NULL,
+            email VARCHAR(255),
+            phone VARCHAR(100),
+            instagram VARCHAR(255),
+            photos TEXT[],
+            height VARCHAR(20),
+            experience_level VARCHAR(50) DEFAULT 'intermediate',
+            availability JSONB DEFAULT '{}',
+            notes TEXT,
+            status VARCHAR(50) DEFAULT 'pending',
+            ai_score INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+          )
+        `);
+        dbInitStatus.modelsFix = 'recreated';
+        console.log('Models table recreated successfully');
+      } else {
+        dbInitStatus.modelsFix = 'has_user_id';
+        console.log('Models table has user_id column');
+      }
+    } catch (e) {
+      dbInitStatus.modelsFix = 'error: ' + e.message;
+      console.error('Models fix error:', e.message);
+    }
+
+    // ============================================
+    // INTEGRATIONS TABLE - Store API keys for external services
+    // ============================================
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS integrations (
+        id SERIAL PRIMARY KEY,
+        provider VARCHAR(50) NOT NULL UNIQUE,
+        api_key_encrypted TEXT,
+        api_secret_encrypted TEXT,
+        extra_config JSONB DEFAULT '{}',
+        status VARCHAR(20) DEFAULT 'disconnected',
+        last_sync TIMESTAMP,
+        last_error TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_integrations_provider ON integrations(provider);
+      CREATE INDEX IF NOT EXISTS idx_integrations_status ON integrations(status);
+    `);
+    console.log('Integrations table initialized');
+
+    dbInitStatus.completed = true;
+    console.log('Database tables initialized successfully (guests, email_events, tickets, activity_log, sponsors, events, budgets, vendors, staff, contracts, client_access, integrations)');
   } catch (error) {
+    dbInitStatus.error = error.message;
     console.error('Error initializing database:', error);
   } finally {
     client.release();
@@ -2163,6 +2453,42 @@ app.get('/api/v1/health', async (req, res) => {
     res.json({ status: 'ok', database: 'connected', version: API_VERSION, timestamp: new Date().toISOString() });
   } catch (error) {
     res.json({ status: 'error', database: 'disconnected', version: API_VERSION, timestamp: new Date().toISOString() });
+  }
+});
+
+// Debug endpoint to check tables
+app.get('/api/v1/debug/tables', async (req, res) => {
+  try {
+    const tablesResult = await pool.query(`
+      SELECT table_name FROM information_schema.tables
+      WHERE table_schema = 'public' ORDER BY table_name
+    `);
+    const tables = tablesResult.rows.map(r => r.table_name);
+
+    // Check models table columns
+    let modelsColumns = [];
+    try {
+      const columnsResult = await pool.query(`
+        SELECT column_name, data_type FROM information_schema.columns
+        WHERE table_name = 'models' ORDER BY ordinal_position
+      `);
+      modelsColumns = columnsResult.rows;
+    } catch (e) {
+      modelsColumns = [{ error: e.message }];
+    }
+
+    // Try to query models
+    let modelsTest = null;
+    try {
+      const result = await pool.query('SELECT COUNT(*) as count FROM models');
+      modelsTest = { success: true, count: result.rows[0].count };
+    } catch (e) {
+      modelsTest = { success: false, error: e.message };
+    }
+
+    res.json({ tables, modelsColumns, modelsTest, dbInitStatus });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
   }
 });
 
@@ -6989,6 +7315,528 @@ const getNotificationMessage = (action, entity, data) => {
   };
   return messages[action] || `${action} ${entity}: ${name}`;
 };
+
+// ============================================
+// INTEGRATIONS API - Manage external service connections
+// ============================================
+
+// Supported providers configuration
+const INTEGRATION_PROVIDERS = {
+  eventbrite: {
+    name: 'Eventbrite',
+    icon: '🎪',
+    color: '#F6682F',
+    description: 'Import events and tickets from Eventbrite',
+    fields: ['api_key'],
+    testEndpoint: 'https://www.eventbriteapi.com/v3/users/me/'
+  },
+  mailchimp: {
+    name: 'Mailchimp',
+    icon: '📧',
+    color: '#FFE01B',
+    description: 'Sync guests with Mailchimp audiences',
+    fields: ['api_key', 'server_prefix'],
+    testEndpoint: null // Built dynamically with server prefix
+  },
+  ticketmaster: {
+    name: 'Ticketmaster',
+    icon: '🎫',
+    color: '#0068B3',
+    description: 'Sync events and tickets from Ticketmaster',
+    fields: ['api_key', 'api_secret'],
+    testEndpoint: 'https://app.ticketmaster.com/discovery/v2/events.json'
+  },
+  sendgrid: {
+    name: 'SendGrid',
+    icon: '✉️',
+    color: '#1A82E2',
+    description: 'Send transactional and marketing emails',
+    fields: ['api_key'],
+    testEndpoint: 'https://api.sendgrid.com/v3/user/profile'
+  },
+  twilio: {
+    name: 'Twilio',
+    icon: '📱',
+    color: '#F22F46',
+    description: 'SMS and WhatsApp messaging',
+    fields: ['account_sid', 'auth_token', 'phone_number'],
+    testEndpoint: null
+  }
+};
+
+// GET /api/v1/integrations - List all integrations with status
+app.get('/api/v1/integrations', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM integrations ORDER BY provider');
+
+    // Merge with provider config and mask API keys
+    const integrations = Object.keys(INTEGRATION_PROVIDERS).map(provider => {
+      const config = INTEGRATION_PROVIDERS[provider];
+      const saved = result.rows.find(r => r.provider === provider);
+
+      return {
+        provider,
+        ...config,
+        status: saved?.status || 'disconnected',
+        lastSync: saved?.last_sync,
+        lastError: saved?.last_error,
+        hasApiKey: !!saved?.api_key_encrypted,
+        apiKeyMasked: saved?.api_key_encrypted ? maskApiKey(decryptApiKey(saved.api_key_encrypted)) : null,
+        extraConfig: saved?.extra_config || {}
+      };
+    });
+
+    res.json({ integrations });
+  } catch (error) {
+    console.error('Error fetching integrations:', error);
+    res.status(500).json({ error: 'Failed to fetch integrations' });
+  }
+});
+
+// GET /api/v1/integrations/:provider - Get specific integration details
+app.get('/api/v1/integrations/:provider', async (req, res) => {
+  try {
+    const { provider } = req.params;
+
+    if (!INTEGRATION_PROVIDERS[provider]) {
+      return res.status(400).json({ error: 'Unknown provider' });
+    }
+
+    const result = await pool.query('SELECT * FROM integrations WHERE provider = $1', [provider]);
+    const saved = result.rows[0];
+    const config = INTEGRATION_PROVIDERS[provider];
+
+    res.json({
+      provider,
+      ...config,
+      status: saved?.status || 'disconnected',
+      lastSync: saved?.last_sync,
+      lastError: saved?.last_error,
+      hasApiKey: !!saved?.api_key_encrypted,
+      apiKeyMasked: saved?.api_key_encrypted ? maskApiKey(decryptApiKey(saved.api_key_encrypted)) : null,
+      extraConfig: saved?.extra_config || {}
+    });
+  } catch (error) {
+    console.error('Error fetching integration:', error);
+    res.status(500).json({ error: 'Failed to fetch integration' });
+  }
+});
+
+// POST /api/v1/integrations/:provider/config - Save API key configuration
+app.post('/api/v1/integrations/:provider/config', async (req, res) => {
+  try {
+    const { provider } = req.params;
+    const { apiKey, apiSecret, extraConfig } = req.body;
+
+    if (!INTEGRATION_PROVIDERS[provider]) {
+      return res.status(400).json({ error: 'Unknown provider' });
+    }
+
+    if (!apiKey) {
+      return res.status(400).json({ error: 'API key is required' });
+    }
+
+    const encryptedKey = encryptApiKey(apiKey);
+    const encryptedSecret = apiSecret ? encryptApiKey(apiSecret) : null;
+
+    // Upsert the integration config
+    const result = await pool.query(`
+      INSERT INTO integrations (provider, api_key_encrypted, api_secret_encrypted, extra_config, status, updated_at)
+      VALUES ($1, $2, $3, $4, 'pending', NOW())
+      ON CONFLICT (provider)
+      DO UPDATE SET
+        api_key_encrypted = $2,
+        api_secret_encrypted = $3,
+        extra_config = $4,
+        status = 'pending',
+        updated_at = NOW()
+      RETURNING *
+    `, [provider, encryptedKey, encryptedSecret, JSON.stringify(extraConfig || {})]);
+
+    res.json({
+      success: true,
+      message: 'Configuration saved. Click "Test Connection" to verify.',
+      integration: {
+        provider,
+        status: 'pending',
+        hasApiKey: true
+      }
+    });
+  } catch (error) {
+    console.error('Error saving integration config:', error);
+    res.status(500).json({ error: 'Failed to save configuration' });
+  }
+});
+
+// POST /api/v1/integrations/:provider/test - Test the connection
+app.post('/api/v1/integrations/:provider/test', async (req, res) => {
+  try {
+    const { provider } = req.params;
+
+    if (!INTEGRATION_PROVIDERS[provider]) {
+      return res.status(400).json({ error: 'Unknown provider' });
+    }
+
+    // Get saved credentials
+    const result = await pool.query('SELECT * FROM integrations WHERE provider = $1', [provider]);
+    const saved = result.rows[0];
+
+    if (!saved?.api_key_encrypted) {
+      return res.status(400).json({ error: 'No API key configured for this provider' });
+    }
+
+    const apiKey = decryptApiKey(saved.api_key_encrypted);
+    const apiSecret = saved.api_secret_encrypted ? decryptApiKey(saved.api_secret_encrypted) : null;
+    const extraConfig = saved.extra_config || {};
+
+    let testResult = { success: false, message: '' };
+
+    // Test connection based on provider
+    switch (provider) {
+      case 'eventbrite':
+        try {
+          const ebResponse = await fetch('https://www.eventbriteapi.com/v3/users/me/', {
+            headers: { 'Authorization': `Bearer ${apiKey}` }
+          });
+          if (ebResponse.ok) {
+            const userData = await ebResponse.json();
+            testResult = { success: true, message: `Connected as ${userData.name || userData.email}` };
+          } else {
+            const error = await ebResponse.json();
+            testResult = { success: false, message: error.error_description || 'Invalid API key' };
+          }
+        } catch (e) {
+          testResult = { success: false, message: 'Connection failed: ' + e.message };
+        }
+        break;
+
+      case 'mailchimp':
+        try {
+          const serverPrefix = extraConfig.server_prefix || 'us21';
+          const mcResponse = await fetch(`https://${serverPrefix}.api.mailchimp.com/3.0/ping`, {
+            headers: { 'Authorization': `apikey ${apiKey}` }
+          });
+          if (mcResponse.ok) {
+            testResult = { success: true, message: 'Connected to Mailchimp successfully' };
+          } else {
+            testResult = { success: false, message: 'Invalid API key or server prefix' };
+          }
+        } catch (e) {
+          testResult = { success: false, message: 'Connection failed: ' + e.message };
+        }
+        break;
+
+      case 'ticketmaster':
+        try {
+          const tmResponse = await fetch(`https://app.ticketmaster.com/discovery/v2/events.json?apikey=${apiKey}&size=1`);
+          if (tmResponse.ok) {
+            testResult = { success: true, message: 'Connected to Ticketmaster API' };
+          } else {
+            testResult = { success: false, message: 'Invalid API key' };
+          }
+        } catch (e) {
+          testResult = { success: false, message: 'Connection failed: ' + e.message };
+        }
+        break;
+
+      case 'sendgrid':
+        try {
+          const sgResponse = await fetch('https://api.sendgrid.com/v3/user/profile', {
+            headers: { 'Authorization': `Bearer ${apiKey}` }
+          });
+          if (sgResponse.ok) {
+            testResult = { success: true, message: 'Connected to SendGrid' };
+          } else {
+            testResult = { success: false, message: 'Invalid API key' };
+          }
+        } catch (e) {
+          testResult = { success: false, message: 'Connection failed: ' + e.message };
+        }
+        break;
+
+      case 'twilio':
+        try {
+          const accountSid = apiKey;
+          const authToken = apiSecret;
+          const twilioAuth = Buffer.from(`${accountSid}:${authToken}`).toString('base64');
+          const twResponse = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${accountSid}.json`, {
+            headers: { 'Authorization': `Basic ${twilioAuth}` }
+          });
+          if (twResponse.ok) {
+            testResult = { success: true, message: 'Connected to Twilio' };
+          } else {
+            testResult = { success: false, message: 'Invalid Account SID or Auth Token' };
+          }
+        } catch (e) {
+          testResult = { success: false, message: 'Connection failed: ' + e.message };
+        }
+        break;
+
+      default:
+        testResult = { success: false, message: 'Provider test not implemented' };
+    }
+
+    // Update status in database
+    await pool.query(`
+      UPDATE integrations
+      SET status = $1, last_error = $2, updated_at = NOW()
+      WHERE provider = $3
+    `, [testResult.success ? 'connected' : 'error', testResult.success ? null : testResult.message, provider]);
+
+    res.json(testResult);
+  } catch (error) {
+    console.error('Error testing integration:', error);
+    res.status(500).json({ error: 'Failed to test connection' });
+  }
+});
+
+// DELETE /api/v1/integrations/:provider - Disconnect integration
+app.delete('/api/v1/integrations/:provider', async (req, res) => {
+  try {
+    const { provider } = req.params;
+
+    await pool.query('DELETE FROM integrations WHERE provider = $1', [provider]);
+
+    res.json({ success: true, message: `${provider} disconnected` });
+  } catch (error) {
+    console.error('Error disconnecting integration:', error);
+    res.status(500).json({ error: 'Failed to disconnect' });
+  }
+});
+
+// ============================================
+// EVENTBRITE SYNC - Import events and tickets
+// ============================================
+
+// POST /api/v1/integrations/eventbrite/sync - Sync events from Eventbrite
+app.post('/api/v1/integrations/eventbrite/sync', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM integrations WHERE provider = $1', ['eventbrite']);
+    const saved = result.rows[0];
+
+    if (!saved?.api_key_encrypted || saved.status !== 'connected') {
+      return res.status(400).json({ error: 'Eventbrite not connected' });
+    }
+
+    const apiKey = decryptApiKey(saved.api_key_encrypted);
+
+    // Get user's organizations
+    const orgResponse = await fetch('https://www.eventbriteapi.com/v3/users/me/organizations/', {
+      headers: { 'Authorization': `Bearer ${apiKey}` }
+    });
+
+    if (!orgResponse.ok) {
+      return res.status(400).json({ error: 'Failed to fetch organizations' });
+    }
+
+    const orgData = await orgResponse.json();
+    const organizations = orgData.organizations || [];
+
+    let totalEvents = 0;
+    let totalTickets = 0;
+
+    // For each organization, get events
+    for (const org of organizations) {
+      const eventsResponse = await fetch(`https://www.eventbriteapi.com/v3/organizations/${org.id}/events/?status=live,started,ended&expand=ticket_classes`, {
+        headers: { 'Authorization': `Bearer ${apiKey}` }
+      });
+
+      if (!eventsResponse.ok) continue;
+
+      const eventsData = await eventsResponse.json();
+      const events = eventsData.events || [];
+
+      for (const event of events) {
+        // Upsert event into our events table
+        await pool.query(`
+          INSERT INTO events (name, description, venue_name, start_date, end_date, status, external_id, external_source)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, 'eventbrite')
+          ON CONFLICT (external_id) WHERE external_source = 'eventbrite'
+          DO UPDATE SET name = $1, description = $2, updated_at = NOW()
+        `, [
+          event.name?.text || 'Untitled Event',
+          event.description?.text || '',
+          event.venue?.name || '',
+          event.start?.utc,
+          event.end?.utc,
+          event.status === 'live' ? 'upcoming' : event.status,
+          event.id
+        ]).catch(() => {}); // Ignore if external_id column doesn't exist
+
+        totalEvents++;
+
+        // Get attendees/tickets for this event
+        const attendeesResponse = await fetch(`https://www.eventbriteapi.com/v3/events/${event.id}/attendees/`, {
+          headers: { 'Authorization': `Bearer ${apiKey}` }
+        });
+
+        if (attendeesResponse.ok) {
+          const attendeesData = await attendeesResponse.json();
+          const attendees = attendeesData.attendees || [];
+
+          for (const attendee of attendees) {
+            const ticketId = `eb_${attendee.id}`;
+            await pool.query(`
+              INSERT INTO tickets (id, event_id, external_id, ticket_type, holder_name, holder_email, status, source, created_at)
+              VALUES ($1, $2, $3, $4, $5, $6, $7, 'eventbrite', NOW())
+              ON CONFLICT (id) DO UPDATE SET
+                holder_name = $5,
+                holder_email = $6,
+                status = $7,
+                updated_at = NOW()
+            `, [
+              ticketId,
+              event.id,
+              attendee.id,
+              attendee.ticket_class_name || 'General',
+              attendee.profile?.name || '',
+              attendee.profile?.email || '',
+              attendee.cancelled ? 'cancelled' : (attendee.checked_in ? 'used' : 'valid')
+            ]);
+            totalTickets++;
+          }
+        }
+      }
+    }
+
+    // Update last sync time
+    await pool.query(`
+      UPDATE integrations SET last_sync = NOW(), updated_at = NOW() WHERE provider = 'eventbrite'
+    `);
+
+    res.json({
+      success: true,
+      message: `Synced ${totalEvents} events and ${totalTickets} tickets from Eventbrite`,
+      eventsImported: totalEvents,
+      ticketsImported: totalTickets
+    });
+  } catch (error) {
+    console.error('Error syncing Eventbrite:', error);
+    res.status(500).json({ error: 'Failed to sync with Eventbrite: ' + error.message });
+  }
+});
+
+// ============================================
+// MAILCHIMP SYNC - Sync guests to audiences
+// ============================================
+
+// GET /api/v1/integrations/mailchimp/audiences - List Mailchimp audiences
+app.get('/api/v1/integrations/mailchimp/audiences', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM integrations WHERE provider = $1', ['mailchimp']);
+    const saved = result.rows[0];
+
+    if (!saved?.api_key_encrypted || saved.status !== 'connected') {
+      return res.status(400).json({ error: 'Mailchimp not connected' });
+    }
+
+    const apiKey = decryptApiKey(saved.api_key_encrypted);
+    const serverPrefix = saved.extra_config?.server_prefix || 'us21';
+
+    const response = await fetch(`https://${serverPrefix}.api.mailchimp.com/3.0/lists`, {
+      headers: { 'Authorization': `apikey ${apiKey}` }
+    });
+
+    if (!response.ok) {
+      return res.status(400).json({ error: 'Failed to fetch audiences' });
+    }
+
+    const data = await response.json();
+    const audiences = (data.lists || []).map(list => ({
+      id: list.id,
+      name: list.name,
+      memberCount: list.stats?.member_count || 0
+    }));
+
+    res.json({ audiences });
+  } catch (error) {
+    console.error('Error fetching Mailchimp audiences:', error);
+    res.status(500).json({ error: 'Failed to fetch audiences' });
+  }
+});
+
+// POST /api/v1/integrations/mailchimp/sync - Sync guests to Mailchimp audience
+app.post('/api/v1/integrations/mailchimp/sync', async (req, res) => {
+  try {
+    const { audienceId, guestFilter } = req.body; // guestFilter: 'all', 'vip', 'checked_in'
+
+    const intResult = await pool.query('SELECT * FROM integrations WHERE provider = $1', ['mailchimp']);
+    const saved = intResult.rows[0];
+
+    if (!saved?.api_key_encrypted || saved.status !== 'connected') {
+      return res.status(400).json({ error: 'Mailchimp not connected' });
+    }
+
+    if (!audienceId) {
+      return res.status(400).json({ error: 'Audience ID is required' });
+    }
+
+    const apiKey = decryptApiKey(saved.api_key_encrypted);
+    const serverPrefix = saved.extra_config?.server_prefix || 'us21';
+
+    // Get guests based on filter
+    let guestQuery = 'SELECT * FROM guests WHERE email IS NOT NULL AND email != \'\'';
+    if (guestFilter === 'vip') {
+      guestQuery += " AND category = 'vip'";
+    } else if (guestFilter === 'checked_in') {
+      guestQuery += ' AND checked_in_at IS NOT NULL';
+    }
+
+    const guestsResult = await pool.query(guestQuery);
+    const guests = guestsResult.rows;
+
+    if (guests.length === 0) {
+      return res.json({ success: true, message: 'No guests to sync', synced: 0 });
+    }
+
+    // Prepare batch for Mailchimp
+    const members = guests.map(g => ({
+      email_address: g.email,
+      status: 'subscribed',
+      merge_fields: {
+        FNAME: g.name?.split(' ')[0] || '',
+        LNAME: g.name?.split(' ').slice(1).join(' ') || '',
+        PHONE: g.phone || ''
+      }
+    }));
+
+    // Batch add/update members
+    const response = await fetch(`https://${serverPrefix}.api.mailchimp.com/3.0/lists/${audienceId}`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `apikey ${apiKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        members,
+        update_existing: true
+      })
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      return res.status(400).json({ error: error.detail || 'Failed to sync' });
+    }
+
+    const result = await response.json();
+
+    // Update last sync time
+    await pool.query(`
+      UPDATE integrations SET last_sync = NOW(), updated_at = NOW() WHERE provider = 'mailchimp'
+    `);
+
+    res.json({
+      success: true,
+      message: `Synced ${result.total_created + result.total_updated} contacts to Mailchimp`,
+      created: result.total_created,
+      updated: result.total_updated,
+      errors: result.error_count
+    });
+  } catch (error) {
+    console.error('Error syncing to Mailchimp:', error);
+    res.status(500).json({ error: 'Failed to sync with Mailchimp: ' + error.message });
+  }
+});
 
 // Start server
 const startServer = async () => {

@@ -38,7 +38,7 @@ const categoryToStatus = (category: GuestCategory): string => {
 
 type GuestCategory = 'pending' | 'A' | 'B' | 'C' | 'rejected';
 type GuestStatus = 'pending' | 'approved' | 'declined' | 'rejected';
-type ViewType = 'overview' | 'guests' | 'emails' | 'vip' | 'priority' | 'standard' | 'analytics' | 'automation' | 'checkin' | 'models' | 'tables' | 'tickets' | 'sponsors' | 'events' | 'budget' | 'vendors' | 'staff' | 'client-portal' | 'monitoring';
+type ViewType = 'overview' | 'guests' | 'emails' | 'vip' | 'priority' | 'standard' | 'analytics' | 'automation' | 'checkin' | 'models' | 'tables' | 'tickets' | 'sponsors' | 'events' | 'budget' | 'vendors' | 'staff' | 'client-portal' | 'monitoring' | 'integrations';
 type ThemeMode = 'dark' | 'light';
 
 interface Purchase {
@@ -228,6 +228,22 @@ interface Event {
 
 // EventTimeline and EventChecklist interfaces will be added when
 // timeline and checklist features are implemented in the UI
+
+// Integration Interface for external service connections
+interface Integration {
+  provider: string;
+  name: string;
+  icon: string;
+  color: string;
+  description: string;
+  fields: string[];
+  status: 'connected' | 'disconnected' | 'pending' | 'error';
+  lastSync?: string;
+  lastError?: string;
+  hasApiKey: boolean;
+  apiKeyMasked?: string;
+  extraConfig?: Record<string, string>;
+}
 
 // Budget Interfaces
 interface BudgetCategory {
@@ -1088,6 +1104,13 @@ function App() {
   });
   const [selectedStaff, setSelectedStaff] = useState<Staff | null>(null);
 
+  // Integrations state
+  const [integrations, setIntegrations] = useState<Integration[]>([]);
+  const [selectedIntegration, setSelectedIntegration] = useState<Integration | null>(null);
+  const [integrationFormData, setIntegrationFormData] = useState({ apiKey: '', apiSecret: '', serverPrefix: '' });
+  const [integrationLoading, setIntegrationLoading] = useState<string | null>(null);
+  const [mailchimpAudiences, setMailchimpAudiences] = useState<{id: string, name: string, memberCount: number}[]>([]);
+
   // Client Portal state
   const [clientAccesses, setClientAccesses] = useState<ClientAccess[]>([]);
   const [showClientAccessForm, setShowClientAccessForm] = useState(false);
@@ -1224,6 +1247,134 @@ function App() {
       console.error('Error fetching tickets:', error);
     }
   }, []);
+
+  // Fetch Integrations
+  const fetchIntegrations = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_URL}/integrations`);
+      const data = await res.json();
+      setIntegrations(data.integrations || []);
+    } catch (error) {
+      console.error('Error fetching integrations:', error);
+    }
+  }, []);
+
+  // Save Integration Config
+  const saveIntegrationConfig = async (provider: string) => {
+    setIntegrationLoading(provider);
+    try {
+      const extraConfig: Record<string, string> = {};
+      if (provider === 'mailchimp' && integrationFormData.serverPrefix) {
+        extraConfig.server_prefix = integrationFormData.serverPrefix;
+      }
+
+      const res = await fetch(`${API_URL}/integrations/${provider}/config`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          apiKey: integrationFormData.apiKey,
+          apiSecret: integrationFormData.apiSecret || undefined,
+          extraConfig
+        })
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        addToast('Configuration saved! Click Test Connection to verify.', 'success');
+        fetchIntegrations();
+        setIntegrationFormData({ apiKey: '', apiSecret: '', serverPrefix: '' });
+      } else {
+        addToast(data.error || 'Failed to save', 'error');
+      }
+    } catch (error) {
+      addToast('Failed to save configuration', 'error');
+    } finally {
+      setIntegrationLoading(null);
+    }
+  };
+
+  // Test Integration Connection
+  const testIntegration = async (provider: string) => {
+    setIntegrationLoading(provider);
+    try {
+      const res = await fetch(`${API_URL}/integrations/${provider}/test`, {
+        method: 'POST'
+      });
+      const data = await res.json();
+      if (data.success) {
+        addToast(data.message || 'Connected successfully!', 'success');
+      } else {
+        addToast(data.message || 'Connection failed', 'error');
+      }
+      fetchIntegrations();
+    } catch (error) {
+      addToast('Connection test failed', 'error');
+    } finally {
+      setIntegrationLoading(null);
+    }
+  };
+
+  // Sync with Integration
+  const syncIntegration = async (provider: string, options?: Record<string, string>) => {
+    setIntegrationLoading(provider);
+    try {
+      const res = await fetch(`${API_URL}/integrations/${provider}/sync`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(options || {})
+      });
+      const data = await res.json();
+      if (data.success) {
+        addToast(data.message || 'Sync completed!', 'success');
+        // Refresh relevant data
+        if (provider === 'eventbrite') {
+          fetchTickets();
+          fetchEvents();
+        }
+      } else {
+        addToast(data.error || 'Sync failed', 'error');
+      }
+    } catch (error) {
+      addToast('Sync failed', 'error');
+    } finally {
+      setIntegrationLoading(null);
+    }
+  };
+
+  // Disconnect Integration
+  const disconnectIntegration = async (provider: string) => {
+    if (!confirm(`Are you sure you want to disconnect ${provider}?`)) return;
+
+    setIntegrationLoading(provider);
+    try {
+      const res = await fetch(`${API_URL}/integrations/${provider}`, {
+        method: 'DELETE'
+      });
+      const data = await res.json();
+      if (data.success) {
+        addToast(`${provider} disconnected`, 'success');
+        fetchIntegrations();
+        setSelectedIntegration(null);
+      } else {
+        addToast(data.error || 'Failed to disconnect', 'error');
+      }
+    } catch (error) {
+      addToast('Failed to disconnect', 'error');
+    } finally {
+      setIntegrationLoading(null);
+    }
+  };
+
+  // Fetch Mailchimp Audiences
+  const fetchMailchimpAudiences = async () => {
+    try {
+      const res = await fetch(`${API_URL}/integrations/mailchimp/audiences`);
+      const data = await res.json();
+      setMailchimpAudiences(data.audiences || []);
+    } catch (error) {
+      console.error('Error fetching audiences:', error);
+    }
+  };
 
   // Fetch Sponsors
   const fetchSponsors = useCallback(async () => {
@@ -1733,7 +1884,8 @@ function App() {
     if (activeView === 'staff') fetchStaff();
     if (activeView === 'budget' && selectedEvent) fetchBudget(selectedEvent.id);
     if (activeView === 'monitoring') fetchHealthStatus();
-  }, [activeView, fetchModels, fetchTables, fetchTickets, fetchSponsors, fetchEvents, fetchVendors, fetchStaff, fetchBudget, fetchHealthStatus, selectedEvent]);
+    if (activeView === 'integrations') fetchIntegrations();
+  }, [activeView, fetchModels, fetchTables, fetchTickets, fetchSponsors, fetchEvents, fetchVendors, fetchStaff, fetchBudget, fetchHealthStatus, fetchIntegrations, selectedEvent]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -2344,6 +2496,7 @@ function App() {
           {/* System Menu */}
           <CollapsibleMenu title="SYSTEM" expanded={expandedMenus.has('system')} onToggle={() => toggleMenu('system')}>
             <NavItem label="Monitoring" active={activeView === 'monitoring'} icon="📊" onClick={() => navigateTo('monitoring')} />
+            <NavItem label="Integrations" active={activeView === 'integrations'} icon="🔌" count={integrations.filter(i => i.status === 'connected').length} onClick={() => navigateTo('integrations')} />
           </CollapsibleMenu>
         </nav>
 
@@ -4950,6 +5103,313 @@ function App() {
                 <div style={{ padding: 12, background: '#111', borderRadius: 8 }}>
                   <span style={{ color: '#22c55e' }}>GET</span> <span style={{ color: '#888' }}>/api/v1/health/test-apis</span>
                   <div style={{ fontSize: 11, color: '#666', marginTop: 4 }}>Test all API endpoints</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Integrations Page */}
+        {activeView === 'integrations' && (
+          <div className="page-content" style={{ padding: 32, animation: 'fadeIn 0.3s ease' }}>
+            <div style={{ marginBottom: 24 }}>
+              <h2 style={{ fontSize: 20, fontWeight: 600, margin: 0 }}>Integrations</h2>
+              <p style={{ fontSize: 13, color: '#666', margin: '4px 0 0' }}>
+                Connect external services to sync tickets, guests, and send campaigns
+              </p>
+            </div>
+
+            {/* Integration Cards Grid */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(350px, 1fr))', gap: 20 }}>
+              {integrations.map((integration) => (
+                <div
+                  key={integration.provider}
+                  style={{
+                    background: '#0a0a0a',
+                    border: `1px solid ${integration.status === 'connected' ? integration.color + '40' : '#1a1a1a'}`,
+                    borderRadius: 12,
+                    padding: 20,
+                    transition: 'all 0.2s'
+                  }}
+                >
+                  {/* Header */}
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                      <span style={{ fontSize: 28 }}>{integration.icon}</span>
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: 16 }}>{integration.name}</div>
+                        <div style={{ fontSize: 12, color: '#666' }}>{integration.description}</div>
+                      </div>
+                    </div>
+                    <span style={{
+                      background: integration.status === 'connected' ? '#22c55e20' :
+                                  integration.status === 'pending' ? '#f59e0b20' :
+                                  integration.status === 'error' ? '#ef444420' : '#1a1a1a',
+                      color: integration.status === 'connected' ? '#22c55e' :
+                             integration.status === 'pending' ? '#f59e0b' :
+                             integration.status === 'error' ? '#ef4444' : '#666',
+                      padding: '4px 10px',
+                      borderRadius: 6,
+                      fontSize: 11,
+                      fontWeight: 600,
+                      textTransform: 'uppercase'
+                    }}>
+                      {integration.status}
+                    </span>
+                  </div>
+
+                  {/* Last Sync Info */}
+                  {integration.lastSync && (
+                    <div style={{ fontSize: 12, color: '#666', marginBottom: 12 }}>
+                      Last synced: {new Date(integration.lastSync).toLocaleString()}
+                    </div>
+                  )}
+
+                  {/* Error Message */}
+                  {integration.lastError && integration.status === 'error' && (
+                    <div style={{ background: '#ef444420', border: '1px solid #ef444440', borderRadius: 8, padding: 10, marginBottom: 12, fontSize: 12, color: '#fca5a5' }}>
+                      {integration.lastError}
+                    </div>
+                  )}
+
+                  {/* Configuration Form - Show when not connected or when editing */}
+                  {(integration.status === 'disconnected' || integration.status === 'error' || selectedIntegration?.provider === integration.provider) && (
+                    <div style={{ marginBottom: 16 }}>
+                      <div style={{ marginBottom: 12 }}>
+                        <label style={{ fontSize: 12, color: '#888', display: 'block', marginBottom: 4 }}>
+                          {integration.provider === 'twilio' ? 'Account SID' : 'API Key'}
+                        </label>
+                        <input
+                          type="password"
+                          placeholder={integration.hasApiKey ? '••••••••' : 'Enter your API key'}
+                          value={selectedIntegration?.provider === integration.provider ? integrationFormData.apiKey : ''}
+                          onChange={(e) => {
+                            setSelectedIntegration(integration);
+                            setIntegrationFormData(prev => ({ ...prev, apiKey: e.target.value }));
+                          }}
+                          onFocus={() => setSelectedIntegration(integration)}
+                          style={{
+                            width: '100%',
+                            background: '#111',
+                            border: '1px solid #333',
+                            borderRadius: 8,
+                            padding: '10px 12px',
+                            fontSize: 14,
+                            color: '#fff'
+                          }}
+                        />
+                      </div>
+
+                      {/* Additional fields for specific providers */}
+                      {integration.provider === 'mailchimp' && (
+                        <div style={{ marginBottom: 12 }}>
+                          <label style={{ fontSize: 12, color: '#888', display: 'block', marginBottom: 4 }}>Server Prefix (e.g., us21)</label>
+                          <input
+                            type="text"
+                            placeholder="us21"
+                            value={selectedIntegration?.provider === integration.provider ? integrationFormData.serverPrefix : (integration.extraConfig?.server_prefix || '')}
+                            onChange={(e) => setIntegrationFormData(prev => ({ ...prev, serverPrefix: e.target.value }))}
+                            style={{
+                              width: '100%',
+                              background: '#111',
+                              border: '1px solid #333',
+                              borderRadius: 8,
+                              padding: '10px 12px',
+                              fontSize: 14,
+                              color: '#fff'
+                            }}
+                          />
+                        </div>
+                      )}
+
+                      {(integration.provider === 'twilio' || integration.provider === 'ticketmaster') && (
+                        <div style={{ marginBottom: 12 }}>
+                          <label style={{ fontSize: 12, color: '#888', display: 'block', marginBottom: 4 }}>
+                            {integration.provider === 'twilio' ? 'Auth Token' : 'API Secret'}
+                          </label>
+                          <input
+                            type="password"
+                            placeholder="Enter secret"
+                            value={selectedIntegration?.provider === integration.provider ? integrationFormData.apiSecret : ''}
+                            onChange={(e) => setIntegrationFormData(prev => ({ ...prev, apiSecret: e.target.value }))}
+                            style={{
+                              width: '100%',
+                              background: '#111',
+                              border: '1px solid #333',
+                              borderRadius: 8,
+                              padding: '10px 12px',
+                              fontSize: 14,
+                              color: '#fff'
+                            }}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Action Buttons */}
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    {/* Save button - only show if form is being edited */}
+                    {selectedIntegration?.provider === integration.provider && integrationFormData.apiKey && (
+                      <button
+                        onClick={() => saveIntegrationConfig(integration.provider)}
+                        disabled={integrationLoading === integration.provider}
+                        style={{
+                          background: integration.color,
+                          color: '#000',
+                          border: 'none',
+                          padding: '8px 16px',
+                          borderRadius: 6,
+                          fontSize: 13,
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                          opacity: integrationLoading === integration.provider ? 0.6 : 1
+                        }}
+                      >
+                        {integrationLoading === integration.provider ? 'Saving...' : 'Save'}
+                      </button>
+                    )}
+
+                    {/* Test Connection */}
+                    {integration.hasApiKey && (
+                      <button
+                        onClick={() => testIntegration(integration.provider)}
+                        disabled={integrationLoading === integration.provider}
+                        style={{
+                          background: '#1a1a1a',
+                          color: '#fff',
+                          border: '1px solid #333',
+                          padding: '8px 16px',
+                          borderRadius: 6,
+                          fontSize: 13,
+                          cursor: 'pointer',
+                          opacity: integrationLoading === integration.provider ? 0.6 : 1
+                        }}
+                      >
+                        {integrationLoading === integration.provider ? 'Testing...' : 'Test Connection'}
+                      </button>
+                    )}
+
+                    {/* Sync button - only for connected integrations */}
+                    {integration.status === 'connected' && (integration.provider === 'eventbrite' || integration.provider === 'mailchimp') && (
+                      <button
+                        onClick={() => {
+                          if (integration.provider === 'mailchimp') {
+                            fetchMailchimpAudiences();
+                            addToast('Select an audience to sync guests', 'info');
+                          } else {
+                            syncIntegration(integration.provider);
+                          }
+                        }}
+                        disabled={integrationLoading === integration.provider}
+                        style={{
+                          background: '#22c55e20',
+                          color: '#22c55e',
+                          border: '1px solid #22c55e40',
+                          padding: '8px 16px',
+                          borderRadius: 6,
+                          fontSize: 13,
+                          cursor: 'pointer',
+                          opacity: integrationLoading === integration.provider ? 0.6 : 1
+                        }}
+                      >
+                        {integrationLoading === integration.provider ? 'Syncing...' :
+                         integration.provider === 'eventbrite' ? 'Sync Events & Tickets' : 'Sync to Mailchimp'}
+                      </button>
+                    )}
+
+                    {/* Disconnect button */}
+                    {integration.status === 'connected' && (
+                      <button
+                        onClick={() => disconnectIntegration(integration.provider)}
+                        style={{
+                          background: 'transparent',
+                          color: '#ef4444',
+                          border: '1px solid #ef444440',
+                          padding: '8px 16px',
+                          borderRadius: 6,
+                          fontSize: 13,
+                          cursor: 'pointer'
+                        }}
+                      >
+                        Disconnect
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Mailchimp Audiences Selector */}
+                  {integration.provider === 'mailchimp' && integration.status === 'connected' && mailchimpAudiences.length > 0 && (
+                    <div style={{ marginTop: 16, padding: 12, background: '#111', borderRadius: 8 }}>
+                      <div style={{ fontSize: 12, color: '#888', marginBottom: 8 }}>Select audience to sync guests:</div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                        {mailchimpAudiences.map(audience => (
+                          <button
+                            key={audience.id}
+                            onClick={() => syncIntegration('mailchimp', { audienceId: audience.id, guestFilter: 'all' })}
+                            style={{
+                              background: '#1a1a1a',
+                              border: '1px solid #333',
+                              color: '#fff',
+                              padding: '10px 12px',
+                              borderRadius: 6,
+                              fontSize: 13,
+                              cursor: 'pointer',
+                              textAlign: 'left',
+                              display: 'flex',
+                              justifyContent: 'space-between'
+                            }}
+                          >
+                            <span>{audience.name}</span>
+                            <span style={{ color: '#666' }}>{audience.memberCount} members</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Masked API Key display */}
+                  {integration.hasApiKey && integration.apiKeyMasked && integration.status !== 'disconnected' && (
+                    <div style={{ marginTop: 12, fontSize: 11, color: '#444' }}>
+                      API Key: {integration.apiKeyMasked}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            {/* Help Section */}
+            <div style={{ marginTop: 32, background: '#0a0a0a', border: '1px solid #1a1a1a', borderRadius: 12, padding: 20 }}>
+              <h3 style={{ fontSize: 14, color: '#888', marginBottom: 16, textTransform: 'uppercase', letterSpacing: 1 }}>How to get API Keys</h3>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16 }}>
+                <div style={{ padding: 12, background: '#111', borderRadius: 8 }}>
+                  <div style={{ fontWeight: 600, marginBottom: 4 }}>🎪 Eventbrite</div>
+                  <div style={{ fontSize: 12, color: '#888' }}>
+                    Go to <a href="https://www.eventbrite.com/platform/api-keys" target="_blank" rel="noopener noreferrer" style={{ color: '#F6682F' }}>Eventbrite API Keys</a> → Create a Private Token
+                  </div>
+                </div>
+                <div style={{ padding: 12, background: '#111', borderRadius: 8 }}>
+                  <div style={{ fontWeight: 600, marginBottom: 4 }}>📧 Mailchimp</div>
+                  <div style={{ fontSize: 12, color: '#888' }}>
+                    Go to Account → Extras → <a href="https://admin.mailchimp.com/account/api/" target="_blank" rel="noopener noreferrer" style={{ color: '#FFE01B' }}>API Keys</a> → Create a Key
+                  </div>
+                </div>
+                <div style={{ padding: 12, background: '#111', borderRadius: 8 }}>
+                  <div style={{ fontWeight: 600, marginBottom: 4 }}>🎫 Ticketmaster</div>
+                  <div style={{ fontSize: 12, color: '#888' }}>
+                    Register at <a href="https://developer.ticketmaster.com/" target="_blank" rel="noopener noreferrer" style={{ color: '#0068B3' }}>Ticketmaster Developer</a> → Get your API key
+                  </div>
+                </div>
+                <div style={{ padding: 12, background: '#111', borderRadius: 8 }}>
+                  <div style={{ fontWeight: 600, marginBottom: 4 }}>✉️ SendGrid</div>
+                  <div style={{ fontSize: 12, color: '#888' }}>
+                    Go to <a href="https://app.sendgrid.com/settings/api_keys" target="_blank" rel="noopener noreferrer" style={{ color: '#1A82E2' }}>SendGrid API Keys</a> → Create API Key
+                  </div>
+                </div>
+                <div style={{ padding: 12, background: '#111', borderRadius: 8 }}>
+                  <div style={{ fontWeight: 600, marginBottom: 4 }}>📱 Twilio</div>
+                  <div style={{ fontSize: 12, color: '#888' }}>
+                    Go to <a href="https://console.twilio.com/" target="_blank" rel="noopener noreferrer" style={{ color: '#F22F46' }}>Twilio Console</a> → Copy Account SID & Auth Token
+                  </div>
                 </div>
               </div>
             </div>
