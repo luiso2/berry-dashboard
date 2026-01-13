@@ -7702,6 +7702,7 @@ app.post('/api/v1/integrations/eventbrite/sync', async (req, res) => {
 
     let totalEvents = 0;
     let totalTickets = 0;
+    let insertErrors = [];
 
     // For each organization, get events
     for (const org of organizations) {
@@ -7779,19 +7780,22 @@ app.post('/api/v1/integrations/eventbrite/sync', async (req, res) => {
             console.log(`✅ Inserted Eventbrite event: ${event.name?.text}`);
           } catch (insertErr) {
             console.error(`❌ Failed to insert event ${event.name?.text}:`, insertErr.message);
-            // Try fallback insert with minimal columns
+            insertErrors.push({ event: event.name?.text, error: insertErr.message });
+            // Try fallback insert with minimal columns (name and event_date are required per schema)
             try {
               await pool.query(`
-                INSERT INTO events (title, date, status, category)
-                VALUES ($1, $2, $3, 'eventbrite')
+                INSERT INTO events (name, event_date, status)
+                VALUES ($1, $2, $3)
               `, [
                 event.name?.text || 'Untitled Event',
                 eventDate,
                 eventStatus
               ]);
               console.log(`✅ Inserted Eventbrite event with minimal columns: ${event.name?.text}`);
+              insertErrors.pop(); // Remove the error since fallback worked
             } catch (fallbackErr) {
               console.error(`❌ Fallback insert also failed:`, fallbackErr.message);
+              insertErrors[insertErrors.length - 1].fallbackError = fallbackErr.message;
             }
           }
         }
@@ -7837,11 +7841,16 @@ app.post('/api/v1/integrations/eventbrite/sync', async (req, res) => {
       UPDATE integrations SET last_sync = NOW(), updated_at = NOW() WHERE provider = 'eventbrite'
     `);
 
+    // Get current event count to verify inserts worked
+    const eventCount = await pool.query('SELECT COUNT(*) FROM events');
+
     res.json({
       success: true,
       message: `Synced ${totalEvents} events and ${totalTickets} tickets from Eventbrite`,
       eventsImported: totalEvents,
-      ticketsImported: totalTickets
+      ticketsImported: totalTickets,
+      totalEventsInDb: parseInt(eventCount.rows[0].count),
+      insertErrors: insertErrors.length > 0 ? insertErrors : undefined
     });
   } catch (error) {
     console.error('Error syncing Eventbrite:', error);
