@@ -38,7 +38,7 @@ const categoryToStatus = (category: GuestCategory): string => {
 
 type GuestCategory = 'pending' | 'A' | 'B' | 'C' | 'rejected';
 type GuestStatus = 'pending' | 'approved' | 'declined' | 'rejected';
-type ViewType = 'overview' | 'guests' | 'emails' | 'analytics' | 'automation' | 'checkin' | 'models' | 'tables' | 'tickets' | 'sponsors' | 'events' | 'budget' | 'vendors' | 'staff' | 'monitoring' | 'integrations';
+type ViewType = 'overview' | 'guests' | 'emails' | 'analytics' | 'automation' | 'checkin' | 'models' | 'tables' | 'tickets' | 'sponsors' | 'promoters' | 'events' | 'budget' | 'vendors' | 'staff' | 'monitoring' | 'integrations';
 type ThemeMode = 'dark' | 'light';
 
 interface Purchase {
@@ -214,6 +214,41 @@ interface Sponsor {
   contractSigned: boolean;
   paymentStatus: 'pending' | 'partial' | 'complete';
   benefits: string[];
+  createdAt: string;
+}
+
+interface Promoter {
+  id: number;
+  name: string;
+  email: string;
+  phone?: string;
+  code: string;
+  commissionRate: number;
+  commissionType: 'percentage' | 'fixed';
+  status: 'active' | 'inactive' | 'pending';
+  tier: 'bronze' | 'silver' | 'gold' | 'platinum';
+  bio?: string;
+  photoUrl?: string;
+  socialInstagram?: string;
+  socialTiktok?: string;
+  socialTwitter?: string;
+  totalSales: number;
+  totalCommission: number;
+  totalTicketsSold: number;
+  totalGuestsReferred: number;
+  lastSaleAt?: string;
+  createdAt: string;
+}
+
+interface PromoterSale {
+  id: number;
+  promoterId: number;
+  eventId?: number;
+  guestName?: string;
+  guestEmail?: string;
+  saleAmount: number;
+  commissionAmount: number;
+  commissionStatus: 'pending' | 'approved' | 'paid';
   createdAt: string;
 }
 
@@ -1110,6 +1145,14 @@ function App() {
   const [selectedSponsor, setSelectedSponsor] = useState<Sponsor | null>(null);
   const [showFlyerGenerator, setShowFlyerGenerator] = useState(false);
 
+  // Promoters state
+  const [promoters, setPromoters] = useState<Promoter[]>([]);
+  const [promoterStats, setPromoterStats] = useState({ total: 0, active: 0, totalSales: 0, totalCommission: 0 });
+  const [selectedPromoter, setSelectedPromoter] = useState<Promoter | null>(null);
+  const [showPromoterForm, setShowPromoterForm] = useState(false);
+  const [promoterFormData, setPromoterFormData] = useState({ name: '', email: '', phone: '', commissionRate: '10', commissionType: 'percentage', bio: '', socialInstagram: '', socialTiktok: '', socialTwitter: '' });
+  const [promoterLeaderboard, setPromoterLeaderboard] = useState<Promoter[]>([]);
+
   // Events state
   const [events, setEvents] = useState<Event[]>([]);
   const [eventStats, setEventStats] = useState({ total: 0, planning: 0, confirmed: 0, completed: 0, upcoming: 0, thisMonth: 0 });
@@ -1665,6 +1708,114 @@ function App() {
     });
   }, [updateSponsor]);
 
+  // Fetch Promoters
+  const fetchPromoters = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_URL}/promoters`);
+      const data = await res.json();
+      const promoterList = data.promoters || data || [];
+      setPromoters(promoterList);
+      setPromoterStats({
+        total: promoterList.length,
+        active: promoterList.filter((p: Promoter) => p.status === 'active').length,
+        totalSales: promoterList.reduce((sum: number, p: Promoter) => sum + (p.totalSales || 0), 0),
+        totalCommission: promoterList.reduce((sum: number, p: Promoter) => sum + (p.totalCommission || 0), 0),
+      });
+    } catch (error) {
+      console.error('Error fetching promoters:', error);
+    }
+  }, []);
+
+  // Fetch Promoter Leaderboard
+  const fetchPromoterLeaderboard = useCallback(async (period: string = 'month') => {
+    try {
+      const res = await fetch(`${API_URL}/promoters/leaderboard?period=${period}`);
+      const data = await res.json();
+      setPromoterLeaderboard(data.leaderboard || []);
+    } catch (error) {
+      console.error('Error fetching leaderboard:', error);
+    }
+  }, []);
+
+  // Create Promoter
+  const createPromoter = useCallback(async () => {
+    if (!promoterFormData.name || !promoterFormData.email) {
+      addToast('Name and email are required', 'error');
+      return;
+    }
+    try {
+      const res = await fetch(`${API_URL}/promoters`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: promoterFormData.name,
+          email: promoterFormData.email,
+          phone: promoterFormData.phone,
+          commissionRate: parseFloat(promoterFormData.commissionRate) || 10,
+          commissionType: promoterFormData.commissionType,
+          bio: promoterFormData.bio,
+          socialInstagram: promoterFormData.socialInstagram,
+          socialTiktok: promoterFormData.socialTiktok,
+          socialTwitter: promoterFormData.socialTwitter,
+        }),
+      });
+      if (res.ok) {
+        const newPromoter = await res.json();
+        addToast(`Promoter created! Code: ${newPromoter.promoter?.code || newPromoter.code}`, 'success');
+        setShowPromoterForm(false);
+        setPromoterFormData({ name: '', email: '', phone: '', commissionRate: '10', commissionType: 'percentage', bio: '', socialInstagram: '', socialTiktok: '', socialTwitter: '' });
+        fetchPromoters();
+      } else {
+        const error = await res.json();
+        addToast(error.error || 'Failed to create promoter', 'error');
+      }
+    } catch (error) {
+      console.error('Error creating promoter:', error);
+      addToast('Failed to create promoter', 'error');
+    }
+  }, [promoterFormData, fetchPromoters]);
+
+  // Update Promoter
+  const updatePromoter = useCallback(async (id: number, updates: Partial<Promoter>) => {
+    try {
+      const res = await fetch(`${API_URL}/promoters/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updates),
+      });
+      if (res.ok) {
+        addToast('Promoter updated successfully', 'success');
+        fetchPromoters();
+        setSelectedPromoter(null);
+      } else {
+        addToast('Failed to update promoter', 'error');
+      }
+    } catch (error) {
+      console.error('Error updating promoter:', error);
+      addToast('Failed to update promoter', 'error');
+    }
+  }, [fetchPromoters]);
+
+  // Delete Promoter
+  const deletePromoter = useCallback(async (id: number) => {
+    if (!confirm('Are you sure you want to delete this promoter?')) return;
+    try {
+      const res = await fetch(`${API_URL}/promoters/${id}`, {
+        method: 'DELETE',
+      });
+      if (res.ok) {
+        addToast('Promoter deleted successfully', 'success');
+        fetchPromoters();
+        setSelectedPromoter(null);
+      } else {
+        addToast('Failed to delete promoter', 'error');
+      }
+    } catch (error) {
+      console.error('Error deleting promoter:', error);
+      addToast('Failed to delete promoter', 'error');
+    }
+  }, [fetchPromoters]);
+
   // Fetch Events
   const fetchEvents = useCallback(async () => {
     try {
@@ -2195,13 +2346,14 @@ function App() {
     if (activeView === 'tables') fetchTables();
     if (activeView === 'tickets') { fetchTickets(); fetchOrders(); }
     if (activeView === 'sponsors') fetchSponsors();
+    if (activeView === 'promoters') { fetchPromoters(); fetchPromoterLeaderboard(); }
     if (activeView === 'events') fetchEvents();
     if (activeView === 'vendors') fetchVendors();
     if (activeView === 'staff') fetchStaff();
     if (activeView === 'budget' && selectedEvent) fetchBudget(selectedEvent.id);
     if (activeView === 'monitoring') fetchHealthStatus();
     if (activeView === 'integrations') fetchIntegrations();
-  }, [activeView, fetchModels, fetchTables, fetchTickets, fetchOrders, fetchSponsors, fetchEvents, fetchVendors, fetchStaff, fetchBudget, fetchHealthStatus, fetchIntegrations, selectedEvent]);
+  }, [activeView, fetchModels, fetchTables, fetchTickets, fetchOrders, fetchSponsors, fetchPromoters, fetchPromoterLeaderboard, fetchEvents, fetchVendors, fetchStaff, fetchBudget, fetchHealthStatus, fetchIntegrations, selectedEvent]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -2774,6 +2926,7 @@ function App() {
             count={sponsorStats.total + vendors.length}
           >
             <NavItem label="Sponsors" active={activeView === 'sponsors'} icon="◆" count={sponsorStats.total} onClick={() => navigateTo('sponsors')} />
+            <NavItem label="Promoters" active={activeView === 'promoters'} icon="📣" count={promoterStats.total} onClick={() => navigateTo('promoters')} />
             <NavItem label="Vendors" active={activeView === 'vendors'} icon="🏢" count={vendors.length} onClick={() => navigateTo('vendors')} />
             <NavItem label="Staff" active={activeView === 'staff'} icon="👥" count={staffStats.total} onClick={() => navigateTo('staff')} />
             <NavItem label="Budget" active={activeView === 'budget'} icon="💰" onClick={() => navigateTo('budget')} />
@@ -4612,6 +4765,422 @@ function App() {
                   <div style={{ color: '#444', fontSize: 13, marginTop: 8 }}>Sponsor applications will appear here</div>
                 </div>
               )}
+            </div>
+          </div>
+        )}
+
+        {/* ========== PROMOTERS VIEW ========== */}
+        {activeView === 'promoters' && (
+          <div className="page-content" style={{ padding: '32px', animation: 'fadeIn 0.3s ease' }}>
+            {/* Promoters Stats */}
+            <div className="stats-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 32 }}>
+              <div className="stat-card" style={{ background: '#0a0a0a', border: '1px solid #1a1a1a', borderRadius: 12, padding: 20 }}>
+                <div style={{ fontSize: 13, color: '#666', marginBottom: 4 }}>Total Promoters</div>
+                <div style={{ fontSize: 32, fontWeight: 700 }}>{promoterStats.total}</div>
+              </div>
+              <div className="stat-card" style={{ background: '#0a0a0a', border: '1px solid #22c55e40', borderRadius: 12, padding: 20 }}>
+                <div style={{ fontSize: 13, color: '#22c55e', marginBottom: 4 }}>Active</div>
+                <div style={{ fontSize: 32, fontWeight: 700, color: '#22c55e' }}>{promoterStats.active}</div>
+              </div>
+              <div className="stat-card" style={{ background: '#0a0a0a', border: '1px solid #d4af3740', borderRadius: 12, padding: 20 }}>
+                <div style={{ fontSize: 13, color: '#d4af37', marginBottom: 4 }}>Total Sales</div>
+                <div style={{ fontSize: 32, fontWeight: 700, color: '#d4af37' }}>${promoterStats.totalSales.toLocaleString()}</div>
+              </div>
+              <div className="stat-card" style={{ background: '#0a0a0a', border: '1px solid #a78bfa40', borderRadius: 12, padding: 20 }}>
+                <div style={{ fontSize: 13, color: '#a78bfa', marginBottom: 4 }}>Total Commission</div>
+                <div style={{ fontSize: 32, fontWeight: 700, color: '#a78bfa' }}>${promoterStats.totalCommission.toLocaleString()}</div>
+              </div>
+            </div>
+
+            {/* Promoter Tiers */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 24 }}>
+              {[
+                { tier: 'Platinum', color: '#e5e4e2', icon: '💎', minSales: '$35,000+' },
+                { tier: 'Gold', color: '#d4af37', icon: '🥇', minSales: '$15,000+' },
+                { tier: 'Silver', color: '#c0c0c0', icon: '🥈', minSales: '$5,000+' },
+                { tier: 'Bronze', color: '#cd7f32', icon: '🥉', minSales: '$0+' }
+              ].map(t => (
+                <div key={t.tier} style={{ background: '#0a0a0a', border: `1px solid ${t.color}40`, borderRadius: 12, padding: 20, textAlign: 'center' }}>
+                  <div style={{ fontSize: 28, marginBottom: 8 }}>{t.icon}</div>
+                  <div style={{ fontSize: 16, fontWeight: 600, color: t.color }}>{t.tier}</div>
+                  <div style={{ fontSize: 12, color: '#666', marginTop: 4 }}>{t.minSales}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* Leaderboard */}
+            {promoterLeaderboard.length > 0 && (
+              <div style={{ background: '#0a0a0a', borderRadius: 12, border: '1px solid #d4af3740', padding: 20, marginBottom: 24 }}>
+                <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
+                  🏆 <span style={{ color: '#d4af37' }}>Top Promoters This Month</span>
+                </div>
+                <div style={{ display: 'flex', gap: 16 }}>
+                  {promoterLeaderboard.slice(0, 5).map((p, idx) => (
+                    <div key={p.id} style={{ flex: 1, textAlign: 'center', padding: 16, background: '#111', borderRadius: 8 }}>
+                      <div style={{ fontSize: 24, marginBottom: 8 }}>{idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : '🏅'}</div>
+                      <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>{p.name}</div>
+                      <div style={{ fontSize: 20, fontWeight: 700, color: '#d4af37' }}>${(p.totalSales || 0).toLocaleString()}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Promoters List */}
+            <div style={{ background: '#0a0a0a', borderRadius: 12, border: '1px solid #1a1a1a', overflow: 'hidden' }}>
+              <div style={{ padding: '16px 20px', borderBottom: '1px solid #1a1a1a', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: 15, fontWeight: 600 }}>Promoters</span>
+                <button
+                  onClick={() => setShowPromoterForm(true)}
+                  style={{
+                    background: '#d4af37',
+                    border: 'none',
+                    color: '#000',
+                    padding: '8px 16px',
+                    borderRadius: 6,
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: 'pointer'
+                  }}
+                >
+                  + Add Promoter
+                </button>
+              </div>
+              {promoters.map((promoter, idx) => (
+                <div
+                  key={promoter.id}
+                  onClick={() => setSelectedPromoter(promoter)}
+                  className="nav-hover"
+                  style={{
+                    padding: '16px 20px',
+                    borderBottom: '1px solid #1a1a1a',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    animation: `fadeIn 0.2s ease ${idx * 0.02}s both`,
+                    cursor: 'pointer',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                    <div style={{
+                      width: 48,
+                      height: 48,
+                      borderRadius: '50%',
+                      background: promoter.photoUrl ? `url(${promoter.photoUrl}) center/cover` : '#1a1a1a',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: 20,
+                      color: promoter.tier === 'platinum' ? '#e5e4e2' : promoter.tier === 'gold' ? '#d4af37' : promoter.tier === 'silver' ? '#c0c0c0' : '#cd7f32',
+                    }}>
+                      {!promoter.photoUrl && (promoter.tier === 'platinum' ? '💎' : promoter.tier === 'gold' ? '🥇' : promoter.tier === 'silver' ? '🥈' : '🥉')}
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 2 }}>{promoter.name}</div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                        <span style={{ fontSize: 14, color: '#888' }}>Code: {promoter.code}</span>
+                        <span style={{
+                          background: promoter.tier === 'platinum' ? '#e5e4e220' : promoter.tier === 'gold' ? '#d4af3720' : promoter.tier === 'silver' ? '#c0c0c020' : '#cd7f3220',
+                          color: promoter.tier === 'platinum' ? '#e5e4e2' : promoter.tier === 'gold' ? '#d4af37' : promoter.tier === 'silver' ? '#c0c0c0' : '#cd7f32',
+                          padding: '2px 8px',
+                          borderRadius: 4,
+                          fontSize: 11,
+                          textTransform: 'capitalize'
+                        }}>
+                          {promoter.tier}
+                        </span>
+                        {promoter.socialInstagram && (
+                          <span style={{ fontSize: 12, color: '#888' }}>📷 {promoter.socialInstagram}</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                    <div style={{ textAlign: 'right' }}>
+                      <div style={{ fontSize: 18, fontWeight: 700, color: '#d4af37' }}>${(promoter.totalSales || 0).toLocaleString()}</div>
+                      <div style={{ fontSize: 12, color: '#888' }}>{promoter.totalTicketsSold || 0} tickets sold</div>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{
+                        background: promoter.status === 'active' ? '#22c55e20' : promoter.status === 'pending' ? '#fbbf2420' : '#66666620',
+                        color: promoter.status === 'active' ? '#22c55e' : promoter.status === 'pending' ? '#fbbf24' : '#888',
+                        padding: '4px 12px',
+                        borderRadius: 6,
+                        fontSize: 12,
+                        textTransform: 'capitalize'
+                      }}>
+                        {promoter.status}
+                      </span>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          navigator.clipboard.writeText(promoter.code);
+                          addToast(`Code ${promoter.code} copied!`, 'success');
+                        }}
+                        style={{
+                          background: '#3b82f620',
+                          border: 'none',
+                          color: '#3b82f6',
+                          padding: '6px 12px',
+                          borderRadius: 6,
+                          fontSize: 12,
+                          cursor: 'pointer',
+                        }}
+                        title="Copy promo code"
+                      >
+                        📋 Copy Code
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          deletePromoter(promoter.id);
+                        }}
+                        style={{
+                          background: '#ef444420',
+                          border: 'none',
+                          color: '#ef4444',
+                          padding: '6px 12px',
+                          borderRadius: 6,
+                          fontSize: 12,
+                          cursor: 'pointer',
+                        }}
+                        title="Delete promoter"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+              {promoters.length === 0 && (
+                <div style={{ padding: 40, textAlign: 'center' }}>
+                  <div style={{ color: '#333', fontSize: 48, marginBottom: 12 }}>📣</div>
+                  <div style={{ color: '#666', fontSize: 15 }}>No promoters yet</div>
+                  <div style={{ color: '#444', fontSize: 13, marginTop: 8 }}>Add promoters to track sales and commissions</div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Promoter Form Modal */}
+        {showPromoterForm && (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+            <div style={{ background: '#0a0a0a', borderRadius: 16, width: 500, maxHeight: '90vh', overflow: 'auto', border: '1px solid #1a1a1a' }}>
+              <div style={{ padding: 24, borderBottom: '1px solid #1a1a1a', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <h3 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>Add New Promoter</h3>
+                <button onClick={() => setShowPromoterForm(false)} style={{ background: 'none', border: 'none', color: '#888', fontSize: 24, cursor: 'pointer' }}>×</button>
+              </div>
+              <div style={{ padding: 24 }}>
+                <div style={{ marginBottom: 16 }}>
+                  <label style={{ display: 'block', fontSize: 13, color: '#888', marginBottom: 6 }}>Name *</label>
+                  <input
+                    type="text"
+                    value={promoterFormData.name}
+                    onChange={(e) => setPromoterFormData({ ...promoterFormData, name: e.target.value })}
+                    style={{ width: '100%', padding: '12px 16px', background: '#111', border: '1px solid #222', borderRadius: 8, color: '#fff', fontSize: 14 }}
+                    placeholder="John Doe"
+                  />
+                </div>
+                <div style={{ marginBottom: 16 }}>
+                  <label style={{ display: 'block', fontSize: 13, color: '#888', marginBottom: 6 }}>Email *</label>
+                  <input
+                    type="email"
+                    value={promoterFormData.email}
+                    onChange={(e) => setPromoterFormData({ ...promoterFormData, email: e.target.value })}
+                    style={{ width: '100%', padding: '12px 16px', background: '#111', border: '1px solid #222', borderRadius: 8, color: '#fff', fontSize: 14 }}
+                    placeholder="john@example.com"
+                  />
+                </div>
+                <div style={{ marginBottom: 16 }}>
+                  <label style={{ display: 'block', fontSize: 13, color: '#888', marginBottom: 6 }}>Phone</label>
+                  <input
+                    type="tel"
+                    value={promoterFormData.phone}
+                    onChange={(e) => setPromoterFormData({ ...promoterFormData, phone: e.target.value })}
+                    style={{ width: '100%', padding: '12px 16px', background: '#111', border: '1px solid #222', borderRadius: 8, color: '#fff', fontSize: 14 }}
+                    placeholder="+1 234 567 8900"
+                  />
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
+                  <div>
+                    <label style={{ display: 'block', fontSize: 13, color: '#888', marginBottom: 6 }}>Commission Rate (%)</label>
+                    <input
+                      type="number"
+                      value={promoterFormData.commissionRate}
+                      onChange={(e) => setPromoterFormData({ ...promoterFormData, commissionRate: e.target.value })}
+                      style={{ width: '100%', padding: '12px 16px', background: '#111', border: '1px solid #222', borderRadius: 8, color: '#fff', fontSize: 14 }}
+                      placeholder="10"
+                    />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: 13, color: '#888', marginBottom: 6 }}>Commission Type</label>
+                    <select
+                      value={promoterFormData.commissionType}
+                      onChange={(e) => setPromoterFormData({ ...promoterFormData, commissionType: e.target.value })}
+                      style={{ width: '100%', padding: '12px 16px', background: '#111', border: '1px solid #222', borderRadius: 8, color: '#fff', fontSize: 14 }}
+                    >
+                      <option value="percentage">Percentage</option>
+                      <option value="fixed">Fixed Amount</option>
+                    </select>
+                  </div>
+                </div>
+                <div style={{ marginBottom: 16 }}>
+                  <label style={{ display: 'block', fontSize: 13, color: '#888', marginBottom: 6 }}>Instagram</label>
+                  <input
+                    type="text"
+                    value={promoterFormData.socialInstagram}
+                    onChange={(e) => setPromoterFormData({ ...promoterFormData, socialInstagram: e.target.value })}
+                    style={{ width: '100%', padding: '12px 16px', background: '#111', border: '1px solid #222', borderRadius: 8, color: '#fff', fontSize: 14 }}
+                    placeholder="@username"
+                  />
+                </div>
+                <div style={{ marginBottom: 16 }}>
+                  <label style={{ display: 'block', fontSize: 13, color: '#888', marginBottom: 6 }}>Bio</label>
+                  <textarea
+                    value={promoterFormData.bio}
+                    onChange={(e) => setPromoterFormData({ ...promoterFormData, bio: e.target.value })}
+                    style={{ width: '100%', padding: '12px 16px', background: '#111', border: '1px solid #222', borderRadius: 8, color: '#fff', fontSize: 14, minHeight: 80, resize: 'vertical' }}
+                    placeholder="Brief description..."
+                  />
+                </div>
+                <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
+                  <button
+                    onClick={() => setShowPromoterForm(false)}
+                    style={{ padding: '12px 24px', background: '#222', border: 'none', borderRadius: 8, color: '#888', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={createPromoter}
+                    style={{ padding: '12px 24px', background: '#d4af37', border: 'none', borderRadius: 8, color: '#000', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}
+                  >
+                    Create Promoter
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Promoter Detail Modal */}
+        {selectedPromoter && (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+            <div style={{ background: '#0a0a0a', borderRadius: 16, width: 600, maxHeight: '90vh', overflow: 'auto', border: '1px solid #1a1a1a' }}>
+              <div style={{ padding: 24, borderBottom: '1px solid #1a1a1a', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                  <div style={{
+                    width: 56,
+                    height: 56,
+                    borderRadius: '50%',
+                    background: selectedPromoter.photoUrl ? `url(${selectedPromoter.photoUrl}) center/cover` : '#1a1a1a',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: 24,
+                  }}>
+                    {!selectedPromoter.photoUrl && (selectedPromoter.tier === 'platinum' ? '💎' : selectedPromoter.tier === 'gold' ? '🥇' : selectedPromoter.tier === 'silver' ? '🥈' : '🥉')}
+                  </div>
+                  <div>
+                    <h3 style={{ margin: 0, fontSize: 20, fontWeight: 600 }}>{selectedPromoter.name}</h3>
+                    <div style={{ fontSize: 14, color: '#888' }}>Code: <span style={{ color: '#d4af37', fontWeight: 600 }}>{selectedPromoter.code}</span></div>
+                  </div>
+                </div>
+                <button onClick={() => setSelectedPromoter(null)} style={{ background: 'none', border: 'none', color: '#888', fontSize: 24, cursor: 'pointer' }}>×</button>
+              </div>
+              <div style={{ padding: 24 }}>
+                {/* Stats Grid */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, marginBottom: 24 }}>
+                  <div style={{ background: '#111', borderRadius: 12, padding: 16, textAlign: 'center' }}>
+                    <div style={{ fontSize: 24, fontWeight: 700, color: '#d4af37' }}>${(selectedPromoter.totalSales || 0).toLocaleString()}</div>
+                    <div style={{ fontSize: 12, color: '#888', marginTop: 4 }}>Total Sales</div>
+                  </div>
+                  <div style={{ background: '#111', borderRadius: 12, padding: 16, textAlign: 'center' }}>
+                    <div style={{ fontSize: 24, fontWeight: 700, color: '#a78bfa' }}>${(selectedPromoter.totalCommission || 0).toLocaleString()}</div>
+                    <div style={{ fontSize: 12, color: '#888', marginTop: 4 }}>Commission Earned</div>
+                  </div>
+                  <div style={{ background: '#111', borderRadius: 12, padding: 16, textAlign: 'center' }}>
+                    <div style={{ fontSize: 24, fontWeight: 700 }}>{selectedPromoter.totalTicketsSold || 0}</div>
+                    <div style={{ fontSize: 12, color: '#888', marginTop: 4 }}>Tickets Sold</div>
+                  </div>
+                </div>
+
+                {/* Info Grid */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 24 }}>
+                  <div>
+                    <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>Email</div>
+                    <div style={{ fontSize: 14 }}>{selectedPromoter.email}</div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>Phone</div>
+                    <div style={{ fontSize: 14 }}>{selectedPromoter.phone || 'Not provided'}</div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>Commission Rate</div>
+                    <div style={{ fontSize: 14 }}>{selectedPromoter.commissionRate}% ({selectedPromoter.commissionType})</div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>Tier</div>
+                    <div style={{ fontSize: 14, textTransform: 'capitalize', color: selectedPromoter.tier === 'platinum' ? '#e5e4e2' : selectedPromoter.tier === 'gold' ? '#d4af37' : selectedPromoter.tier === 'silver' ? '#c0c0c0' : '#cd7f32' }}>
+                      {selectedPromoter.tier === 'platinum' ? '💎' : selectedPromoter.tier === 'gold' ? '🥇' : selectedPromoter.tier === 'silver' ? '🥈' : '🥉'} {selectedPromoter.tier}
+                    </div>
+                  </div>
+                  {selectedPromoter.socialInstagram && (
+                    <div>
+                      <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>Instagram</div>
+                      <div style={{ fontSize: 14 }}>📷 {selectedPromoter.socialInstagram}</div>
+                    </div>
+                  )}
+                  {selectedPromoter.lastSaleAt && (
+                    <div>
+                      <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>Last Sale</div>
+                      <div style={{ fontSize: 14 }}>{new Date(selectedPromoter.lastSaleAt).toLocaleDateString()}</div>
+                    </div>
+                  )}
+                </div>
+
+                {selectedPromoter.bio && (
+                  <div style={{ marginBottom: 24 }}>
+                    <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>Bio</div>
+                    <div style={{ fontSize: 14, color: '#ccc' }}>{selectedPromoter.bio}</div>
+                  </div>
+                )}
+
+                {/* Actions */}
+                <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(selectedPromoter.code);
+                      addToast(`Code ${selectedPromoter.code} copied!`, 'success');
+                    }}
+                    style={{ padding: '12px 24px', background: '#3b82f620', border: '1px solid #3b82f640', borderRadius: 8, color: '#3b82f6', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}
+                  >
+                    📋 Copy Code
+                  </button>
+                  {selectedPromoter.status !== 'active' && (
+                    <button
+                      onClick={() => updatePromoter(selectedPromoter.id, { status: 'active' })}
+                      style={{ padding: '12px 24px', background: '#22c55e20', border: '1px solid #22c55e40', borderRadius: 8, color: '#22c55e', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}
+                    >
+                      ✓ Activate
+                    </button>
+                  )}
+                  {selectedPromoter.status === 'active' && (
+                    <button
+                      onClick={() => updatePromoter(selectedPromoter.id, { status: 'inactive' })}
+                      style={{ padding: '12px 24px', background: '#f59e0b20', border: '1px solid #f59e0b40', borderRadius: 8, color: '#f59e0b', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}
+                    >
+                      Deactivate
+                    </button>
+                  )}
+                  <button
+                    onClick={() => deletePromoter(selectedPromoter.id)}
+                    style={{ padding: '12px 24px', background: '#ef444420', border: '1px solid #ef444440', borderRadius: 8, color: '#ef4444', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}
+                  >
+                    Delete
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         )}
