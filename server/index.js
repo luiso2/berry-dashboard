@@ -12,7 +12,7 @@ import { fileURLToPath } from 'url';
 import yaml from 'js-yaml';
 
 // API Version - for tracking deployments
-const API_VERSION = '3.2.0-eventbrite-debug';
+const API_VERSION = '3.3.0-sponsor-portal';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -3597,10 +3597,7 @@ app.get('/api/v1/sponsor-portal/:token', async (req, res) => {
     let events = [];
     if (sponsor.event_id) {
       const eventResult = await pool.query(
-        `SELECT id, title, date, description, status,
-                COALESCE(expected_attendance, 0) as expected_attendance,
-                COALESCE(actual_attendance, 0) as actual_attendance,
-                venue_name, venue_city
+        `SELECT id, title, date, description, status, venue
          FROM events WHERE id = $1`,
         [sponsor.event_id]
       );
@@ -3608,17 +3605,27 @@ app.get('/api/v1/sponsor-portal/:token', async (req, res) => {
     } else {
       // Get all events (sponsor may have sponsored multiple)
       const eventResult = await pool.query(
-        `SELECT id, title, date, description, status,
-                COALESCE(expected_attendance, 0) as expected_attendance,
-                COALESCE(actual_attendance, 0) as actual_attendance,
-                venue_name, venue_city
+        `SELECT id, title, date, description, status, venue
          FROM events ORDER BY date DESC LIMIT 10`
       );
       events = eventResult.rows;
     }
 
-    // Calculate metrics
-    const totalAttendance = events.reduce((sum, e) => sum + (parseInt(e.actual_attendance) || 0), 0);
+    // Get guest counts for each event to estimate attendance
+    for (const event of events) {
+      try {
+        const guestCount = await pool.query(
+          `SELECT COUNT(*) as count FROM guests WHERE event_id = $1`,
+          [event.id]
+        );
+        event.guestCount = parseInt(guestCount.rows[0]?.count) || 0;
+      } catch {
+        event.guestCount = 0;
+      }
+    }
+
+    // Calculate metrics based on guest counts (as proxy for attendance)
+    const totalAttendance = events.reduce((sum, e) => sum + (e.guestCount || 0), 0);
     const avgAttendance = events.length > 0 ? Math.round(totalAttendance / events.length) : 0;
 
     // Estimate impressions (attendees × avg touchpoints)
@@ -3657,13 +3664,11 @@ app.get('/api/v1/sponsor-portal/:token', async (req, res) => {
         title: e.title,
         date: e.date,
         status: e.status,
-        venueName: e.venue_name,
-        venueCity: e.venue_city,
-        expectedAttendance: parseInt(e.expected_attendance) || 0,
-        actualAttendance: parseInt(e.actual_attendance) || 0,
-        attendanceRate: e.expected_attendance > 0
-          ? Math.round((e.actual_attendance / e.expected_attendance) * 100)
-          : null
+        venueName: e.venue || null,
+        venueCity: null,
+        expectedAttendance: 0,
+        actualAttendance: e.guestCount || 0,
+        attendanceRate: null
       })),
       metrics: {
         totalEvents: events.length,
