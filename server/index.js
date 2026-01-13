@@ -13,7 +13,7 @@ import yaml from 'js-yaml';
 import cookieParser from 'cookie-parser';
 
 // API Version - for tracking deployments
-const API_VERSION = '3.9.1-telnyx-integration-ui';
+const API_VERSION = '3.9.2-sponsor-email-fix';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -3837,56 +3837,71 @@ app.post('/api/v1/sponsors/:id/send-portal-link', async (req, res) => {
     const portalUrl = `${baseUrl}/sponsor-portal/${accessToken}`;
 
     // Send email with portal link
-    if (resend) {
-      await resend.emails.send({
-        from: 'Berry Bly Productions <noreply@berryblyproductions.com>',
-        to: s.email,
-        subject: `Your Sponsor Metrics Portal - ${s.company_name}`,
-        html: `
-          <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto; padding: 40px 20px;">
-            <div style="text-align: center; margin-bottom: 40px;">
-              <h1 style="color: #d4af37; font-size: 28px; margin: 0;">Sponsor Metrics Portal</h1>
-              <p style="color: #666; margin-top: 10px;">Your exclusive access to event performance data</p>
+    let emailSent = false;
+    let emailError = null;
+
+    if (!process.env.RESEND_API_KEY) {
+      console.warn('RESEND_API_KEY not configured - cannot send sponsor portal email');
+      emailError = 'Email service not configured';
+    } else if (resend) {
+      try {
+        const emailResult = await resend.emails.send({
+          from: 'Berry Bly Productions <noreply@berryblyproductions.com>',
+          to: s.email,
+          subject: `Your Sponsor Metrics Portal - ${s.company_name}`,
+          html: `
+            <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto; padding: 40px 20px;">
+              <div style="text-align: center; margin-bottom: 40px;">
+                <h1 style="color: #d4af37; font-size: 28px; margin: 0;">Sponsor Metrics Portal</h1>
+                <p style="color: #666; margin-top: 10px;">Your exclusive access to event performance data</p>
+              </div>
+
+              <p style="color: #333; font-size: 16px; line-height: 1.6;">Hi ${s.contact_name},</p>
+
+              <p style="color: #333; font-size: 16px; line-height: 1.6;">
+                As a valued ${s.tier_name || s.sponsorship_tier} sponsor, you now have access to your personalized metrics portal where you can track the impact of your sponsorship investment.
+              </p>
+
+              <div style="background: linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%); border-radius: 12px; padding: 30px; text-align: center; margin: 30px 0;">
+                <p style="color: #888; margin: 0 0 15px 0;">Click below to view your metrics:</p>
+                <a href="${portalUrl}" style="display: inline-block; background: linear-gradient(135deg, #d4af37 0%, #b8962d 100%); color: #000; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-weight: 600; font-size: 16px;">
+                  View Sponsor Portal
+                </a>
+              </div>
+
+              <p style="color: #666; font-size: 14px; line-height: 1.6;">
+                Your portal includes:
+              </p>
+              <ul style="color: #666; font-size: 14px; line-height: 1.8;">
+                <li>Event attendance metrics</li>
+                <li>Brand impression estimates</li>
+                <li>ROI calculations</li>
+                <li>Industry benchmark comparisons</li>
+              </ul>
+
+              <p style="color: #888; font-size: 13px; margin-top: 40px;">
+                This link expires in 30 days. If you need a new link, please contact us.
+              </p>
+
+              <div style="border-top: 1px solid #eee; margin-top: 40px; padding-top: 20px; text-align: center;">
+                <p style="color: #888; font-size: 12px; margin: 0;">Powered by <a href="https://merktop.com" style="color: #d4af37; text-decoration: none;">Merktop</a></p>
+              </div>
             </div>
-
-            <p style="color: #333; font-size: 16px; line-height: 1.6;">Hi ${s.contact_name},</p>
-
-            <p style="color: #333; font-size: 16px; line-height: 1.6;">
-              As a valued ${s.tier_name || s.sponsorship_tier} sponsor, you now have access to your personalized metrics portal where you can track the impact of your sponsorship investment.
-            </p>
-
-            <div style="background: linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%); border-radius: 12px; padding: 30px; text-align: center; margin: 30px 0;">
-              <p style="color: #888; margin: 0 0 15px 0;">Click below to view your metrics:</p>
-              <a href="${portalUrl}" style="display: inline-block; background: linear-gradient(135deg, #d4af37 0%, #b8962d 100%); color: #000; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-weight: 600; font-size: 16px;">
-                View Sponsor Portal
-              </a>
-            </div>
-
-            <p style="color: #666; font-size: 14px; line-height: 1.6;">
-              Your portal includes:
-            </p>
-            <ul style="color: #666; font-size: 14px; line-height: 1.8;">
-              <li>Event attendance metrics</li>
-              <li>Brand impression estimates</li>
-              <li>ROI calculations</li>
-              <li>Industry benchmark comparisons</li>
-            </ul>
-
-            <p style="color: #888; font-size: 13px; margin-top: 40px;">
-              This link expires in 30 days. If you need a new link, please contact us.
-            </p>
-
-            <div style="border-top: 1px solid #eee; margin-top: 40px; padding-top: 20px; text-align: center;">
-              <p style="color: #888; font-size: 12px; margin: 0;">Powered by <a href="https://merktop.com" style="color: #d4af37; text-decoration: none;">Merktop</a></p>
-            </div>
-          </div>
-        `
-      });
+          `
+        });
+        console.log('Sponsor portal email sent:', emailResult);
+        emailSent = true;
+      } catch (err) {
+        console.error('Failed to send sponsor portal email:', err);
+        emailError = err.message || 'Failed to send email';
+      }
     }
 
     res.json({
       success: true,
-      message: `Portal link sent to ${s.email}`,
+      emailSent,
+      emailError,
+      message: emailSent ? `Portal link sent to ${s.email}` : `Portal link generated (email not sent: ${emailError})`,
       portalUrl,
       expiresAt: expiresAt.toISOString()
     });
