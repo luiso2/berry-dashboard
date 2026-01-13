@@ -3127,10 +3127,9 @@ function App() {
         {activeView === 'analytics' && (
           <div className="page-content" style={{ padding: '32px', animation: 'fadeIn 0.3s ease' }}>
             {/* Key Metrics */}
-            <div className="stats-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 32 }}>
+            <div className="stats-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, marginBottom: 32 }}>
               <MetricCard label="Conversion Rate" value={`${stats.conversionRate}%`} subtitle="Accepted / Total" color="#22c55e" />
               <MetricCard label="Email Rate" value={`${stats.emailRate}%`} subtitle="Emails Sent / Total" color="#3b82f6" />
-              <MetricCard label="Avg AI Score" value={stats.avgScore} subtitle="Guest intelligence score" color="#a78bfa" />
               <MetricCard label="High-Value Guests" value={stats.highScoreGuests} subtitle="Score >= 70" color="#fbbf24" />
             </div>
 
