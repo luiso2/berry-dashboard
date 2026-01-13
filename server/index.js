@@ -12,7 +12,7 @@ import { fileURLToPath } from 'url';
 import yaml from 'js-yaml';
 
 // API Version - for tracking deployments
-const API_VERSION = '3.1.0-websocket';
+const API_VERSION = '3.2.0-eventbrite-debug';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
