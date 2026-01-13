@@ -13,7 +13,7 @@ import yaml from 'js-yaml';
 import cookieParser from 'cookie-parser';
 
 // API Version - for tracking deployments
-const API_VERSION = '3.8.0-delete-tickets-bulk';
+const API_VERSION = '3.9.0-telnyx-integration';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -7821,6 +7821,14 @@ const INTEGRATION_PROVIDERS = {
     description: 'SMS and WhatsApp messaging',
     fields: ['account_sid', 'auth_token', 'phone_number'],
     testEndpoint: null
+  },
+  telnyx: {
+    name: 'Telnyx',
+    icon: '📞',
+    color: '#00C08B',
+    description: 'SMS, Voice and Fax messaging platform',
+    fields: ['api_key', 'phone_number', 'messaging_profile_id'],
+    testEndpoint: 'https://api.telnyx.com/v2/messaging_profiles'
   }
 };
 
@@ -8032,6 +8040,27 @@ app.post('/api/v1/integrations/:provider/test', async (req, res) => {
         }
         break;
 
+      case 'telnyx':
+        try {
+          const telnyxResponse = await fetch('https://api.telnyx.com/v2/messaging_profiles', {
+            headers: {
+              'Authorization': `Bearer ${apiKey}`,
+              'Content-Type': 'application/json'
+            }
+          });
+          if (telnyxResponse.ok) {
+            const telnyxData = await telnyxResponse.json();
+            const profileCount = telnyxData.data?.length || 0;
+            testResult = { success: true, message: `Connected to Telnyx (${profileCount} messaging profiles found)` };
+          } else {
+            const telnyxError = await telnyxResponse.json().catch(() => ({}));
+            testResult = { success: false, message: telnyxError.errors?.[0]?.detail || 'Invalid API key' };
+          }
+        } catch (e) {
+          testResult = { success: false, message: 'Connection failed: ' + e.message };
+        }
+        break;
+
       default:
         testResult = { success: false, message: 'Provider test not implemented' };
     }
@@ -8061,6 +8090,237 @@ app.delete('/api/v1/integrations/:provider', async (req, res) => {
   } catch (error) {
     console.error('Error disconnecting integration:', error);
     res.status(500).json({ error: 'Failed to disconnect' });
+  }
+});
+
+// ============================================
+// TELNYX MESSAGING ENDPOINTS
+// ============================================
+
+// POST /api/v1/telnyx/send-sms - Send SMS via Telnyx
+app.post('/api/v1/telnyx/send-sms', async (req, res) => {
+  try {
+    const { to, message, from } = req.body;
+
+    if (!to || !message) {
+      return res.status(400).json({ error: 'Phone number (to) and message are required' });
+    }
+
+    // Get Telnyx credentials
+    const result = await pool.query('SELECT * FROM integrations WHERE provider = $1', ['telnyx']);
+    const integration = result.rows[0];
+
+    if (!integration?.api_key_encrypted) {
+      return res.status(400).json({ error: 'Telnyx integration not configured' });
+    }
+
+    const apiKey = decryptApiKey(integration.api_key_encrypted);
+    const extraConfig = integration.extra_config || {};
+    const fromNumber = from || extraConfig.phone_number;
+    const messagingProfileId = extraConfig.messaging_profile_id;
+
+    if (!fromNumber) {
+      return res.status(400).json({ error: 'No sender phone number configured' });
+    }
+
+    const payload = {
+      from: fromNumber,
+      to: to,
+      text: message
+    };
+
+    if (messagingProfileId) {
+      payload.messaging_profile_id = messagingProfileId;
+    }
+
+    const telnyxResponse = await fetch('https://api.telnyx.com/v2/messages', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    });
+
+    const telnyxData = await telnyxResponse.json();
+
+    if (telnyxResponse.ok) {
+      res.json({
+        success: true,
+        messageId: telnyxData.data?.id,
+        status: telnyxData.data?.to?.[0]?.status || 'queued'
+      });
+    } else {
+      res.status(400).json({
+        error: telnyxData.errors?.[0]?.detail || 'Failed to send SMS',
+        details: telnyxData.errors
+      });
+    }
+  } catch (error) {
+    console.error('Error sending Telnyx SMS:', error);
+    res.status(500).json({ error: 'Failed to send SMS' });
+  }
+});
+
+// POST /api/v1/telnyx/send-bulk-sms - Send SMS to multiple recipients
+app.post('/api/v1/telnyx/send-bulk-sms', async (req, res) => {
+  try {
+    const { recipients, message, from } = req.body;
+
+    if (!recipients || !Array.isArray(recipients) || recipients.length === 0) {
+      return res.status(400).json({ error: 'Recipients array is required' });
+    }
+
+    if (!message) {
+      return res.status(400).json({ error: 'Message is required' });
+    }
+
+    // Get Telnyx credentials
+    const result = await pool.query('SELECT * FROM integrations WHERE provider = $1', ['telnyx']);
+    const integration = result.rows[0];
+
+    if (!integration?.api_key_encrypted) {
+      return res.status(400).json({ error: 'Telnyx integration not configured' });
+    }
+
+    const apiKey = decryptApiKey(integration.api_key_encrypted);
+    const extraConfig = integration.extra_config || {};
+    const fromNumber = from || extraConfig.phone_number;
+    const messagingProfileId = extraConfig.messaging_profile_id;
+
+    if (!fromNumber) {
+      return res.status(400).json({ error: 'No sender phone number configured' });
+    }
+
+    const results = [];
+    for (const recipient of recipients) {
+      try {
+        const payload = {
+          from: fromNumber,
+          to: recipient,
+          text: message
+        };
+
+        if (messagingProfileId) {
+          payload.messaging_profile_id = messagingProfileId;
+        }
+
+        const telnyxResponse = await fetch('https://api.telnyx.com/v2/messages', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${apiKey}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(payload)
+        });
+
+        const telnyxData = await telnyxResponse.json();
+
+        results.push({
+          to: recipient,
+          success: telnyxResponse.ok,
+          messageId: telnyxData.data?.id,
+          error: telnyxResponse.ok ? null : telnyxData.errors?.[0]?.detail
+        });
+      } catch (e) {
+        results.push({
+          to: recipient,
+          success: false,
+          error: e.message
+        });
+      }
+    }
+
+    const successCount = results.filter(r => r.success).length;
+    res.json({
+      success: true,
+      totalSent: successCount,
+      totalFailed: recipients.length - successCount,
+      results
+    });
+  } catch (error) {
+    console.error('Error sending bulk SMS:', error);
+    res.status(500).json({ error: 'Failed to send bulk SMS' });
+  }
+});
+
+// GET /api/v1/telnyx/phone-numbers - List Telnyx phone numbers
+app.get('/api/v1/telnyx/phone-numbers', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM integrations WHERE provider = $1', ['telnyx']);
+    const integration = result.rows[0];
+
+    if (!integration?.api_key_encrypted) {
+      return res.status(400).json({ error: 'Telnyx integration not configured' });
+    }
+
+    const apiKey = decryptApiKey(integration.api_key_encrypted);
+
+    const telnyxResponse = await fetch('https://api.telnyx.com/v2/phone_numbers', {
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json'
+      }
+    });
+
+    const telnyxData = await telnyxResponse.json();
+
+    if (telnyxResponse.ok) {
+      res.json({
+        success: true,
+        phoneNumbers: telnyxData.data?.map(pn => ({
+          id: pn.id,
+          phoneNumber: pn.phone_number,
+          status: pn.status,
+          connectionName: pn.connection_name
+        })) || []
+      });
+    } else {
+      res.status(400).json({ error: 'Failed to fetch phone numbers' });
+    }
+  } catch (error) {
+    console.error('Error fetching Telnyx phone numbers:', error);
+    res.status(500).json({ error: 'Failed to fetch phone numbers' });
+  }
+});
+
+// GET /api/v1/telnyx/messaging-profiles - List Telnyx messaging profiles
+app.get('/api/v1/telnyx/messaging-profiles', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM integrations WHERE provider = $1', ['telnyx']);
+    const integration = result.rows[0];
+
+    if (!integration?.api_key_encrypted) {
+      return res.status(400).json({ error: 'Telnyx integration not configured' });
+    }
+
+    const apiKey = decryptApiKey(integration.api_key_encrypted);
+
+    const telnyxResponse = await fetch('https://api.telnyx.com/v2/messaging_profiles', {
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json'
+      }
+    });
+
+    const telnyxData = await telnyxResponse.json();
+
+    if (telnyxResponse.ok) {
+      res.json({
+        success: true,
+        profiles: telnyxData.data?.map(p => ({
+          id: p.id,
+          name: p.name,
+          enabled: p.enabled,
+          numberPoolSettings: p.number_pool_settings
+        })) || []
+      });
+    } else {
+      res.status(400).json({ error: 'Failed to fetch messaging profiles' });
+    }
+  } catch (error) {
+    console.error('Error fetching Telnyx messaging profiles:', error);
+    res.status(500).json({ error: 'Failed to fetch messaging profiles' });
   }
 });
 
