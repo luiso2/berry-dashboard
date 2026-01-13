@@ -323,6 +323,31 @@ const initDatabase = async () => {
       console.log('Events slug migration:', e.message);
     }
 
+    // Add external_id and external_source columns for Eventbrite sync
+    try {
+      await client.query(`
+        DO $$
+        BEGIN
+          IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='events' AND column_name='external_id') THEN
+            ALTER TABLE events ADD COLUMN external_id VARCHAR(100);
+          END IF;
+          IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='events' AND column_name='external_source') THEN
+            ALTER TABLE events ADD COLUMN external_source VARCHAR(50);
+          END IF;
+          IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='events' AND column_name='eventbrite_url') THEN
+            ALTER TABLE events ADD COLUMN eventbrite_url TEXT;
+          END IF;
+          IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='events' AND column_name='ticket_types') THEN
+            ALTER TABLE events ADD COLUMN ticket_types JSONB DEFAULT '[]';
+          END IF;
+        END $$;
+      `);
+      await client.query('CREATE INDEX IF NOT EXISTS idx_events_external ON events(external_id, external_source)');
+      console.log('Added Eventbrite columns to events table');
+    } catch (e) {
+      console.log('Events Eventbrite columns migration:', e.message);
+    }
+
     // Create event_timeline table - Run of show / production timeline
     // Note: Creating without FK constraint due to potential type mismatch with existing events table
     await client.query(`
@@ -7678,21 +7703,72 @@ app.post('/api/v1/integrations/eventbrite/sync', async (req, res) => {
       const events = eventsData.events || [];
 
       for (const event of events) {
-        // Upsert event into our events table
-        await pool.query(`
-          INSERT INTO events (name, description, venue_name, start_date, end_date, status, external_id, external_source)
-          VALUES ($1, $2, $3, $4, $5, $6, $7, 'eventbrite')
-          ON CONFLICT (external_id) WHERE external_source = 'eventbrite'
-          DO UPDATE SET name = $1, description = $2, updated_at = NOW()
-        `, [
-          event.name?.text || 'Untitled Event',
-          event.description?.text || '',
-          event.venue?.name || '',
-          event.start?.utc,
-          event.end?.utc,
-          event.status === 'live' ? 'upcoming' : event.status,
-          event.id
-        ]).catch(() => {}); // Ignore if external_id column doesn't exist
+        // Extract ticket types from event
+        const ticketTypes = (event.ticket_classes || []).map(tc => ({
+          id: tc.id,
+          name: tc.name || tc.display_name,
+          price: tc.cost?.display || 'Free',
+          quantity: tc.quantity_total,
+          sold: tc.quantity_sold,
+          available: tc.on_sale_status === 'AVAILABLE'
+        }));
+
+        // Check if event already exists
+        const existingEvent = await pool.query(
+          'SELECT id FROM events WHERE external_id = $1 AND external_source = $2',
+          [event.id, 'eventbrite']
+        );
+
+        const eventDate = event.start?.utc ? new Date(event.start.utc).toISOString().split('T')[0] : new Date().toISOString().split('T')[0];
+        const startTime = event.start?.local ? event.start.local.split('T')[1]?.substring(0, 5) : null;
+        const endTime = event.end?.local ? event.end.local.split('T')[1]?.substring(0, 5) : null;
+        const eventStatus = event.status === 'live' ? 'upcoming' : (event.status === 'ended' ? 'past' : 'planning');
+
+        if (existingEvent.rows.length > 0) {
+          // Update existing event
+          await pool.query(`
+            UPDATE events SET
+              name = $1,
+              description = $2,
+              event_date = $3,
+              start_time = $4,
+              end_time = $5,
+              status = $6,
+              eventbrite_url = $7,
+              ticket_types = $8,
+              cover_image = $9,
+              updated_at = NOW()
+            WHERE external_id = $10 AND external_source = 'eventbrite'
+          `, [
+            event.name?.text || 'Untitled Event',
+            event.description?.text || '',
+            eventDate,
+            startTime,
+            endTime,
+            eventStatus,
+            event.url || '',
+            JSON.stringify(ticketTypes),
+            event.logo?.url || null,
+            event.id
+          ]);
+        } else {
+          // Insert new event
+          await pool.query(`
+            INSERT INTO events (name, description, event_date, start_time, end_time, status, external_id, external_source, eventbrite_url, ticket_types, cover_image, event_type)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, 'eventbrite', $8, $9, $10, 'eventbrite')
+          `, [
+            event.name?.text || 'Untitled Event',
+            event.description?.text || '',
+            eventDate,
+            startTime,
+            endTime,
+            eventStatus,
+            event.id,
+            event.url || '',
+            JSON.stringify(ticketTypes),
+            event.logo?.url || null
+          ]);
+        }
 
         totalEvents++;
 
