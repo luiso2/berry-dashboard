@@ -1373,6 +1373,7 @@ const getEmailStatus = async (emailId) => {
 const allowedOrigins = [
   'https://berrydashboard.merktop.com',
   'https://berry-dashboard.up.railway.app',
+  'https://berry-dashboard-production.up.railway.app',
   'https://berry.merktop.com',
   'https://berrybly.com',
   'https://www.berrybly.com',
