@@ -10,9 +10,10 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import yaml from 'js-yaml';
+import cookieParser from 'cookie-parser';
 
 // API Version - for tracking deployments
-const API_VERSION = '3.3.0-sponsor-portal';
+const API_VERSION = '3.4.0-eventbrite-oauth';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -1162,6 +1163,7 @@ app.use(cors({
 }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use(cookieParser());
 
 // ============================================
 // OAUTH 2.0 ENDPOINTS
@@ -7926,6 +7928,190 @@ app.delete('/api/v1/integrations/:provider', async (req, res) => {
     res.json({ success: true, message: `${provider} disconnected` });
   } catch (error) {
     console.error('Error disconnecting integration:', error);
+    res.status(500).json({ error: 'Failed to disconnect' });
+  }
+});
+
+// ============================================
+// EVENTBRITE OAUTH 2.0 - Authentication Flow
+// ============================================
+
+// OAuth Configuration
+const EVENTBRITE_CLIENT_ID = process.env.EVENTBRITE_CLIENT_ID || 'PCQOMZRJ4RH4AAHOPU';
+const EVENTBRITE_CLIENT_SECRET = process.env.EVENTBRITE_CLIENT_SECRET || '3IUTMSV4NLEJW36TOHM757E4TET6WQCRF7RWWRQWRDXNDIP6DQ';
+const EVENTBRITE_REDIRECT_URI = process.env.EVENTBRITE_REDIRECT_URI || 'https://berry-dashboard-api-production.up.railway.app/api/v1/auth/eventbrite/callback';
+const FRONTEND_URL = process.env.FRONTEND_URL || 'https://berry-dashboard-production.up.railway.app';
+
+// GET /api/v1/auth/eventbrite - Redirect to Eventbrite for authorization
+app.get('/api/v1/auth/eventbrite', (req, res) => {
+  // Generate a state parameter for CSRF protection
+  const state = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+
+  // Store state in a cookie for validation
+  res.cookie('eventbrite_oauth_state', state, {
+    httpOnly: true,
+    secure: true,
+    sameSite: 'lax',
+    maxAge: 10 * 60 * 1000 // 10 minutes
+  });
+
+  const authUrl = `https://www.eventbrite.com/oauth/authorize?response_type=code&client_id=${EVENTBRITE_CLIENT_ID}&redirect_uri=${encodeURIComponent(EVENTBRITE_REDIRECT_URI)}&state=${state}`;
+
+  console.log('Redirecting to Eventbrite OAuth:', authUrl);
+  res.redirect(authUrl);
+});
+
+// GET /api/v1/auth/eventbrite/callback - Handle OAuth callback
+app.get('/api/v1/auth/eventbrite/callback', async (req, res) => {
+  try {
+    const { code, state, error } = req.query;
+
+    // Check for errors from Eventbrite
+    if (error) {
+      console.error('Eventbrite OAuth error:', error);
+      return res.redirect(`${FRONTEND_URL}/dashboard?eventbrite=error&message=${encodeURIComponent(error)}`);
+    }
+
+    if (!code) {
+      return res.redirect(`${FRONTEND_URL}/dashboard?eventbrite=error&message=No authorization code received`);
+    }
+
+    // Validate state parameter (CSRF protection)
+    const savedState = req.cookies?.eventbrite_oauth_state;
+    if (state && savedState && state !== savedState) {
+      console.error('State mismatch - possible CSRF attack');
+      return res.redirect(`${FRONTEND_URL}/dashboard?eventbrite=error&message=Invalid state parameter`);
+    }
+
+    // Exchange authorization code for access token
+    console.log('Exchanging code for token...');
+    const tokenResponse = await fetch('https://www.eventbrite.com/oauth/token', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: new URLSearchParams({
+        grant_type: 'authorization_code',
+        client_id: EVENTBRITE_CLIENT_ID,
+        client_secret: EVENTBRITE_CLIENT_SECRET,
+        code: code,
+        redirect_uri: EVENTBRITE_REDIRECT_URI
+      }).toString()
+    });
+
+    if (!tokenResponse.ok) {
+      const errorText = await tokenResponse.text();
+      console.error('Token exchange failed:', errorText);
+      return res.redirect(`${FRONTEND_URL}/dashboard?eventbrite=error&message=Failed to exchange token`);
+    }
+
+    const tokenData = await tokenResponse.json();
+    const accessToken = tokenData.access_token;
+
+    if (!accessToken) {
+      console.error('No access token in response:', tokenData);
+      return res.redirect(`${FRONTEND_URL}/dashboard?eventbrite=error&message=No access token received`);
+    }
+
+    console.log('Got access token, fetching user info...');
+
+    // Get user info to verify token works
+    const userResponse = await fetch('https://www.eventbriteapi.com/v3/users/me/', {
+      headers: { 'Authorization': `Bearer ${accessToken}` }
+    });
+
+    if (!userResponse.ok) {
+      console.error('Failed to fetch user info');
+      return res.redirect(`${FRONTEND_URL}/dashboard?eventbrite=error&message=Failed to verify token`);
+    }
+
+    const userData = await userResponse.json();
+    console.log('Eventbrite user:', userData.name, userData.emails?.[0]?.email);
+
+    // Encrypt and store the access token
+    const encryptedToken = encryptApiKey(accessToken);
+
+    // Upsert into integrations table
+    await pool.query(`
+      INSERT INTO integrations (provider, api_key_encrypted, status, last_sync, config)
+      VALUES ('eventbrite', $1, 'connected', NOW(), $2)
+      ON CONFLICT (provider)
+      DO UPDATE SET
+        api_key_encrypted = $1,
+        status = 'connected',
+        last_sync = NOW(),
+        config = $2
+    `, [
+      encryptedToken,
+      JSON.stringify({
+        userName: userData.name,
+        userEmail: userData.emails?.[0]?.email,
+        connectedAt: new Date().toISOString()
+      })
+    ]);
+
+    console.log('Eventbrite connected successfully!');
+
+    // Clear the state cookie
+    res.clearCookie('eventbrite_oauth_state');
+
+    // Redirect back to dashboard with success
+    res.redirect(`${FRONTEND_URL}/dashboard?eventbrite=connected&user=${encodeURIComponent(userData.name || 'User')}`);
+
+  } catch (error) {
+    console.error('OAuth callback error:', error);
+    res.redirect(`${FRONTEND_URL}/dashboard?eventbrite=error&message=${encodeURIComponent(error.message)}`);
+  }
+});
+
+// GET /api/v1/auth/eventbrite/status - Check connection status
+app.get('/api/v1/auth/eventbrite/status', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM integrations WHERE provider = $1', ['eventbrite']);
+    const integration = result.rows[0];
+
+    if (!integration || integration.status !== 'connected') {
+      return res.json({ connected: false });
+    }
+
+    // Try to get user info to verify token is still valid
+    const apiKey = decryptApiKey(integration.api_key_encrypted);
+    const userResponse = await fetch('https://www.eventbriteapi.com/v3/users/me/', {
+      headers: { 'Authorization': `Bearer ${apiKey}` }
+    });
+
+    if (!userResponse.ok) {
+      // Token is invalid, update status
+      await pool.query('UPDATE integrations SET status = $1 WHERE provider = $2', ['expired', 'eventbrite']);
+      return res.json({ connected: false, error: 'Token expired' });
+    }
+
+    const userData = await userResponse.json();
+    const config = integration.config ? JSON.parse(integration.config) : {};
+
+    res.json({
+      connected: true,
+      user: {
+        name: userData.name,
+        email: userData.emails?.[0]?.email
+      },
+      connectedAt: config.connectedAt,
+      lastSync: integration.last_sync
+    });
+
+  } catch (error) {
+    console.error('Error checking Eventbrite status:', error);
+    res.json({ connected: false, error: error.message });
+  }
+});
+
+// POST /api/v1/auth/eventbrite/disconnect - Disconnect Eventbrite
+app.post('/api/v1/auth/eventbrite/disconnect', async (req, res) => {
+  try {
+    await pool.query('UPDATE integrations SET status = $1, api_key_encrypted = NULL WHERE provider = $2', ['disconnected', 'eventbrite']);
+    res.json({ success: true, message: 'Eventbrite disconnected' });
+  } catch (error) {
+    console.error('Error disconnecting Eventbrite:', error);
     res.status(500).json({ error: 'Failed to disconnect' });
   }
 });

@@ -1995,6 +1995,27 @@ function App() {
     }
   }, []);
 
+  // Handle Eventbrite OAuth callback
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const eventbriteStatus = params.get('eventbrite');
+
+    if (eventbriteStatus === 'connected') {
+      const userName = params.get('user') || 'User';
+      addToast(`Eventbrite connected successfully! Welcome ${userName}`, 'success');
+      // Navigate to integrations and clear URL params
+      setActiveView('integrations');
+      window.history.replaceState({}, '', '/dashboard');
+      // Refresh integrations
+      fetchIntegrations();
+    } else if (eventbriteStatus === 'error') {
+      const message = params.get('message') || 'Connection failed';
+      addToast(`Eventbrite error: ${message}`, 'error');
+      // Clear URL params
+      window.history.replaceState({}, '', '/dashboard');
+    }
+  }, [addToast, fetchIntegrations]);
+
   // Fetch new modules when view changes
   useEffect(() => {
     if (activeView === 'models') fetchModels();
@@ -5474,8 +5495,40 @@ function App() {
                     </div>
                   )}
 
-                  {/* Configuration Form - Show when not connected or when editing */}
-                  {(integration.status === 'disconnected' || integration.status === 'error' || selectedIntegration?.provider === integration.provider) && (
+                  {/* Eventbrite OAuth - Special handling */}
+                  {integration.provider === 'eventbrite' && integration.status !== 'connected' && (
+                    <div style={{ marginBottom: 16 }}>
+                      <button
+                        onClick={() => {
+                          window.location.href = `${API_URL.replace('/api/v1', '')}/api/v1/auth/eventbrite`;
+                        }}
+                        style={{
+                          width: '100%',
+                          background: '#F6682F',
+                          border: 'none',
+                          borderRadius: 8,
+                          padding: '12px 16px',
+                          fontSize: 14,
+                          fontWeight: 600,
+                          color: '#fff',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: 8
+                        }}
+                      >
+                        <span style={{ fontSize: 18 }}>🎟️</span>
+                        Connect with Eventbrite
+                      </button>
+                      <p style={{ fontSize: 11, color: '#666', marginTop: 8, textAlign: 'center' }}>
+                        You'll be redirected to Eventbrite to authorize access
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Configuration Form - Show when not connected or when editing (except Eventbrite) */}
+                  {integration.provider !== 'eventbrite' && (integration.status === 'disconnected' || integration.status === 'error' || selectedIntegration?.provider === integration.provider) && (
                     <div style={{ marginBottom: 16 }}>
                       <div style={{ marginBottom: 12 }}>
                         <label style={{ fontSize: 12, color: '#888', display: 'block', marginBottom: 4 }}>
