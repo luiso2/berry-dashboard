@@ -13,7 +13,7 @@ import yaml from 'js-yaml';
 import cookieParser from 'cookie-parser';
 
 // API Version - for tracking deployments
-const API_VERSION = '3.6.2-fix-token-type-column';
+const API_VERSION = '3.7.0-bulk-delete-events';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -5400,10 +5400,35 @@ app.delete('/api/v1/events/:id', async (req, res) => {
       return res.status(404).json({ error: 'Event not found' });
     }
 
-    res.status(204).send();
+    res.json({ success: true, message: 'Event deleted' });
   } catch (error) {
     console.error('Error deleting event:', error);
     res.status(500).json({ error: 'Failed to delete event' });
+  }
+});
+
+// POST /api/v1/events/bulk-delete - Delete multiple events
+app.post('/api/v1/events/bulk-delete', async (req, res) => {
+  try {
+    const { eventIds } = req.body;
+
+    if (!eventIds || !Array.isArray(eventIds) || eventIds.length === 0) {
+      return res.status(400).json({ error: 'Event IDs required' });
+    }
+
+    const result = await pool.query(
+      'DELETE FROM events WHERE id = ANY($1) RETURNING id',
+      [eventIds]
+    );
+
+    res.json({
+      success: true,
+      message: `Deleted ${result.rowCount} events`,
+      deletedCount: result.rowCount
+    });
+  } catch (error) {
+    console.error('Error bulk deleting events:', error);
+    res.status(500).json({ error: 'Failed to delete events' });
   }
 });
 
