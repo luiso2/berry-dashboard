@@ -38,7 +38,7 @@ const categoryToStatus = (category: GuestCategory): string => {
 
 type GuestCategory = 'pending' | 'A' | 'B' | 'C' | 'rejected';
 type GuestStatus = 'pending' | 'approved' | 'declined' | 'rejected';
-type ViewType = 'overview' | 'guests' | 'emails' | 'vip' | 'priority' | 'standard' | 'analytics' | 'automation' | 'checkin' | 'models' | 'tables' | 'tickets' | 'sponsors' | 'events' | 'budget' | 'vendors' | 'staff' | 'client-portal' | 'monitoring' | 'integrations';
+type ViewType = 'overview' | 'guests' | 'emails' | 'analytics' | 'automation' | 'checkin' | 'models' | 'tables' | 'tickets' | 'sponsors' | 'events' | 'budget' | 'vendors' | 'staff' | 'monitoring' | 'integrations';
 type ThemeMode = 'dark' | 'light';
 
 interface Purchase {
@@ -2051,12 +2051,6 @@ function App() {
     switch (activeView) {
       case 'emails':
         return baseList.filter((g) => g.emailSent);
-      case 'vip':
-        return baseList.filter((g) => g.category === 'A');
-      case 'priority':
-        return baseList.filter((g) => g.category === 'B');
-      case 'standard':
-        return baseList.filter((g) => g.category === 'C');
       case 'guests':
         return guestTab === 'pending'
           ? baseList.filter((g) => g.category === 'pending')
@@ -2307,12 +2301,11 @@ function App() {
     switch (activeView) {
       case 'overview': return 'Overview';
       case 'emails': return 'Emails Sent';
-      case 'vip': return 'VIP Guests';
-      case 'priority': return 'Priority Guests';
-      case 'standard': return 'Standard Guests';
       case 'analytics': return 'Analytics';
       case 'automation': return 'Automation';
       case 'checkin': return 'Check-In';
+      case 'models': return 'Models';
+      case 'integrations': return 'Integrations';
       default: return 'Guests';
     }
   };
@@ -2321,12 +2314,11 @@ function App() {
     switch (activeView) {
       case 'overview': return `${stats.total} total guests`;
       case 'emails': return `${stats.emailsSent} emails sent`;
-      case 'vip': return `${stats.vip} VIP guests`;
-      case 'priority': return `${stats.priority} priority guests`;
-      case 'standard': return `${stats.standard} standard guests`;
       case 'analytics': return 'Performance metrics';
       case 'automation': return `${scheduledEmails.filter(e => e.status === 'pending').length} scheduled`;
       case 'checkin': return `${stats.checkedIn}/${stats.accepted} checked in (${stats.checkedInPartySize} people)`;
+      case 'models': return 'Featured talent';
+      case 'integrations': return 'Connect your services';
       default: return `${stats.pending} pending review`;
     }
   };
@@ -2423,80 +2415,68 @@ function App() {
         </div>
 
         <nav style={{ flex: 1, overflowY: 'auto' }}>
+          {/* HOME */}
           <CollapsibleMenu
-            title="Main"
-            expanded={expandedMenus.has('main')}
-            onToggle={() => toggleMenu('main')}
-            count={stats.total + stats.emailsSent}
+            title="Home"
+            expanded={expandedMenus.has('home')}
+            onToggle={() => toggleMenu('home')}
           >
             <NavItem label="Overview" active={activeView === 'overview'} icon="◈" onClick={() => navigateTo('overview')} />
-            <NavItem label="Guests" active={activeView === 'guests'} icon="◉" count={stats.total} onClick={() => navigateTo('guests')} />
-            <NavItem label="Emails Sent" active={activeView === 'emails'} icon="✉" count={stats.emailsSent} onClick={() => navigateTo('emails')} />
+            <NavItem label="Analytics" active={activeView === 'analytics'} icon="◐" onClick={() => navigateTo('analytics')} />
           </CollapsibleMenu>
 
+          {/* GUESTS */}
           <CollapsibleMenu
-            title="Intelligence"
-            expanded={expandedMenus.has('intelligence')}
-            onToggle={() => toggleMenu('intelligence')}
-            count={scheduledEmails.filter(e => e.status === 'pending').length}
+            title="Guests"
+            expanded={expandedMenus.has('guests')}
+            onToggle={() => toggleMenu('guests')}
+            count={stats.total}
           >
-            <NavItem label="Analytics" active={activeView === 'analytics'} icon="◐" onClick={() => navigateTo('analytics')} />
+            <NavItem label="All Guests" active={activeView === 'guests'} icon="◉" count={stats.total} onClick={() => navigateTo('guests')} />
+            <NavItem label="Check-In" active={activeView === 'checkin'} icon="✓" count={stats.checkedIn} onClick={() => navigateTo('checkin')} />
+            <NavItem label="Emails" active={activeView === 'emails'} icon="✉" count={stats.emailsSent} onClick={() => navigateTo('emails')} />
             <NavItem label="Automation" active={activeView === 'automation'} icon="⚡" count={scheduledEmails.filter(e => e.status === 'pending').length} onClick={() => navigateTo('automation')} />
           </CollapsibleMenu>
 
+          {/* EVENTS */}
           <CollapsibleMenu
-            title="Event Day"
-            expanded={expandedMenus.has('eventday')}
-            onToggle={() => toggleMenu('eventday')}
-            count={stats.checkedIn}
+            title="Events"
+            expanded={expandedMenus.has('events')}
+            onToggle={() => toggleMenu('events')}
+            count={eventStats.total}
           >
-            <NavItem label="Check-In" active={activeView === 'checkin'} icon="✓" count={stats.checkedIn} onClick={() => navigateTo('checkin')} />
-          </CollapsibleMenu>
-
-          <CollapsibleMenu
-            title="Talent"
-            expanded={expandedMenus.has('talent')}
-            onToggle={() => toggleMenu('talent')}
-            count={stats.featured}
-          >
-            <NavItem label="Hot/Featured" active={activeView === 'models'} icon="🔥" count={stats.featured} onClick={() => navigateTo('models')} />
-          </CollapsibleMenu>
-
-          <CollapsibleMenu
-            title="Reservations"
-            expanded={expandedMenus.has('reservations')}
-            onToggle={() => toggleMenu('reservations')}
-            count={tableStats.total + ticketStats.total}
-          >
-            <NavItem label="Tables" active={activeView === 'tables'} icon="▣" count={tableStats.total} onClick={() => navigateTo('tables')} />
+            <NavItem label="All Events" active={activeView === 'events'} icon="📅" count={eventStats.total} onClick={() => navigateTo('events')} />
             <NavItem label="Tickets" active={activeView === 'tickets'} icon="🎫" count={ticketStats.total} onClick={() => navigateTo('tickets')} />
+            <NavItem label="Tables" active={activeView === 'tables'} icon="▣" count={tableStats.total} onClick={() => navigateTo('tables')} />
           </CollapsibleMenu>
 
+          {/* BUSINESS */}
           <CollapsibleMenu
             title="Business"
             expanded={expandedMenus.has('business')}
             onToggle={() => toggleMenu('business')}
-            count={sponsorStats.total}
+            count={sponsorStats.total + vendors.length}
           >
             <NavItem label="Sponsors" active={activeView === 'sponsors'} icon="◆" count={sponsorStats.total} onClick={() => navigateTo('sponsors')} />
-          </CollapsibleMenu>
-
-          <CollapsibleMenu
-            title="Event Management"
-            expanded={expandedMenus.has('eventmgmt')}
-            onToggle={() => toggleMenu('eventmgmt')}
-            count={eventStats.upcoming}
-          >
-            <NavItem label="All Events" active={activeView === 'events'} icon="📅" count={eventStats.total} onClick={() => navigateTo('events')} />
-            <NavItem label="Budget" active={activeView === 'budget'} icon="💰" onClick={() => navigateTo('budget')} />
             <NavItem label="Vendors" active={activeView === 'vendors'} icon="🏢" count={vendors.length} onClick={() => navigateTo('vendors')} />
             <NavItem label="Staff" active={activeView === 'staff'} icon="👥" count={staffStats.total} onClick={() => navigateTo('staff')} />
+            <NavItem label="Budget" active={activeView === 'budget'} icon="💰" onClick={() => navigateTo('budget')} />
           </CollapsibleMenu>
 
-          {/* System Menu */}
-          <CollapsibleMenu title="SYSTEM" expanded={expandedMenus.has('system')} onToggle={() => toggleMenu('system')}>
-            <NavItem label="Monitoring" active={activeView === 'monitoring'} icon="📊" onClick={() => navigateTo('monitoring')} />
+          {/* TALENT */}
+          <CollapsibleMenu
+            title="Talent"
+            expanded={expandedMenus.has('talent')}
+            onToggle={() => toggleMenu('talent')}
+            count={modelStats.total}
+          >
+            <NavItem label="Models" active={activeView === 'models'} icon="🔥" count={modelStats.total} onClick={() => navigateTo('models')} />
+          </CollapsibleMenu>
+
+          {/* SETTINGS */}
+          <CollapsibleMenu title="Settings" expanded={expandedMenus.has('settings')} onToggle={() => toggleMenu('settings')}>
             <NavItem label="Integrations" active={activeView === 'integrations'} icon="🔌" count={integrations.filter(i => i.status === 'connected').length} onClick={() => navigateTo('integrations')} />
+            <NavItem label="Monitoring" active={activeView === 'monitoring'} icon="📊" onClick={() => navigateTo('monitoring')} />
           </CollapsibleMenu>
         </nav>
 
@@ -2551,12 +2531,12 @@ function App() {
           </button>
         </div>
 
-        <div style={{ padding: '16px 0', borderTop: '1px solid #1a1a1a' }}>
-          <div style={{ fontSize: 13, color: '#666', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 12 }}>Quick Stats</div>
-          <div style={{ display: 'grid', gap: 2 }}>
-            <StatRow label="VIP" value={stats.vip} color="#a78bfa" active={activeView === 'vip'} onClick={() => navigateTo('vip')} />
-            <StatRow label="Priority" value={stats.priority} color="#60a5fa" active={activeView === 'priority'} onClick={() => navigateTo('priority')} />
-            <StatRow label="Standard" value={stats.standard} color="#6b7280" active={activeView === 'standard'} onClick={() => navigateTo('standard')} />
+        <div style={{ padding: '12px', borderTop: '1px solid #1a1a1a' }}>
+          <div style={{ fontSize: 11, color: '#666', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 8 }}>Guest Categories</div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
+            <span style={{ color: '#a78bfa' }}>VIP: {stats.vip}</span>
+            <span style={{ color: '#60a5fa' }}>Priority: {stats.priority}</span>
+            <span style={{ color: '#6b7280' }}>Std: {stats.standard}</span>
           </div>
         </div>
 
@@ -2604,7 +2584,7 @@ function App() {
             </button>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
-            {(activeView === 'guests' || activeView === 'vip' || activeView === 'priority' || activeView === 'standard') && (
+            {activeView === 'guests' && (
               <>
                 <button
                   onClick={() => setShowFilters(!showFilters)}
@@ -2682,7 +2662,7 @@ function App() {
         </header>
 
         {/* Search & Filters Bar */}
-        {(activeView === 'guests' || activeView === 'vip' || activeView === 'priority' || activeView === 'standard' || activeView === 'emails') && (
+        {(activeView === 'guests' || activeView === 'emails') && (
           <div className="header-content" style={{ borderBottom: '1px solid #1a1a1a', background: '#050505' }}>
             <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
               <div style={{ position: 'relative', flex: 1, minWidth: 'min(200px, 100%)' }}>
@@ -2798,9 +2778,9 @@ function App() {
 
             <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 16, color: '#888' }}>Guest Breakdown</h3>
             <div className="category-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, marginBottom: 32 }}>
-              <CategoryCard label="VIP" value={stats.vip} color="#a78bfa" onClick={() => navigateTo('vip')} />
-              <CategoryCard label="Priority" value={stats.priority} color="#60a5fa" onClick={() => navigateTo('priority')} />
-              <CategoryCard label="Standard" value={stats.standard} color="#6b7280" onClick={() => navigateTo('standard')} />
+              <CategoryCard label="VIP" value={stats.vip} color="#a78bfa" onClick={() => navigateTo('guests')} />
+              <CategoryCard label="Priority" value={stats.priority} color="#60a5fa" onClick={() => navigateTo('guests')} />
+              <CategoryCard label="Standard" value={stats.standard} color="#6b7280" onClick={() => navigateTo('guests')} />
             </div>
 
             {/* Top Scored Guests */}
@@ -3207,48 +3187,6 @@ function App() {
               removeGuest={removeGuest}
               openModal={openModal}
               formatDate={formatDate}
-              getScoreColor={getScoreColor}
-            />
-          </>
-        )}
-
-        {/* Category Views */}
-        {(activeView === 'vip' || activeView === 'priority' || activeView === 'standard') && (
-          <>
-            <div className="tab-container" style={{ padding: '20px 32px', borderBottom: '1px solid #1a1a1a', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <div style={{
-                  width: 12,
-                  height: 12,
-                  borderRadius: 4,
-                  background: activeView === 'vip' ? '#a78bfa' : activeView === 'priority' ? '#60a5fa' : '#6b7280'
-                }} />
-                <span style={{ fontSize: 15, color: '#888' }}>
-                  {currentList.length} {activeView === 'vip' ? 'VIP' : activeView === 'priority' ? 'Priority' : 'Standard'} guests
-                </span>
-              </div>
-              {selectedGuests.size > 0 && (
-                <div className="bulk-actions" style={{ display: 'flex', alignItems: 'center', gap: 10, animation: 'slideDown 0.2s ease' }}>
-                  <span style={{ fontSize: 15, color: '#888', background: '#1a1a1a', padding: '6px 12px', borderRadius: 6 }}>
-                    {selectedGuests.size} selected
-                  </span>
-                  <ActionBtn onClick={() => handleBulkAction(null, true)} color="#22c55e" label="✉" />
-                  {activeView !== 'vip' && <ActionBtn onClick={() => handleBulkAction('A')} color="#a78bfa" label="VIP" />}
-                  {activeView !== 'priority' && <ActionBtn onClick={() => handleBulkAction('B')} color="#60a5fa" label="Pri" />}
-                  {activeView !== 'standard' && <ActionBtn onClick={() => handleBulkAction('C')} color="#6b7280" label="Std" />}
-                </div>
-              )}
-            </div>
-            <GuestList
-              guests={currentList}
-              selectedGuests={selectedGuests}
-              toggleSelect={toggleSelect}
-              selectAll={selectAll}
-              openModal={openModal}
-              removeGuest={removeGuest}
-              showActions={true}
-              setShowForm={setShowForm}
-              categoryView={activeView}
               getScoreColor={getScoreColor}
             />
           </>
@@ -5377,42 +5315,6 @@ function App() {
               ))}
             </div>
 
-            {/* Help Section */}
-            <div style={{ marginTop: 32, background: '#0a0a0a', border: '1px solid #1a1a1a', borderRadius: 12, padding: 20 }}>
-              <h3 style={{ fontSize: 14, color: '#888', marginBottom: 16, textTransform: 'uppercase', letterSpacing: 1 }}>How to get API Keys</h3>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16 }}>
-                <div style={{ padding: 12, background: '#111', borderRadius: 8 }}>
-                  <div style={{ fontWeight: 600, marginBottom: 4 }}>🎪 Eventbrite</div>
-                  <div style={{ fontSize: 12, color: '#888' }}>
-                    Go to <a href="https://www.eventbrite.com/platform/api-keys" target="_blank" rel="noopener noreferrer" style={{ color: '#F6682F' }}>Eventbrite API Keys</a> → Create a Private Token
-                  </div>
-                </div>
-                <div style={{ padding: 12, background: '#111', borderRadius: 8 }}>
-                  <div style={{ fontWeight: 600, marginBottom: 4 }}>📧 Mailchimp</div>
-                  <div style={{ fontSize: 12, color: '#888' }}>
-                    Go to Account → Extras → <a href="https://admin.mailchimp.com/account/api/" target="_blank" rel="noopener noreferrer" style={{ color: '#FFE01B' }}>API Keys</a> → Create a Key
-                  </div>
-                </div>
-                <div style={{ padding: 12, background: '#111', borderRadius: 8 }}>
-                  <div style={{ fontWeight: 600, marginBottom: 4 }}>🎫 Ticketmaster</div>
-                  <div style={{ fontSize: 12, color: '#888' }}>
-                    Register at <a href="https://developer.ticketmaster.com/" target="_blank" rel="noopener noreferrer" style={{ color: '#0068B3' }}>Ticketmaster Developer</a> → Get your API key
-                  </div>
-                </div>
-                <div style={{ padding: 12, background: '#111', borderRadius: 8 }}>
-                  <div style={{ fontWeight: 600, marginBottom: 4 }}>✉️ SendGrid</div>
-                  <div style={{ fontSize: 12, color: '#888' }}>
-                    Go to <a href="https://app.sendgrid.com/settings/api_keys" target="_blank" rel="noopener noreferrer" style={{ color: '#1A82E2' }}>SendGrid API Keys</a> → Create API Key
-                  </div>
-                </div>
-                <div style={{ padding: 12, background: '#111', borderRadius: 8 }}>
-                  <div style={{ fontWeight: 600, marginBottom: 4 }}>📱 Twilio</div>
-                  <div style={{ fontSize: 12, color: '#888' }}>
-                    Go to <a href="https://console.twilio.com/" target="_blank" rel="noopener noreferrer" style={{ color: '#F22F46' }}>Twilio Console</a> → Copy Account SID & Auth Token
-                  </div>
-                </div>
-              </div>
-            </div>
           </div>
         )}
       </main>
@@ -6171,29 +6073,6 @@ const NavItem = ({ label, active, icon, count, onClick }: { label: string; activ
   </div>
 );
 
-const StatRow = ({ label, value, color, active, onClick }: { label: string; value: number; color: string; active?: boolean; onClick: () => void }) => (
-  <div
-    onClick={onClick}
-    className="stat-hover"
-    style={{
-      display: 'flex',
-      justifyContent: 'space-between',
-      alignItems: 'center',
-      padding: '10px 12px',
-      borderRadius: 8,
-      background: active ? '#1a1a1a' : 'transparent',
-      marginLeft: -12,
-      marginRight: -12,
-    }}
-  >
-    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-      <div style={{ width: 10, height: 10, borderRadius: 3, background: color }} />
-      <span style={{ fontSize: 14, color: active ? '#fff' : '#888' }}>{label}</span>
-    </div>
-    <span style={{ fontSize: 15, fontWeight: 600, color: '#fff' }}>{value}</span>
-  </div>
-);
-
 const StatCard = ({ label, value, icon, color, onClick }: { label: string; value: number | string; icon: string; color?: string; onClick: () => void }) => (
   <div
     onClick={onClick}
@@ -6412,7 +6291,7 @@ const Input = ({ label, placeholder, value, onChange, type = 'text', prefix, req
 );
 
 // Guest List Component
-const GuestList = ({ guests, selectedGuests, toggleSelect, selectAll, openModal, removeGuest, showActions, setShowForm, categoryView, getScoreColor }: {
+const GuestList = ({ guests, selectedGuests, toggleSelect, selectAll, openModal, removeGuest, showActions, setShowForm, getScoreColor }: {
   guests: Guest[];
   selectedGuests: Set<string>;
   toggleSelect: (id: string) => void;
@@ -6421,7 +6300,6 @@ const GuestList = ({ guests, selectedGuests, toggleSelect, selectAll, openModal,
   removeGuest: (id: string) => void;
   showActions: boolean;
   setShowForm: (show: boolean) => void;
-  categoryView?: ViewType;
   getScoreColor: (score: number) => string;
 }) => (
   <div className="page-content" style={{ padding: '0 32px 32px', animation: 'fadeIn 0.3s ease' }}>
@@ -6505,20 +6383,12 @@ const GuestList = ({ guests, selectedGuests, toggleSelect, selectAll, openModal,
               </td>
               <td style={tdStyle}>
                 <div className="action-buttons" style={{ display: 'flex', gap: 4 }}>
-                  {showActions && !categoryView && (
+                  {showActions && (
                     <>
                       <SmallBtn onClick={() => openModal([guest], null, true)} label="✉" title="Send Email" color="#22c55e" />
                       <SmallBtn onClick={() => openModal([guest], 'A')} label="VIP" title="Move to VIP" color="#a78bfa" />
                       <SmallBtn onClick={() => openModal([guest], 'B')} label="Pri" title="Move to Priority" color="#60a5fa" />
                       <SmallBtn onClick={() => openModal([guest], 'C')} label="Std" title="Move to Standard" />
-                    </>
-                  )}
-                  {categoryView && (
-                    <>
-                      <SmallBtn onClick={() => openModal([guest], null, true)} label="✉" title="Send Email" color="#22c55e" />
-                      {categoryView !== 'vip' && <SmallBtn onClick={() => openModal([guest], 'A')} label="VIP" title="Move to VIP" color="#a78bfa" />}
-                      {categoryView !== 'priority' && <SmallBtn onClick={() => openModal([guest], 'B')} label="Pri" title="Move to Priority" color="#60a5fa" />}
-                      {categoryView !== 'standard' && <SmallBtn onClick={() => openModal([guest], 'C')} label="Std" title="Move to Standard" />}
                     </>
                   )}
                   <SmallBtn onClick={() => removeGuest(guest.id)} label="×" title="Remove" danger />
@@ -6599,20 +6469,12 @@ const GuestList = ({ guests, selectedGuests, toggleSelect, selectAll, openModal,
               </div>
 
               <div className="action-buttons" style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                {showActions && !categoryView && (
+                {showActions && (
                   <>
                     <SmallBtn onClick={() => openModal([guest], null, true)} label="✉ Email" title="Send Email" color="#22c55e" />
                     <SmallBtn onClick={() => openModal([guest], 'A')} label="VIP" title="Move to VIP" color="#a78bfa" />
                     <SmallBtn onClick={() => openModal([guest], 'B')} label="Priority" title="Move to Priority" color="#60a5fa" />
                     <SmallBtn onClick={() => openModal([guest], 'C')} label="Standard" title="Move to Standard" />
-                  </>
-                )}
-                {categoryView && (
-                  <>
-                    <SmallBtn onClick={() => openModal([guest], null, true)} label="✉ Email" title="Send Email" color="#22c55e" />
-                    {categoryView !== 'vip' && <SmallBtn onClick={() => openModal([guest], 'A')} label="VIP" title="Move to VIP" color="#a78bfa" />}
-                    {categoryView !== 'priority' && <SmallBtn onClick={() => openModal([guest], 'B')} label="Priority" title="Move to Priority" color="#60a5fa" />}
-                    {categoryView !== 'standard' && <SmallBtn onClick={() => openModal([guest], 'C')} label="Standard" title="Move to Standard" />}
                   </>
                 )}
                 <SmallBtn onClick={() => removeGuest(guest.id)} label="Remove" title="Remove" danger />
