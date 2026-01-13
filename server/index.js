@@ -3518,6 +3518,271 @@ app.delete('/api/v1/sponsors/:id', async (req, res) => {
 });
 
 // ============================================
+// SPONSOR METRICS PORTAL - ROI Dashboard for Sponsors
+// ============================================
+
+// Generate unique access token for sponsor portal
+const generateSponsorAccessToken = () => {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  let token = '';
+  for (let i = 0; i < 32; i++) {
+    token += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return token;
+};
+
+// POST /api/v1/sponsors/:id/generate-portal-link - Generate sponsor portal access link
+app.post('/api/v1/sponsors/:id/generate-portal-link', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Check if sponsor exists
+    const sponsor = await pool.query('SELECT * FROM sponsors WHERE id = $1', [id]);
+    if (sponsor.rows.length === 0) {
+      return res.status(404).json({ error: 'Sponsor not found' });
+    }
+
+    // Generate access token
+    const accessToken = generateSponsorAccessToken();
+    const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // 30 days
+
+    // Store token (add column if not exists)
+    await pool.query(`
+      DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='sponsors' AND column_name='portal_token') THEN
+          ALTER TABLE sponsors ADD COLUMN portal_token VARCHAR(64);
+          ALTER TABLE sponsors ADD COLUMN portal_token_expires TIMESTAMP;
+        END IF;
+      END $$;
+    `);
+
+    await pool.query(
+      'UPDATE sponsors SET portal_token = $1, portal_token_expires = $2 WHERE id = $3',
+      [accessToken, expiresAt, id]
+    );
+
+    const portalUrl = `${req.protocol}://${req.get('host').replace('-api', '')}/sponsor-portal/${accessToken}`;
+
+    res.json({
+      success: true,
+      portalUrl,
+      accessToken,
+      expiresAt: expiresAt.toISOString(),
+      sponsorName: sponsor.rows[0].company_name
+    });
+  } catch (error) {
+    console.error('Error generating portal link:', error);
+    res.status(500).json({ error: 'Failed to generate portal link' });
+  }
+});
+
+// GET /api/v1/sponsor-portal/:token - Get sponsor metrics by access token
+app.get('/api/v1/sponsor-portal/:token', async (req, res) => {
+  try {
+    const { token } = req.params;
+
+    // Find sponsor by token
+    const result = await pool.query(
+      'SELECT * FROM sponsors WHERE portal_token = $1 AND portal_token_expires > NOW()',
+      [token]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(401).json({ error: 'Invalid or expired access token' });
+    }
+
+    const sponsor = result.rows[0];
+
+    // Get events this sponsor is linked to
+    let events = [];
+    if (sponsor.event_id) {
+      const eventResult = await pool.query(
+        `SELECT id, title, date, description, status,
+                COALESCE(expected_attendance, 0) as expected_attendance,
+                COALESCE(actual_attendance, 0) as actual_attendance,
+                venue_name, venue_city
+         FROM events WHERE id = $1`,
+        [sponsor.event_id]
+      );
+      events = eventResult.rows;
+    } else {
+      // Get all events (sponsor may have sponsored multiple)
+      const eventResult = await pool.query(
+        `SELECT id, title, date, description, status,
+                COALESCE(expected_attendance, 0) as expected_attendance,
+                COALESCE(actual_attendance, 0) as actual_attendance,
+                venue_name, venue_city
+         FROM events ORDER BY date DESC LIMIT 10`
+      );
+      events = eventResult.rows;
+    }
+
+    // Calculate metrics
+    const totalAttendance = events.reduce((sum, e) => sum + (parseInt(e.actual_attendance) || 0), 0);
+    const avgAttendance = events.length > 0 ? Math.round(totalAttendance / events.length) : 0;
+
+    // Estimate impressions (attendees × avg touchpoints)
+    const estimatedImpressions = totalAttendance * 5; // Logo seen ~5 times per attendee
+
+    // Tier pricing for ROI calculation
+    const tierPrices = { bronze: 5000, silver: 15000, gold: 50000, platinum: 100000, title: 150000 };
+    const sponsorInvestment = tierPrices[sponsor.sponsorship_tier] || parseInt(sponsor.tier_price?.replace(/\D/g, '')) || 0;
+    const costPerImpression = sponsorInvestment > 0 && estimatedImpressions > 0
+      ? (sponsorInvestment / estimatedImpressions).toFixed(2)
+      : 'N/A';
+    const costPerAttendee = sponsorInvestment > 0 && totalAttendance > 0
+      ? (sponsorInvestment / totalAttendance).toFixed(2)
+      : 'N/A';
+
+    // Industry benchmark comparison
+    const industryAvgCPI = 0.50; // Average cost per impression
+    const performanceVsIndustry = costPerImpression !== 'N/A'
+      ? ((industryAvgCPI / parseFloat(costPerImpression)) * 100).toFixed(0)
+      : null;
+
+    res.json({
+      success: true,
+      sponsor: {
+        companyName: sponsor.company_name,
+        contactName: sponsor.contact_name,
+        tier: sponsor.sponsorship_tier,
+        tierName: sponsor.tier_name || sponsor.sponsorship_tier,
+        tierPrice: sponsor.tier_price,
+        status: sponsor.status,
+        logoUrl: sponsor.logo_url,
+        benefits: sponsor.benefits || []
+      },
+      events: events.map(e => ({
+        id: e.id,
+        title: e.title,
+        date: e.date,
+        status: e.status,
+        venueName: e.venue_name,
+        venueCity: e.venue_city,
+        expectedAttendance: parseInt(e.expected_attendance) || 0,
+        actualAttendance: parseInt(e.actual_attendance) || 0,
+        attendanceRate: e.expected_attendance > 0
+          ? Math.round((e.actual_attendance / e.expected_attendance) * 100)
+          : null
+      })),
+      metrics: {
+        totalEvents: events.length,
+        totalAttendance,
+        avgAttendancePerEvent: avgAttendance,
+        estimatedImpressions,
+        estimatedSocialReach: estimatedImpressions * 3, // Shared content multiplier
+        sponsorInvestment,
+        costPerImpression,
+        costPerAttendee,
+        performanceVsIndustry,
+        industryBenchmark: {
+          avgCostPerImpression: '$0.50',
+          avgCostPerLead: '$15-25',
+          avgEventROI: '5:1'
+        }
+      },
+      generatedAt: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Error fetching sponsor portal data:', error);
+    res.status(500).json({ error: 'Failed to fetch sponsor metrics' });
+  }
+});
+
+// POST /api/v1/sponsors/:id/send-portal-link - Send portal link via email
+app.post('/api/v1/sponsors/:id/send-portal-link', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // First generate the link
+    const sponsor = await pool.query('SELECT * FROM sponsors WHERE id = $1', [id]);
+    if (sponsor.rows.length === 0) {
+      return res.status(404).json({ error: 'Sponsor not found' });
+    }
+
+    const s = sponsor.rows[0];
+    const accessToken = generateSponsorAccessToken();
+    const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+
+    await pool.query(`
+      DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='sponsors' AND column_name='portal_token') THEN
+          ALTER TABLE sponsors ADD COLUMN portal_token VARCHAR(64);
+          ALTER TABLE sponsors ADD COLUMN portal_token_expires TIMESTAMP;
+        END IF;
+      END $$;
+    `);
+
+    await pool.query(
+      'UPDATE sponsors SET portal_token = $1, portal_token_expires = $2 WHERE id = $3',
+      [accessToken, expiresAt, id]
+    );
+
+    // Build portal URL
+    const baseUrl = process.env.FRONTEND_URL || 'https://berry-dashboard-production.up.railway.app';
+    const portalUrl = `${baseUrl}/sponsor-portal/${accessToken}`;
+
+    // Send email with portal link
+    if (resend) {
+      await resend.emails.send({
+        from: 'Berry Bly Productions <noreply@berryblyproductions.com>',
+        to: s.email,
+        subject: `Your Sponsor Metrics Portal - ${s.company_name}`,
+        html: `
+          <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto; padding: 40px 20px;">
+            <div style="text-align: center; margin-bottom: 40px;">
+              <h1 style="color: #d4af37; font-size: 28px; margin: 0;">Sponsor Metrics Portal</h1>
+              <p style="color: #666; margin-top: 10px;">Your exclusive access to event performance data</p>
+            </div>
+
+            <p style="color: #333; font-size: 16px; line-height: 1.6;">Hi ${s.contact_name},</p>
+
+            <p style="color: #333; font-size: 16px; line-height: 1.6;">
+              As a valued ${s.tier_name || s.sponsorship_tier} sponsor, you now have access to your personalized metrics portal where you can track the impact of your sponsorship investment.
+            </p>
+
+            <div style="background: linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%); border-radius: 12px; padding: 30px; text-align: center; margin: 30px 0;">
+              <p style="color: #888; margin: 0 0 15px 0;">Click below to view your metrics:</p>
+              <a href="${portalUrl}" style="display: inline-block; background: linear-gradient(135deg, #d4af37 0%, #b8962d 100%); color: #000; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-weight: 600; font-size: 16px;">
+                View Sponsor Portal
+              </a>
+            </div>
+
+            <p style="color: #666; font-size: 14px; line-height: 1.6;">
+              Your portal includes:
+            </p>
+            <ul style="color: #666; font-size: 14px; line-height: 1.8;">
+              <li>Event attendance metrics</li>
+              <li>Brand impression estimates</li>
+              <li>ROI calculations</li>
+              <li>Industry benchmark comparisons</li>
+            </ul>
+
+            <p style="color: #888; font-size: 13px; margin-top: 40px;">
+              This link expires in 30 days. If you need a new link, please contact us.
+            </p>
+
+            <div style="border-top: 1px solid #eee; margin-top: 40px; padding-top: 20px; text-align: center;">
+              <p style="color: #888; font-size: 12px; margin: 0;">Berry Bly Productions</p>
+            </div>
+          </div>
+        `
+      });
+    }
+
+    res.json({
+      success: true,
+      message: `Portal link sent to ${s.email}`,
+      portalUrl,
+      expiresAt: expiresAt.toISOString()
+    });
+  } catch (error) {
+    console.error('Error sending portal link:', error);
+    res.status(500).json({ error: 'Failed to send portal link' });
+  }
+});
+
+// ============================================
 // EVENTS ENDPOINTS - Multi-Event Management
 // ============================================
 

@@ -2524,7 +2524,7 @@ function App() {
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 32 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
             <div style={{ width: 36, height: 36, background: 'linear-gradient(135deg, #fff 0%, #999 100%)', borderRadius: 8 }} />
-            <span style={{ fontSize: 18, fontWeight: 600, letterSpacing: '-0.3px' }}>Berry Bly</span>
+            <span style={{ fontSize: 18, fontWeight: 600, letterSpacing: '-0.3px' }}>{user?.name || 'Dashboard'}</span>
           </div>
           <button
             className="mobile-menu-btn"
@@ -4351,6 +4351,36 @@ function App() {
                     }}>
                       {sponsor.status}
                     </span>
+                    <button
+                      onClick={async (e) => {
+                        e.stopPropagation();
+                        try {
+                          const res = await fetch(`${API_URL}/sponsors/${sponsor.id}/send-portal-link`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' }
+                          });
+                          if (res.ok) {
+                            addToast(`Portal link sent to ${sponsor.email}`, 'success');
+                          } else {
+                            addToast('Failed to send portal link', 'error');
+                          }
+                        } catch {
+                          addToast('Failed to send portal link', 'error');
+                        }
+                      }}
+                      style={{
+                        background: '#d4af3720',
+                        border: 'none',
+                        color: '#d4af37',
+                        padding: '6px 12px',
+                        borderRadius: 6,
+                        fontSize: 12,
+                        cursor: 'pointer',
+                      }}
+                      title="Send metrics portal link"
+                    >
+                      Portal
+                    </button>
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
