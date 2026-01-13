@@ -20,6 +20,7 @@ interface AuthContextType {
   register: (email: string, password: string, name: string, company?: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => void;
   forgotPassword: (email: string) => Promise<{ success: boolean; error?: string }>;
+  autoLogin: (autoLoginToken: string) => Promise<{ success: boolean; error?: string }>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -130,8 +131,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const autoLogin = async (autoLoginToken: string) => {
+    try {
+      const response = await fetch(`${API_HOST}/api/v1/auth/auto-login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: autoLoginToken })
+      });
+
+      const data = await response.json();
+
+      if (data.success && data.token) {
+        setToken(data.token);
+        setUser(data.user);
+        localStorage.setItem('berry_token', data.token);
+        localStorage.setItem('berry_user', JSON.stringify(data.user));
+        return { success: true };
+      } else {
+        return { success: false, error: data.error || 'Auto-login failed' };
+      }
+    } catch (error) {
+      return { success: false, error: 'Network error during auto-login.' };
+    }
+  };
+
   return (
-    <AuthContext.Provider value={{ user, token, isLoading, login, register, logout, forgotPassword }}>
+    <AuthContext.Provider value={{ user, token, isLoading, login, register, logout, forgotPassword, autoLogin }}>
       {children}
     </AuthContext.Provider>
   );

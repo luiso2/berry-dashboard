@@ -13,7 +13,7 @@ import yaml from 'js-yaml';
 import cookieParser from 'cookie-parser';
 
 // API Version - for tracking deployments
-const API_VERSION = '3.4.2-oauth-fix-config';
+const API_VERSION = '3.5.0-oauth-auto-login';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -8064,8 +8064,26 @@ app.get('/api/v1/auth/eventbrite/callback', async (req, res) => {
     // Clear the state cookie
     res.clearCookie('eventbrite_oauth_state');
 
-    // Redirect back to dashboard with success
-    res.redirect(`${FRONTEND_URL}/dashboard?eventbrite=connected&user=${encodeURIComponent(userData.name || 'User')}`);
+    // Generate a temporary auto-login token for the user
+    let autoLoginToken = null;
+    if (userId && userId !== 'global') {
+      // Create a short-lived token that the frontend can use to restore the session
+      autoLoginToken = crypto.randomBytes(32).toString('hex');
+      const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
+
+      // Store the auto-login token
+      await pool.query(`
+        INSERT INTO oauth_tokens (user_id, access_token, token_type, expires_at)
+        VALUES ($1, $2, 'auto_login', $3)
+      `, [userId, autoLoginToken, expiresAt]);
+    }
+
+    // Redirect back to dashboard with success and auto-login token
+    const redirectUrl = autoLoginToken
+      ? `${FRONTEND_URL}/dashboard?eventbrite=connected&user=${encodeURIComponent(userData.name || 'User')}&autoLogin=${autoLoginToken}`
+      : `${FRONTEND_URL}/dashboard?eventbrite=connected&user=${encodeURIComponent(userData.name || 'User')}`;
+
+    res.redirect(redirectUrl);
 
   } catch (error) {
     console.error('OAuth callback error:', error);
@@ -8111,6 +8129,58 @@ app.get('/api/v1/auth/eventbrite/status', async (req, res) => {
   } catch (error) {
     console.error('Error checking Eventbrite status:', error);
     res.json({ connected: false, error: error.message });
+  }
+});
+
+// POST /api/v1/auth/auto-login - Exchange auto-login token for session
+app.post('/api/v1/auth/auto-login', async (req, res) => {
+  try {
+    const { token } = req.body;
+
+    if (!token) {
+      return res.status(400).json({ error: 'Token required' });
+    }
+
+    // Find and validate the auto-login token
+    const result = await pool.query(`
+      SELECT t.*, u.id as user_id, u.email, u.name, u.company
+      FROM oauth_tokens t
+      JOIN users u ON t.user_id = u.id
+      WHERE t.access_token = $1 AND t.token_type = 'auto_login' AND t.expires_at > NOW()
+    `, [token]);
+
+    if (result.rows.length === 0) {
+      return res.status(401).json({ error: 'Invalid or expired token' });
+    }
+
+    const userData = result.rows[0];
+
+    // Delete the used auto-login token (one-time use)
+    await pool.query('DELETE FROM oauth_tokens WHERE access_token = $1', [token]);
+
+    // Generate a new session token
+    const newToken = crypto.randomBytes(32).toString('hex');
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
+
+    await pool.query(`
+      INSERT INTO oauth_tokens (user_id, access_token, token_type, expires_at)
+      VALUES ($1, $2, 'session', $3)
+    `, [userData.user_id, newToken, expiresAt]);
+
+    res.json({
+      success: true,
+      token: newToken,
+      user: {
+        id: userData.user_id,
+        email: userData.email,
+        name: userData.name,
+        company: userData.company
+      }
+    });
+
+  } catch (error) {
+    console.error('Auto-login error:', error);
+    res.status(500).json({ error: 'Auto-login failed' });
   }
 });
 
