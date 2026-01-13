@@ -240,18 +240,6 @@ interface Promoter {
   createdAt: string;
 }
 
-interface PromoterSale {
-  id: number;
-  promoterId: number;
-  eventId?: number;
-  guestName?: string;
-  guestEmail?: string;
-  saleAmount: number;
-  commissionAmount: number;
-  commissionStatus: 'pending' | 'approved' | 'paid';
-  createdAt: string;
-}
-
 // Event Management Interfaces
 interface Event {
   id: number;
