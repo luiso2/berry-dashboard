@@ -7688,6 +7688,18 @@ app.post('/api/v1/integrations/eventbrite/sync', async (req, res) => {
     const orgData = await orgResponse.json();
     const organizations = orgData.organizations || [];
 
+    // Ensure required columns exist for Eventbrite sync
+    try {
+      await pool.query(`
+        ALTER TABLE events ADD COLUMN IF NOT EXISTS external_id VARCHAR(100);
+        ALTER TABLE events ADD COLUMN IF NOT EXISTS external_source VARCHAR(50);
+        ALTER TABLE events ADD COLUMN IF NOT EXISTS eventbrite_url TEXT;
+        ALTER TABLE events ADD COLUMN IF NOT EXISTS ticket_types JSONB DEFAULT '[]';
+      `);
+    } catch (colErr) {
+      console.log('Column check/add:', colErr.message);
+    }
+
     let totalEvents = 0;
     let totalTickets = 0;
 
@@ -7751,20 +7763,25 @@ app.post('/api/v1/integrations/eventbrite/sync', async (req, res) => {
           ]);
         } else {
           // Insert new event (use berry-bly schema: title, date, time, venue, category)
-          await pool.query(`
-            INSERT INTO events (title, description, date, time, status, external_id, external_source, eventbrite_url, ticket_types, flyer_url, category)
-            VALUES ($1, $2, $3, $4, $5, $6, 'eventbrite', $7, $8, $9, 'eventbrite')
-          `, [
-            event.name?.text || 'Untitled Event',
-            event.description?.text || '',
-            eventDate,
-            startTime,
-            eventStatus,
-            event.id,
-            event.url || '',
-            JSON.stringify(ticketTypes),
-            event.logo?.url || null
-          ]);
+          try {
+            await pool.query(`
+              INSERT INTO events (title, description, date, time, status, external_id, external_source, eventbrite_url, ticket_types, flyer_url, category)
+              VALUES ($1, $2, $3, $4, $5, $6, 'eventbrite', $7, $8, $9, 'eventbrite')
+            `, [
+              event.name?.text || 'Untitled Event',
+              event.description?.text || '',
+              eventDate,
+              startTime,
+              eventStatus,
+              event.id,
+              event.url || '',
+              JSON.stringify(ticketTypes),
+              event.logo?.url || null
+            ]);
+            console.log(`✅ Inserted Eventbrite event: ${event.name?.text}`);
+          } catch (insertErr) {
+            console.error(`❌ Failed to insert event ${event.name?.text}:`, insertErr.message);
+          }
         }
 
         totalEvents++;
