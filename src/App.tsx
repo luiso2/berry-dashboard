@@ -1699,6 +1699,27 @@ function App() {
     }
   }, [fetchEvents]);
 
+  // Delete Event
+  const deleteEvent = useCallback(async (id: number, eventName: string) => {
+    if (!confirm(`Are you sure you want to delete "${eventName}"? This action cannot be undone.`)) {
+      return;
+    }
+    try {
+      const res = await fetch(`${API_URL}/events/${id}`, {
+        method: 'DELETE',
+      });
+      if (res.ok) {
+        fetchEvents();
+        addToast('Event deleted successfully', 'success');
+      } else {
+        addToast('Failed to delete event', 'error');
+      }
+    } catch (error) {
+      console.error('Error deleting event:', error);
+      addToast('Failed to delete event', 'error');
+    }
+  }, [fetchEvents]);
+
   // Fetch Budget for Event
   const fetchBudget = useCallback(async (eventId: number) => {
     try {
@@ -4584,6 +4605,13 @@ function App() {
                         Eventbrite
                       </button>
                     )}
+                    <button
+                      onClick={(e) => { e.stopPropagation(); deleteEvent(event.id, event.name); }}
+                      style={{ padding: '8px', background: '#ef444420', border: 'none', borderRadius: 6, color: '#ef4444', fontSize: 12, cursor: 'pointer' }}
+                      title="Delete Event"
+                    >
+                      🗑️
+                    </button>
                   </div>
                 </div>
               ))}
