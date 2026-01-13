@@ -13,7 +13,7 @@ import yaml from 'js-yaml';
 import cookieParser from 'cookie-parser';
 
 // API Version - for tracking deployments
-const API_VERSION = '3.4.0-eventbrite-oauth';
+const API_VERSION = '3.4.1-oauth-with-userid';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -7944,8 +7944,12 @@ const FRONTEND_URL = process.env.FRONTEND_URL || 'https://berry-dashboard-produc
 
 // GET /api/v1/auth/eventbrite - Redirect to Eventbrite for authorization
 app.get('/api/v1/auth/eventbrite', (req, res) => {
-  // Generate a state parameter for CSRF protection
-  const state = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+  // Get user ID from query parameter (passed from frontend)
+  const userId = req.query.userId || 'global';
+
+  // Generate a state parameter for CSRF protection, include userId
+  const randomPart = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+  const state = `${randomPart}_${userId}`;
 
   // Store state in a cookie for validation
   res.cookie('eventbrite_oauth_state', state, {
@@ -7957,7 +7961,7 @@ app.get('/api/v1/auth/eventbrite', (req, res) => {
 
   const authUrl = `https://www.eventbrite.com/oauth/authorize?response_type=code&client_id=${EVENTBRITE_CLIENT_ID}&redirect_uri=${encodeURIComponent(EVENTBRITE_REDIRECT_URI)}&state=${state}`;
 
-  console.log('Redirecting to Eventbrite OAuth:', authUrl);
+  console.log('Redirecting to Eventbrite OAuth:', authUrl, 'for user:', userId);
   res.redirect(authUrl);
 });
 
@@ -7982,6 +7986,11 @@ app.get('/api/v1/auth/eventbrite/callback', async (req, res) => {
       console.error('State mismatch - possible CSRF attack');
       return res.redirect(`${FRONTEND_URL}/dashboard?eventbrite=error&message=Invalid state parameter`);
     }
+
+    // Extract userId from state (format: randomPart_userId)
+    const stateParts = (state || '').split('_');
+    const userId = stateParts.length > 1 ? stateParts[stateParts.length - 1] : 'global';
+    console.log('Processing OAuth callback for user:', userId);
 
     // Exchange authorization code for access token
     console.log('Exchanging code for token...');

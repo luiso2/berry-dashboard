@@ -5500,7 +5500,7 @@ function App() {
                     <div style={{ marginBottom: 16 }}>
                       <button
                         onClick={() => {
-                          window.location.href = `${API_URL.replace('/api/v1', '')}/api/v1/auth/eventbrite`;
+                          window.location.href = `${API_URL.replace('/api/v1', '')}/api/v1/auth/eventbrite?userId=${user?.id || 'global'}`;
                         }}
                         style={{
                           width: '100%',
