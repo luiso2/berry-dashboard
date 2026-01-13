@@ -269,6 +269,10 @@ interface Integration {
   hasApiKey: boolean;
   apiKeyMasked?: string;
   extraConfig?: Record<string, string>;
+  connectedUser?: {
+    name: string;
+    email: string;
+  };
 }
 
 // Budget Interfaces
@@ -1375,11 +1379,36 @@ function App() {
     try {
       const res = await fetch(`${API_URL}/integrations`);
       const data = await res.json();
-      setIntegrations(data.integrations || []);
+      let integrationsList = data.integrations || [];
+
+      // Check Eventbrite status per-user
+      if (user?.id) {
+        try {
+          const eventbriteRes = await fetch(`${API_URL}/auth/eventbrite/status?userId=${user.id}`);
+          const eventbriteData = await eventbriteRes.json();
+
+          // Update Eventbrite integration in the list
+          integrationsList = integrationsList.map((int: Integration) => {
+            if (int.provider === 'eventbrite') {
+              return {
+                ...int,
+                status: eventbriteData.connected ? 'connected' : 'disconnected',
+                connectedUser: eventbriteData.user,
+                lastSync: eventbriteData.lastSync
+              };
+            }
+            return int;
+          });
+        } catch (e) {
+          console.error('Error checking Eventbrite status:', e);
+        }
+      }
+
+      setIntegrations(integrationsList);
     } catch (error) {
       console.error('Error fetching integrations:', error);
     }
-  }, []);
+  }, [user?.id]);
 
   // Save Integration Config
   const saveIntegrationConfig = async (provider: string) => {
@@ -1469,9 +1498,19 @@ function App() {
 
     setIntegrationLoading(provider);
     try {
-      const res = await fetch(`${API_URL}/integrations/${provider}`, {
-        method: 'DELETE'
-      });
+      let res;
+      if (provider === 'eventbrite') {
+        // Use per-user disconnect for Eventbrite
+        res = await fetch(`${API_URL}/auth/eventbrite/disconnect`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId: user?.id })
+        });
+      } else {
+        res = await fetch(`${API_URL}/integrations/${provider}`, {
+          method: 'DELETE'
+        });
+      }
       const data = await res.json();
       if (data.success) {
         addToast(`${provider} disconnected`, 'success');
@@ -5492,6 +5531,15 @@ function App() {
                   {integration.lastError && integration.status === 'error' && (
                     <div style={{ background: '#ef444420', border: '1px solid #ef444440', borderRadius: 8, padding: 10, marginBottom: 12, fontSize: 12, color: '#fca5a5' }}>
                       {integration.lastError}
+                    </div>
+                  )}
+
+                  {/* Connected Eventbrite User Info */}
+                  {integration.provider === 'eventbrite' && integration.status === 'connected' && integration.connectedUser && (
+                    <div style={{ background: '#22c55e10', border: '1px solid #22c55e30', borderRadius: 8, padding: 12, marginBottom: 12 }}>
+                      <div style={{ fontSize: 12, color: '#22c55e', fontWeight: 600, marginBottom: 4 }}>Connected Account</div>
+                      <div style={{ fontSize: 14, color: '#fff' }}>{integration.connectedUser.name}</div>
+                      <div style={{ fontSize: 12, color: '#888' }}>{integration.connectedUser.email}</div>
                     </div>
                   )}
 

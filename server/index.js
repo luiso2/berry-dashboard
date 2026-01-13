@@ -13,7 +13,7 @@ import yaml from 'js-yaml';
 import cookieParser from 'cookie-parser';
 
 // API Version - for tracking deployments
-const API_VERSION = '3.5.0-oauth-auto-login';
+const API_VERSION = '3.6.0-per-user-integrations';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -1000,6 +1000,33 @@ const initDatabase = async () => {
     // Add webhook_id column if it doesn't exist
     await client.query(`
       ALTER TABLE integrations ADD COLUMN IF NOT EXISTS webhook_id VARCHAR(100);
+    `);
+
+    // ============================================
+    // USER INTEGRATIONS TABLE - Per-user OAuth connections
+    // ============================================
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS user_integrations (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        provider VARCHAR(50) NOT NULL,
+        api_key_encrypted TEXT,
+        refresh_token_encrypted TEXT,
+        status VARCHAR(20) DEFAULT 'connected',
+        provider_user_id VARCHAR(255),
+        provider_user_email VARCHAR(255),
+        provider_user_name VARCHAR(255),
+        extra_config JSONB DEFAULT '{}',
+        last_sync TIMESTAMP,
+        last_error TEXT,
+        expires_at TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(user_id, provider)
+      );
+      CREATE INDEX IF NOT EXISTS idx_user_integrations_user ON user_integrations(user_id);
+      CREATE INDEX IF NOT EXISTS idx_user_integrations_provider ON user_integrations(provider);
+      CREATE INDEX IF NOT EXISTS idx_user_integrations_status ON user_integrations(status);
     `);
 
     // ============================================
@@ -8035,31 +8062,57 @@ app.get('/api/v1/auth/eventbrite/callback', async (req, res) => {
     }
 
     const userData = await userResponse.json();
-    console.log('Eventbrite user:', userData.name, userData.emails?.[0]?.email);
+    const eventbriteEmail = userData.emails?.[0]?.email;
+    console.log('Eventbrite user:', userData.name, eventbriteEmail);
 
     // Encrypt and store the access token
     const encryptedToken = encryptApiKey(accessToken);
 
-    // Upsert into integrations table
-    await pool.query(`
-      INSERT INTO integrations (provider, api_key_encrypted, status, last_sync, extra_config)
-      VALUES ('eventbrite', $1, 'connected', NOW(), $2)
-      ON CONFLICT (provider)
-      DO UPDATE SET
-        api_key_encrypted = $1,
-        status = 'connected',
-        last_sync = NOW(),
-        extra_config = $2
-    `, [
-      encryptedToken,
-      JSON.stringify({
-        userName: userData.name,
-        userEmail: userData.emails?.[0]?.email,
-        connectedAt: new Date().toISOString()
-      })
-    ]);
-
-    console.log('Eventbrite connected successfully!');
+    // Store in user_integrations table (per-user)
+    if (userId && userId !== 'global') {
+      await pool.query(`
+        INSERT INTO user_integrations (user_id, provider, api_key_encrypted, status, provider_user_id, provider_user_email, provider_user_name, last_sync, extra_config)
+        VALUES ($1, 'eventbrite', $2, 'connected', $3, $4, $5, NOW(), $6)
+        ON CONFLICT (user_id, provider)
+        DO UPDATE SET
+          api_key_encrypted = $2,
+          status = 'connected',
+          provider_user_id = $3,
+          provider_user_email = $4,
+          provider_user_name = $5,
+          last_sync = NOW(),
+          extra_config = $6,
+          updated_at = NOW()
+      `, [
+        userId,
+        encryptedToken,
+        userData.id,
+        eventbriteEmail,
+        userData.name,
+        JSON.stringify({ connectedAt: new Date().toISOString() })
+      ]);
+      console.log(`Eventbrite connected for user ${userId}: ${eventbriteEmail}`);
+    } else {
+      // Fallback to global integrations table (backward compatibility)
+      await pool.query(`
+        INSERT INTO integrations (provider, api_key_encrypted, status, last_sync, extra_config)
+        VALUES ('eventbrite', $1, 'connected', NOW(), $2)
+        ON CONFLICT (provider)
+        DO UPDATE SET
+          api_key_encrypted = $1,
+          status = 'connected',
+          last_sync = NOW(),
+          extra_config = $2
+      `, [
+        encryptedToken,
+        JSON.stringify({
+          userName: userData.name,
+          userEmail: eventbriteEmail,
+          connectedAt: new Date().toISOString()
+        })
+      ]);
+      console.log('Eventbrite connected globally (no user specified)');
+    }
 
     // Clear the state cookie
     res.clearCookie('eventbrite_oauth_state');
@@ -8091,9 +8144,54 @@ app.get('/api/v1/auth/eventbrite/callback', async (req, res) => {
   }
 });
 
-// GET /api/v1/auth/eventbrite/status - Check connection status
+// GET /api/v1/auth/eventbrite/status - Check connection status (per-user)
 app.get('/api/v1/auth/eventbrite/status', async (req, res) => {
   try {
+    const userId = req.query.userId;
+
+    // Check user_integrations first (per-user)
+    if (userId) {
+      const userResult = await pool.query(
+        'SELECT * FROM user_integrations WHERE user_id = $1 AND provider = $2',
+        [userId, 'eventbrite']
+      );
+
+      if (userResult.rows.length > 0) {
+        const integration = userResult.rows[0];
+
+        if (integration.status !== 'connected') {
+          return res.json({ connected: false });
+        }
+
+        // Verify token is still valid
+        const apiKey = decryptApiKey(integration.api_key_encrypted);
+        const userResponse = await fetch('https://www.eventbriteapi.com/v3/users/me/', {
+          headers: { 'Authorization': `Bearer ${apiKey}` }
+        });
+
+        if (!userResponse.ok) {
+          await pool.query(
+            'UPDATE user_integrations SET status = $1 WHERE user_id = $2 AND provider = $3',
+            ['expired', userId, 'eventbrite']
+          );
+          return res.json({ connected: false, error: 'Token expired' });
+        }
+
+        const userData = await userResponse.json();
+
+        return res.json({
+          connected: true,
+          user: {
+            name: integration.provider_user_name || userData.name,
+            email: integration.provider_user_email || userData.emails?.[0]?.email
+          },
+          connectedAt: integration.created_at,
+          lastSync: integration.last_sync
+        });
+      }
+    }
+
+    // Fallback to global integrations table
     const result = await pool.query('SELECT * FROM integrations WHERE provider = $1', ['eventbrite']);
     const integration = result.rows[0];
 
@@ -8101,14 +8199,12 @@ app.get('/api/v1/auth/eventbrite/status', async (req, res) => {
       return res.json({ connected: false });
     }
 
-    // Try to get user info to verify token is still valid
     const apiKey = decryptApiKey(integration.api_key_encrypted);
     const userResponse = await fetch('https://www.eventbriteapi.com/v3/users/me/', {
       headers: { 'Authorization': `Bearer ${apiKey}` }
     });
 
     if (!userResponse.ok) {
-      // Token is invalid, update status
       await pool.query('UPDATE integrations SET status = $1 WHERE provider = $2', ['expired', 'eventbrite']);
       return res.json({ connected: false, error: 'Token expired' });
     }
@@ -8184,10 +8280,23 @@ app.post('/api/v1/auth/auto-login', async (req, res) => {
   }
 });
 
-// POST /api/v1/auth/eventbrite/disconnect - Disconnect Eventbrite
+// POST /api/v1/auth/eventbrite/disconnect - Disconnect Eventbrite (per-user)
 app.post('/api/v1/auth/eventbrite/disconnect', async (req, res) => {
   try {
-    await pool.query('UPDATE integrations SET status = $1, api_key_encrypted = NULL WHERE provider = $2', ['disconnected', 'eventbrite']);
+    const { userId } = req.body;
+
+    if (userId) {
+      // Disconnect for specific user
+      await pool.query(
+        'DELETE FROM user_integrations WHERE user_id = $1 AND provider = $2',
+        [userId, 'eventbrite']
+      );
+      console.log(`Eventbrite disconnected for user ${userId}`);
+    } else {
+      // Fallback to global disconnect
+      await pool.query('UPDATE integrations SET status = $1, api_key_encrypted = NULL WHERE provider = $2', ['disconnected', 'eventbrite']);
+    }
+
     res.json({ success: true, message: 'Eventbrite disconnected' });
   } catch (error) {
     console.error('Error disconnecting Eventbrite:', error);
