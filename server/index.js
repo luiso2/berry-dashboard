@@ -13,7 +13,7 @@ import yaml from 'js-yaml';
 import cookieParser from 'cookie-parser';
 
 // API Version - for tracking deployments
-const API_VERSION = '3.9.2-sponsor-email-fix';
+const API_VERSION = '3.9.3-sponsor-email-domain-fix';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -3846,7 +3846,8 @@ app.post('/api/v1/sponsors/:id/send-portal-link', async (req, res) => {
     } else if (resend) {
       try {
         const emailResult = await resend.emails.send({
-          from: 'Berry Bly Productions <noreply@berryblyproductions.com>',
+          from: EMAIL_CONFIG.from,
+          replyTo: EMAIL_CONFIG.replyTo,
           to: s.email,
           subject: `Your Sponsor Metrics Portal - ${s.company_name}`,
           html: `
