@@ -232,12 +232,13 @@ interface Event {
   startTime?: string;
   endTime?: string;
   doorsOpen?: string;
-  status: 'planning' | 'confirmed' | 'in_progress' | 'completed' | 'cancelled';
+  status: 'planning' | 'confirmed' | 'in_progress' | 'completed' | 'cancelled' | 'upcoming' | 'past';
   coverImage?: string;
   theme?: string;
   dressCode?: string;
   ageRestriction?: string;
   ticketLink?: string;
+  eventbriteUrl?: string;
   isPublic: boolean;
   isFeatured: boolean;
   expectedAttendance?: number;
@@ -4432,7 +4433,14 @@ function App() {
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
                     <div>
-                      <h3 style={{ fontSize: 16, fontWeight: 600, margin: 0 }}>{event.name}</h3>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <h3 style={{ fontSize: 16, fontWeight: 600, margin: 0 }}>{event.name}</h3>
+                        {event.eventbriteUrl && (
+                          <span style={{ fontSize: 10, padding: '2px 6px', background: '#F6682F20', color: '#F6682F', borderRadius: 4, fontWeight: 600 }}>
+                            EVENTBRITE
+                          </span>
+                        )}
+                      </div>
                       <div style={{ fontSize: 13, color: '#666', marginTop: 4 }}>{event.venueName || 'Venue TBD'} {event.venueCity && `• ${event.venueCity}`}</div>
                     </div>
                     <span style={{
@@ -4441,8 +4449,8 @@ function App() {
                       fontSize: 11,
                       fontWeight: 600,
                       textTransform: 'uppercase',
-                      background: event.status === 'confirmed' ? '#22c55e20' : event.status === 'planning' ? '#f59e0b20' : event.status === 'completed' ? '#6b728020' : '#ef444420',
-                      color: event.status === 'confirmed' ? '#22c55e' : event.status === 'planning' ? '#f59e0b' : event.status === 'completed' ? '#9ca3af' : '#ef4444',
+                      background: event.status === 'confirmed' ? '#22c55e20' : event.status === 'planning' ? '#f59e0b20' : event.status === 'completed' ? '#6b728020' : event.status === 'upcoming' ? '#3b82f620' : '#ef444420',
+                      color: event.status === 'confirmed' ? '#22c55e' : event.status === 'planning' ? '#f59e0b' : event.status === 'completed' ? '#9ca3af' : event.status === 'upcoming' ? '#3b82f6' : '#ef4444',
                     }}>
                       {event.status}
                     </span>
@@ -4472,6 +4480,14 @@ function App() {
                     >
                       Share
                     </button>
+                    {event.eventbriteUrl && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); window.open(event.eventbriteUrl, '_blank'); }}
+                        style={{ flex: 1, padding: '8px', background: '#F6682F20', border: 'none', borderRadius: 6, color: '#F6682F', fontSize: 12, cursor: 'pointer' }}
+                      >
+                        Eventbrite
+                      </button>
+                    )}
                   </div>
                 </div>
               ))}
