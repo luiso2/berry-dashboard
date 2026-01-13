@@ -13,7 +13,7 @@ import yaml from 'js-yaml';
 import cookieParser from 'cookie-parser';
 
 // API Version - for tracking deployments
-const API_VERSION = '3.6.1-fix-sync-per-user';
+const API_VERSION = '3.6.2-fix-token-type-column';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -106,11 +106,17 @@ const initDatabase = async () => {
         access_token VARCHAR(255) UNIQUE NOT NULL,
         refresh_token VARCHAR(255),
         code VARCHAR(255),
+        token_type VARCHAR(50) DEFAULT 'session',
         expires_at TIMESTAMP,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
       CREATE INDEX IF NOT EXISTS idx_oauth_tokens_access ON oauth_tokens(access_token);
       CREATE INDEX IF NOT EXISTS idx_oauth_tokens_code ON oauth_tokens(code);
+    `);
+
+    // Add token_type column if it doesn't exist (for existing databases)
+    await client.query(`
+      ALTER TABLE oauth_tokens ADD COLUMN IF NOT EXISTS token_type VARCHAR(50) DEFAULT 'session';
     `);
 
     // Create guests table
