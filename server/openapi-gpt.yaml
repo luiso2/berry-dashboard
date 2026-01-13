@@ -13,17 +13,21 @@ info:
 
     ## Available Endpoints
     - **getDashboard** - Get complete overview (no action needed)
-    - **manageEvents** - Actions: list, get, getFull, create, update, delete, addTimeline, addChecklist
-    - **manageGuests** - Actions: list, get, add, update, delete, approve, reject, checkIn, stats
+    - **manageEvents** - Actions: list, get, getFull, create, update, delete, addTimeline, addChecklist, duplicate
+    - **manageGuests** - Actions: list, get, add, update, delete, approve, reject, checkIn, stats, bulkSend
     - **manageBudget** - Actions: getCategories, getSummary, getItems, addItem, updateItem, deleteItem, markPaid
     - **manageStaff** - Actions: list, get, add, update, delete, assignToEvent, getEventStaff, removeAssignment
     - **manageVendors** - Actions: list, get, add, update, delete
     - **manageModels** - Actions: list, get, updateStatus, stats
     - **manageTables** - Actions: list, create, confirm, cancel, stats
-    - **manageTickets** - Actions: list, create, checkIn, stats
-    - **manageSponsors** - Actions: list, get, add, updateStatus, stats
+    - **manageTickets** - Actions: list, create, checkIn, deleteAll, stats, import
+    - **manageSponsors** - Actions: list, get, add, update, delete, stats, sendPortalEmail
+    - **managePromoters** - Actions: list, get, add, update, delete, trackSale, leaderboard, stats, payout
+    - **manageIntegrations** - Actions: list, connect, disconnect, sync (Eventbrite, Mailchimp)
+    - **manageEmails** - Actions: getStatus, getSummary (email tracking via Resend)
+    - **manageUploads** - Actions: list, get, stats, getTemplate (file upload tracking)
 
-  version: 3.2.0
+  version: 3.14.0
   contact:
     name: Berry Bly Productions
     email: concierge@berrybly.com
@@ -103,20 +107,28 @@ paths:
                     - manageTables
                     - manageTickets
                     - manageSponsors
+                    - managePromoters
+                    - manageIntegrations
+                    - manageEmails
+                    - manageUploads
                 action:
                   type: string
                   description: |
                     Operation to perform. Required for all endpoints except getDashboard.
 
-                    **manageEvents:** list, get, getFull, create, update, delete, addTimeline, addChecklist
-                    **manageGuests:** list, get, add, update, delete, approve, reject, checkIn, stats
+                    **manageEvents:** list, get, getFull, create, update, delete, addTimeline, addChecklist, duplicate
+                    **manageGuests:** list, get, add, update, delete, approve, reject, checkIn, stats, bulkSend
                     **manageBudget:** getCategories, getSummary, getItems, addItem, updateItem, deleteItem, markPaid
                     **manageStaff:** list, get, add, update, delete, assignToEvent, getEventStaff, removeAssignment
                     **manageVendors:** list, get, add, update, delete
                     **manageModels:** list, get, updateStatus, stats
                     **manageTables:** list, create, confirm, cancel, stats
-                    **manageTickets:** list, create, checkIn, stats
-                    **manageSponsors:** list, get, add, updateStatus, stats
+                    **manageTickets:** list, create, checkIn, deleteAll, stats, import
+                    **manageSponsors:** list, get, add, update, delete, stats, sendPortalEmail
+                    **managePromoters:** list, get, add, update, delete, trackSale, leaderboard, stats, payout
+                    **manageIntegrations:** list, connect, disconnect, sync
+                    **manageEmails:** getStatus, getSummary
+                    **manageUploads:** list, get, stats, getTemplate
                 eventId:
                   type: integer
                   description: Event ID (for event-specific operations)
@@ -147,6 +159,24 @@ paths:
                 assignmentId:
                   type: integer
                   description: Staff assignment ID
+                promoterId:
+                  type: integer
+                  description: Promoter ID (for promoter operations)
+                promoterCode:
+                  type: string
+                  description: Promoter promo code (for tracking sales)
+                provider:
+                  type: string
+                  description: Integration provider (eventbrite, mailchimp)
+                emailId:
+                  type: string
+                  description: Email ID for tracking (from Resend)
+                period:
+                  type: string
+                  description: Time period for leaderboard (week, month, year, all)
+                uploadId:
+                  type: integer
+                  description: Upload ID (for upload operations)
                 filters:
                   type: object
                   description: Optional filters for list operations
@@ -174,7 +204,10 @@ paths:
                     **Models:** status (pending, approved, declined, assigned)
                     **Tables:** tableId, tableName, zone, customerName, customerEmail, customerPhone, partySize, minimumSpend
                     **Tickets:** ticketType, holderName, holderEmail, price
-                    **Sponsors:** companyName, contactName, email, phone, tier (platinum, gold, silver, bronze), amount, benefits, status
+                    **Sponsors:** companyName, contactName, email, phone, tier (auto-calculated from amount), amount (determines tier: $1k-5k=bronze, $5k-15k=silver, $15k-35k=gold, $35k-75k=platinum, $75k-150k=diamond, $150k+=title), benefits, status
+                    **Promoters:** name, email, phone, commissionRate (default 10%), commissionType (percentage|fixed), bio, socialInstagram, socialTiktok, socialTwitter
+                    **PromoterSale:** promoterCode, saleAmount, eventId, guestName, guestEmail (for trackSale action)
+                    **PromoterPayout:** amount, paymentMethod, reference, notes (for payout action)
                     **Timeline:** time, title, description, location, isCritical
                     **Checklist:** item, category, priority (high, medium, low)
 
@@ -241,6 +274,104 @@ paths:
                     description: "DJ Services"
                     estimatedAmount: 5000
                     vendorName: "DJ Khaled"
+              listPromoters:
+                summary: List all promoters
+                value:
+                  endpoint: managePromoters
+                  action: list
+              addPromoter:
+                summary: Add a new promoter
+                value:
+                  endpoint: managePromoters
+                  action: add
+                  data:
+                    name: "Mike Rodriguez"
+                    email: "mike@promo.com"
+                    phone: "+1234567890"
+                    commissionRate: 15
+                    bio: "Top nightlife promoter in LA"
+                    socialInstagram: "@mikepromo"
+              trackPromoterSale:
+                summary: Track a sale with promoter code
+                value:
+                  endpoint: managePromoters
+                  action: trackSale
+                  data:
+                    promoterCode: "MIKE1234"
+                    saleAmount: 150.00
+                    eventId: 1
+                    guestName: "John Doe"
+                    guestEmail: "john@example.com"
+              getPromoterLeaderboard:
+                summary: Get promoter leaderboard
+                value:
+                  endpoint: managePromoters
+                  action: leaderboard
+                  period: "month"
+              getPromoterStats:
+                summary: Get promoter statistics
+                value:
+                  endpoint: managePromoters
+                  action: stats
+                  promoterId: 1
+              createPromoterPayout:
+                summary: Pay out promoter commission
+                value:
+                  endpoint: managePromoters
+                  action: payout
+                  promoterId: 1
+                  data:
+                    amount: 500.00
+                    paymentMethod: "venmo"
+                    reference: "VNM-123456"
+              sendSponsorPortalEmail:
+                summary: Send sponsor portal access email
+                value:
+                  endpoint: manageSponsors
+                  action: sendPortalEmail
+                  sponsorId: 1
+              deleteAllTickets:
+                summary: Delete all tickets
+                value:
+                  endpoint: manageTickets
+                  action: deleteAll
+              listIntegrations:
+                summary: List connected integrations
+                value:
+                  endpoint: manageIntegrations
+                  action: list
+              syncEventbrite:
+                summary: Sync events from Eventbrite
+                value:
+                  endpoint: manageIntegrations
+                  action: sync
+                  provider: "eventbrite"
+              getEmailSummary:
+                summary: Get email tracking summary
+                value:
+                  endpoint: manageEmails
+                  action: getSummary
+              listUploads:
+                summary: List all file uploads
+                value:
+                  endpoint: manageUploads
+                  action: list
+              getUploadStats:
+                summary: Get upload statistics
+                value:
+                  endpoint: manageUploads
+                  action: stats
+              getUploadTemplate:
+                summary: Get CSV template info
+                value:
+                  endpoint: manageUploads
+                  action: getTemplate
+              getUploadDetails:
+                summary: Get specific upload details
+                value:
+                  endpoint: manageUploads
+                  action: get
+                  uploadId: 1
 
       responses:
         '200':

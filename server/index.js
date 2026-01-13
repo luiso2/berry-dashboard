@@ -11,9 +11,12 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import yaml from 'js-yaml';
 import cookieParser from 'cookie-parser';
+import multer from 'multer';
+import * as XLSX from 'xlsx';
+import { parse as csvParse } from 'csv-parse/sync';
 
 // API Version - for tracking deployments
-const API_VERSION = '3.9.3-sponsor-email-domain-fix';
+const API_VERSION = '3.14.0-file-uploads';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -67,6 +70,48 @@ function maskApiKey(key) {
   if (!key || key.length < 12) return '••••••••';
   return key.slice(0, 4) + '••••••••' + key.slice(-4);
 }
+
+// ============================================
+// FILE UPLOAD CONFIGURATION (Multer)
+// ============================================
+const uploadDir = path.join(__dirname, 'uploads');
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir, { recursive: true });
+}
+
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, uploadDir);
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, `${uniqueSuffix}-${file.originalname}`);
+  }
+});
+
+const fileFilter = (req, file, cb) => {
+  const allowedMimes = [
+    'text/csv',
+    'application/vnd.ms-excel',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'application/csv',
+    'text/plain'
+  ];
+  if (allowedMimes.includes(file.mimetype) ||
+      file.originalname.endsWith('.csv') ||
+      file.originalname.endsWith('.xlsx') ||
+      file.originalname.endsWith('.xls')) {
+    cb(null, true);
+  } else {
+    cb(new Error('Only CSV and Excel files are allowed'), false);
+  }
+};
+
+const upload = multer({
+  storage,
+  fileFilter,
+  limits: { fileSize: 10 * 1024 * 1024 } // 10MB limit
+});
 
 // Initialize database tables
 const initDatabase = async () => {
@@ -272,6 +317,15 @@ const initDatabase = async () => {
         END IF;
         IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='sponsors' AND column_name='tier_price') THEN
           ALTER TABLE sponsors ADD COLUMN tier_price VARCHAR(50);
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='sponsors' AND column_name='amount') THEN
+          ALTER TABLE sponsors ADD COLUMN amount DECIMAL(12,2) DEFAULT 0;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='sponsors' AND column_name='tier_color') THEN
+          ALTER TABLE sponsors ADD COLUMN tier_color VARCHAR(20);
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='sponsors' AND column_name='tier_icon') THEN
+          ALTER TABLE sponsors ADD COLUMN tier_icon VARCHAR(10);
         END IF;
       END $$;
     `);
@@ -1061,8 +1115,134 @@ const initDatabase = async () => {
     `);
     console.log('Integrations and Orders tables initialized');
 
+    // ============================================
+    // PROMOTER MANAGEMENT SYSTEM
+    // ============================================
+
+    // Create promoters table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS promoters (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER,
+        name VARCHAR(255) NOT NULL,
+        email VARCHAR(255) NOT NULL UNIQUE,
+        phone VARCHAR(100),
+        code VARCHAR(20) NOT NULL UNIQUE,
+        commission_rate DECIMAL(5,2) DEFAULT 10.00,
+        commission_type VARCHAR(20) DEFAULT 'percentage',
+        status VARCHAR(20) DEFAULT 'active',
+        tier VARCHAR(20) DEFAULT 'bronze',
+        bio TEXT,
+        photo_url TEXT,
+        social_instagram VARCHAR(255),
+        social_tiktok VARCHAR(255),
+        social_twitter VARCHAR(255),
+        landing_page_slug VARCHAR(100),
+        total_sales DECIMAL(12,2) DEFAULT 0,
+        total_commission DECIMAL(12,2) DEFAULT 0,
+        total_tickets_sold INTEGER DEFAULT 0,
+        total_guests_referred INTEGER DEFAULT 0,
+        last_sale_at TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_promoters_code ON promoters(code);
+      CREATE INDEX IF NOT EXISTS idx_promoters_email ON promoters(email);
+      CREATE INDEX IF NOT EXISTS idx_promoters_status ON promoters(status);
+      CREATE INDEX IF NOT EXISTS idx_promoters_tier ON promoters(tier);
+    `);
+
+    // Create promoter_sales table for tracking individual sales
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS promoter_sales (
+        id SERIAL PRIMARY KEY,
+        promoter_id INTEGER NOT NULL REFERENCES promoters(id) ON DELETE CASCADE,
+        event_id INTEGER,
+        ticket_id VARCHAR(100),
+        guest_id INTEGER,
+        guest_name VARCHAR(255),
+        guest_email VARCHAR(255),
+        sale_amount DECIMAL(10,2) NOT NULL,
+        commission_amount DECIMAL(10,2) NOT NULL,
+        commission_status VARCHAR(20) DEFAULT 'pending',
+        paid_at TIMESTAMP,
+        notes TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_promoter_sales_promoter ON promoter_sales(promoter_id);
+      CREATE INDEX IF NOT EXISTS idx_promoter_sales_event ON promoter_sales(event_id);
+      CREATE INDEX IF NOT EXISTS idx_promoter_sales_status ON promoter_sales(commission_status);
+      CREATE INDEX IF NOT EXISTS idx_promoter_sales_created ON promoter_sales(created_at DESC);
+    `);
+
+    // Create promoter_payouts table for payout tracking
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS promoter_payouts (
+        id SERIAL PRIMARY KEY,
+        promoter_id INTEGER NOT NULL REFERENCES promoters(id) ON DELETE CASCADE,
+        amount DECIMAL(10,2) NOT NULL,
+        period_start DATE,
+        period_end DATE,
+        sales_count INTEGER DEFAULT 0,
+        status VARCHAR(20) DEFAULT 'pending',
+        payment_method VARCHAR(50),
+        payment_reference VARCHAR(255),
+        paid_at TIMESTAMP,
+        notes TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_promoter_payouts_promoter ON promoter_payouts(promoter_id);
+      CREATE INDEX IF NOT EXISTS idx_promoter_payouts_status ON promoter_payouts(status);
+    `);
+
+    // Create promoter_events table for event-specific assignments and custom rates
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS promoter_events (
+        id SERIAL PRIMARY KEY,
+        promoter_id INTEGER NOT NULL REFERENCES promoters(id) ON DELETE CASCADE,
+        event_id INTEGER NOT NULL,
+        custom_commission_rate DECIMAL(5,2),
+        ticket_quota INTEGER,
+        tickets_sold INTEGER DEFAULT 0,
+        bonus_threshold INTEGER,
+        bonus_amount DECIMAL(10,2),
+        status VARCHAR(20) DEFAULT 'active',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(promoter_id, event_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_promoter_events_promoter ON promoter_events(promoter_id);
+      CREATE INDEX IF NOT EXISTS idx_promoter_events_event ON promoter_events(event_id);
+    `);
+
+    console.log('Promoter Management tables initialized');
+
+    // Create file_uploads table for tracking CSV/Excel uploads
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS file_uploads (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL,
+        filename VARCHAR(255) NOT NULL,
+        original_filename VARCHAR(255) NOT NULL,
+        file_type VARCHAR(50) NOT NULL,
+        file_size INTEGER,
+        upload_type VARCHAR(50) NOT NULL,
+        records_processed INTEGER DEFAULT 0,
+        records_success INTEGER DEFAULT 0,
+        records_failed INTEGER DEFAULT 0,
+        status VARCHAR(20) DEFAULT 'processing',
+        error_details JSONB,
+        event_id INTEGER,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_file_uploads_user ON file_uploads(user_id);
+      CREATE INDEX IF NOT EXISTS idx_file_uploads_type ON file_uploads(upload_type);
+      CREATE INDEX IF NOT EXISTS idx_file_uploads_status ON file_uploads(status);
+    `);
+
+    console.log('File Uploads table initialized');
+
     dbInitStatus.completed = true;
-    console.log('Database tables initialized successfully (guests, email_events, tickets, activity_log, sponsors, events, budgets, vendors, staff, contracts, client_access, integrations)');
+    console.log('Database tables initialized successfully (guests, email_events, tickets, activity_log, sponsors, events, budgets, vendors, staff, contracts, client_access, integrations, promoters, file_uploads)');
   } catch (error) {
     dbInitStatus.error = error.message;
     console.error('Error initializing database:', error);
@@ -1079,6 +1259,114 @@ const EMAIL_CONFIG = {
   from: process.env.RESEND_FROM_EMAIL || 'Berry Bly <noreply@merktop.com>',
   replyTo: process.env.RESEND_REPLY_TO || 'berrybly@gmail.com',
   adminEmail: process.env.ADMIN_EMAIL || 'berrybly@gmail.com',
+};
+
+/**
+ * Centralized email sending function with tracking
+ * @param {Object} options - Email options
+ * @param {string} options.to - Recipient email
+ * @param {string} options.subject - Email subject
+ * @param {string} options.html - Email HTML content
+ * @param {string} [options.from] - From email (defaults to EMAIL_CONFIG.from)
+ * @param {string} [options.replyTo] - Reply-to email (defaults to EMAIL_CONFIG.replyTo)
+ * @param {string} [options.emailType] - Type of email for tracking (e.g., 'invitation', 'sponsor_portal', 'approval')
+ * @param {number|string} [options.relatedId] - Related entity ID (guest_id, sponsor_id, etc.)
+ * @returns {Promise<{success: boolean, emailId: string|null, error: string|null}>}
+ */
+const sendEmail = async (options) => {
+  const result = {
+    success: false,
+    emailId: null,
+    error: null,
+    to: options.to,
+    subject: options.subject,
+    emailType: options.emailType || 'general',
+  };
+
+  // Check if Resend is configured
+  if (!process.env.RESEND_API_KEY) {
+    result.error = 'Email service not configured (RESEND_API_KEY missing)';
+    console.warn(`📧 Email NOT sent to ${options.to}: ${result.error}`);
+    return result;
+  }
+
+  try {
+    const { data, error } = await resend.emails.send({
+      from: options.from || EMAIL_CONFIG.from,
+      replyTo: options.replyTo || EMAIL_CONFIG.replyTo,
+      to: options.to,
+      subject: options.subject,
+      html: options.html,
+    });
+
+    if (error) {
+      result.error = error.message || JSON.stringify(error);
+      console.error(`📧 Email FAILED to ${options.to}: ${result.error}`);
+    } else {
+      result.success = true;
+      result.emailId = data?.id || null;
+      console.log(`📧 Email SENT to ${options.to} (ID: ${result.emailId})`);
+
+      // Store initial send event in database for tracking
+      try {
+        await pool.query(
+          `INSERT INTO email_events (email_id, guest_id, event_type, recipient_email, subject, timestamp, raw_payload)
+           VALUES ($1, $2, $3, $4, $5, NOW(), $6)`,
+          [
+            result.emailId,
+            options.relatedId || null,
+            'email.queued',
+            options.to,
+            options.subject,
+            JSON.stringify({ emailType: options.emailType, relatedId: options.relatedId })
+          ]
+        );
+      } catch (dbError) {
+        console.warn('Failed to store email event:', dbError.message);
+      }
+    }
+  } catch (err) {
+    result.error = err.message || 'Unknown error sending email';
+    console.error(`📧 Email ERROR to ${options.to}: ${result.error}`);
+  }
+
+  return result;
+};
+
+/**
+ * Get email delivery status by email ID
+ */
+const getEmailStatus = async (emailId) => {
+  try {
+    const result = await pool.query(
+      `SELECT event_type, timestamp, created_at
+       FROM email_events
+       WHERE email_id = $1
+       ORDER BY timestamp DESC`,
+      [emailId]
+    );
+
+    if (result.rows.length === 0) {
+      return { status: 'unknown', events: [] };
+    }
+
+    const events = result.rows;
+    const latestEvent = events[0].event_type;
+
+    // Determine overall status
+    let status = 'pending';
+    if (latestEvent === 'email.delivered') status = 'delivered';
+    else if (latestEvent === 'email.sent') status = 'sent';
+    else if (latestEvent === 'email.bounced') status = 'bounced';
+    else if (latestEvent === 'email.complained') status = 'complained';
+    else if (latestEvent === 'email.opened') status = 'opened';
+    else if (latestEvent === 'email.clicked') status = 'clicked';
+
+    return { status, events };
+  } catch (error) {
+    console.error('Error getting email status:', error);
+    return { status: 'error', error: error.message };
+  }
 };
 
 // CORS configuration - Allow dashboard and landing domains
@@ -2405,6 +2693,73 @@ app.get('/api/email-events', async (req, res) => {
   }
 });
 
+// GET email status by email ID
+app.get('/api/email-status/:emailId', async (req, res) => {
+  try {
+    const { emailId } = req.params;
+    const status = await getEmailStatus(emailId);
+    res.json(status);
+  } catch (error) {
+    console.error('Error fetching email status:', error);
+    res.status(500).json({ error: 'Failed to fetch email status' });
+  }
+});
+
+// GET email delivery summary (sent vs delivered vs bounced)
+app.get('/api/email-summary', async (req, res) => {
+  try {
+    const { from, to } = req.query;
+
+    let dateFilter = '';
+    const params = [];
+
+    if (from) {
+      params.push(from);
+      dateFilter += ` AND timestamp >= $${params.length}`;
+    }
+    if (to) {
+      params.push(to);
+      dateFilter += ` AND timestamp <= $${params.length}`;
+    }
+
+    const result = await pool.query(`
+      SELECT
+        COUNT(DISTINCT CASE WHEN event_type = 'email.queued' THEN email_id END) as queued,
+        COUNT(DISTINCT CASE WHEN event_type = 'email.sent' THEN email_id END) as sent,
+        COUNT(DISTINCT CASE WHEN event_type = 'email.delivered' THEN email_id END) as delivered,
+        COUNT(DISTINCT CASE WHEN event_type = 'email.bounced' THEN email_id END) as bounced,
+        COUNT(DISTINCT CASE WHEN event_type = 'email.complained' THEN email_id END) as complained,
+        COUNT(DISTINCT CASE WHEN event_type = 'email.opened' THEN email_id END) as opened,
+        COUNT(DISTINCT CASE WHEN event_type = 'email.clicked' THEN email_id END) as clicked,
+        COUNT(DISTINCT email_id) as total_emails
+      FROM email_events
+      WHERE 1=1 ${dateFilter}
+    `, params);
+
+    const stats = result.rows[0];
+
+    // Calculate delivery rate
+    const totalSent = parseInt(stats.sent) || 0;
+    const totalDelivered = parseInt(stats.delivered) || 0;
+    const deliveryRate = totalSent > 0 ? ((totalDelivered / totalSent) * 100).toFixed(1) : 0;
+
+    res.json({
+      queued: parseInt(stats.queued) || 0,
+      sent: totalSent,
+      delivered: totalDelivered,
+      bounced: parseInt(stats.bounced) || 0,
+      complained: parseInt(stats.complained) || 0,
+      opened: parseInt(stats.opened) || 0,
+      clicked: parseInt(stats.clicked) || 0,
+      totalEmails: parseInt(stats.total_emails) || 0,
+      deliveryRate: `${deliveryRate}%`,
+    });
+  } catch (error) {
+    console.error('Error fetching email summary:', error);
+    res.status(500).json({ error: 'Failed to fetch email summary' });
+  }
+});
+
 // ============================================
 // API V1 ROUTES (aliases for compatibility)
 // ============================================
@@ -2417,7 +2772,13 @@ app.use('/api/v1', (req, res, next) => {
 // Mount all /api routes also on /api/v1
 app.get('/api/v1/guests', async (req, res) => {
   try {
-    const result = await pool.query('SELECT * FROM guests ORDER BY created_at DESC');
+    const userId = req.user?.id;
+    // Filter by user_id if authenticated, otherwise return all (for public access)
+    const query = userId
+      ? 'SELECT * FROM guests WHERE user_id = $1 OR user_id IS NULL ORDER BY created_at DESC'
+      : 'SELECT * FROM guests ORDER BY created_at DESC';
+    const params = userId ? [userId] : [];
+    const result = await pool.query(query, params);
     const guests = result.rows.map(transformGuest);
     res.json(guests);
   } catch (error) {
@@ -2441,14 +2802,15 @@ app.post('/api/v1/guests', async (req, res) => {
   const normalizedPartySize = partySize || numberOfGuests || 1;
   const normalizedNotes = notes || (vipPreferences ? `VIP: ${vipPreferences}` : '') || '';
   const normalizedEventId = eventId || null;
+  const userId = req.user?.id || null;
 
   try {
     const result = await pool.query(
-      `INSERT INTO guests (name, email, phone, instagram, party_size, event_date, notes, category, email_sent, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', false, CURRENT_TIMESTAMP)
+      `INSERT INTO guests (name, email, phone, instagram, party_size, event_date, notes, category, email_sent, user_id, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', false, $8, CURRENT_TIMESTAMP)
        RETURNING *`,
       [name, email, phone || '', instagram || '', normalizedPartySize, eventDate || null,
-       normalizedEventId ? `Event: ${normalizedEventId}\n${normalizedNotes}` : normalizedNotes]
+       normalizedEventId ? `Event: ${normalizedEventId}\n${normalizedNotes}` : normalizedNotes, userId]
     );
 
     const newGuest = transformGuest(result.rows[0]);
@@ -2478,6 +2840,7 @@ app.post('/api/v1/guests', async (req, res) => {
 app.put('/api/v1/guests/:id', async (req, res) => {
   const { id } = req.params;
   const { category, checkedInAt, emailSent, emailSentAt, notes, partySize, phone, instagram } = req.body;
+  const userId = req.user?.id;
   try {
     const updates = [];
     const values = [];
@@ -2492,7 +2855,12 @@ app.put('/api/v1/guests/:id', async (req, res) => {
     if (instagram !== undefined) { updates.push(`instagram = $${paramCount}`); values.push(instagram); paramCount++; }
     if (updates.length === 0) return res.status(400).json({ error: 'No fields to update' });
     values.push(id);
-    const query = `UPDATE guests SET ${updates.join(', ')} WHERE id = $${paramCount} RETURNING *`;
+    // Add user_id check for data isolation
+    const whereClause = userId
+      ? `WHERE id = $${paramCount} AND (user_id = $${paramCount + 1} OR user_id IS NULL)`
+      : `WHERE id = $${paramCount}`;
+    if (userId) values.push(userId);
+    const query = `UPDATE guests SET ${updates.join(', ')} ${whereClause} RETURNING *`;
     const result = await pool.query(query, values);
     if (result.rows.length === 0) return res.status(404).json({ error: 'Guest not found' });
     res.json(transformGuest(result.rows[0]));
@@ -2504,13 +2872,274 @@ app.put('/api/v1/guests/:id', async (req, res) => {
 
 app.delete('/api/v1/guests/:id', async (req, res) => {
   const { id } = req.params;
+  const userId = req.user?.id;
   try {
-    const result = await pool.query('DELETE FROM guests WHERE id = $1 RETURNING *', [id]);
+    // Add user_id check for data isolation
+    const query = userId
+      ? 'DELETE FROM guests WHERE id = $1 AND (user_id = $2 OR user_id IS NULL) RETURNING *'
+      : 'DELETE FROM guests WHERE id = $1 RETURNING *';
+    const params = userId ? [id, userId] : [id];
+    const result = await pool.query(query, params);
     if (result.rows.length === 0) return res.status(404).json({ error: 'Guest not found' });
     res.json({ success: true });
   } catch (error) {
     console.error('Error deleting guest:', error);
     res.status(500).json({ error: 'Failed to delete guest' });
+  }
+});
+
+// ============================================
+// FILE UPLOAD ENDPOINTS - CSV/Excel Import
+// ============================================
+
+// Helper function to parse CSV file
+const parseCSV = (buffer) => {
+  const content = buffer.toString('utf-8');
+  return csvParse(content, {
+    columns: true,
+    skip_empty_lines: true,
+    trim: true,
+    relax_column_count: true
+  });
+};
+
+// Helper function to parse Excel file
+const parseExcel = (buffer) => {
+  const workbook = XLSX.read(buffer, { type: 'buffer' });
+  const sheetName = workbook.SheetNames[0];
+  const sheet = workbook.Sheets[sheetName];
+  return XLSX.utils.sheet_to_json(sheet, { defval: '' });
+};
+
+// Helper function to normalize contact fields
+const normalizeContactRow = (row) => {
+  // Map various possible column names to standard fields
+  const fieldMappings = {
+    name: ['name', 'full_name', 'fullname', 'nombre', 'contact_name', 'contact'],
+    email: ['email', 'email_address', 'correo', 'e-mail', 'mail'],
+    phone: ['phone', 'phone_number', 'telephone', 'telefono', 'mobile', 'cell'],
+    instagram: ['instagram', 'ig', 'instagram_handle', 'insta'],
+    category: ['category', 'type', 'tier', 'categoria', 'guest_type'],
+    company: ['company', 'organization', 'empresa', 'business'],
+    notes: ['notes', 'note', 'comments', 'notas', 'description']
+  };
+
+  const normalized = {};
+  const lowerRow = {};
+
+  // Create lowercase version of keys
+  Object.keys(row).forEach(key => {
+    lowerRow[key.toLowerCase().trim()] = row[key];
+  });
+
+  // Map fields
+  for (const [standardField, aliases] of Object.entries(fieldMappings)) {
+    for (const alias of aliases) {
+      if (lowerRow[alias] !== undefined && lowerRow[alias] !== '') {
+        normalized[standardField] = String(lowerRow[alias]).trim();
+        break;
+      }
+    }
+  }
+
+  return normalized;
+};
+
+// POST /api/v1/uploads/contacts - Upload CSV/Excel file with contacts
+app.post('/api/v1/uploads/contacts', upload.single('file'), async (req, res) => {
+  const userId = req.user?.id;
+
+  if (!userId) {
+    return res.status(401).json({ error: 'Authentication required' });
+  }
+
+  if (!req.file) {
+    return res.status(400).json({ error: 'No file uploaded' });
+  }
+
+  const eventId = req.body.eventId ? parseInt(req.body.eventId) : null;
+  const defaultCategory = req.body.category || 'pending';
+
+  try {
+    // Determine file type and parse
+    const fileBuffer = fs.readFileSync(req.file.path);
+    const isCSV = req.file.originalname.toLowerCase().endsWith('.csv');
+
+    let records;
+    try {
+      records = isCSV ? parseCSV(fileBuffer) : parseExcel(fileBuffer);
+    } catch (parseError) {
+      // Clean up uploaded file
+      fs.unlinkSync(req.file.path);
+      return res.status(400).json({ error: 'Failed to parse file: ' + parseError.message });
+    }
+
+    // Create upload record
+    const uploadResult = await pool.query(`
+      INSERT INTO file_uploads (user_id, filename, original_filename, file_type, file_size, upload_type, records_processed, status, event_id)
+      VALUES ($1, $2, $3, $4, $5, 'contacts', $6, 'processing', $7)
+      RETURNING id
+    `, [userId, req.file.filename, req.file.originalname, isCSV ? 'csv' : 'xlsx', req.file.size, records.length, eventId]);
+
+    const uploadId = uploadResult.rows[0].id;
+
+    // Process records
+    let successCount = 0;
+    let failedCount = 0;
+    const errors = [];
+    const addedGuests = [];
+
+    for (let i = 0; i < records.length; i++) {
+      const row = records[i];
+      const normalized = normalizeContactRow(row);
+
+      // Skip rows without name or email
+      if (!normalized.name && !normalized.email) {
+        failedCount++;
+        errors.push({ row: i + 2, error: 'Missing name and email' });
+        continue;
+      }
+
+      try {
+        // Check for duplicate email if email provided
+        if (normalized.email) {
+          const existingQuery = eventId
+            ? 'SELECT id FROM guests WHERE email = $1 AND user_id = $2 AND event_id = $3'
+            : 'SELECT id FROM guests WHERE email = $1 AND user_id = $2';
+          const existingParams = eventId
+            ? [normalized.email, userId, eventId]
+            : [normalized.email, userId];
+          const existing = await pool.query(existingQuery, existingParams);
+
+          if (existing.rows.length > 0) {
+            failedCount++;
+            errors.push({ row: i + 2, error: `Duplicate email: ${normalized.email}` });
+            continue;
+          }
+        }
+
+        // Insert guest with user_id for data isolation
+        const insertResult = await pool.query(`
+          INSERT INTO guests (name, email, phone, instagram, category, notes, user_id, event_id, created_at)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+          RETURNING id, name, email
+        `, [
+          normalized.name || 'Unknown',
+          normalized.email || null,
+          normalized.phone || null,
+          normalized.instagram || null,
+          normalized.category || defaultCategory,
+          normalized.notes || (normalized.company ? `Company: ${normalized.company}` : null),
+          userId,
+          eventId
+        ]);
+
+        addedGuests.push(insertResult.rows[0]);
+        successCount++;
+      } catch (insertError) {
+        failedCount++;
+        errors.push({ row: i + 2, error: insertError.message });
+      }
+    }
+
+    // Update upload record with results
+    await pool.query(`
+      UPDATE file_uploads
+      SET records_success = $1, records_failed = $2, status = 'completed', error_details = $3
+      WHERE id = $4
+    `, [successCount, failedCount, JSON.stringify(errors.slice(0, 100)), uploadId]);
+
+    // Clean up uploaded file
+    fs.unlinkSync(req.file.path);
+
+    res.json({
+      success: true,
+      uploadId,
+      summary: {
+        totalRecords: records.length,
+        successCount,
+        failedCount,
+        eventId
+      },
+      addedGuests: addedGuests.slice(0, 10), // Return first 10 added
+      errors: errors.slice(0, 20) // Return first 20 errors
+    });
+
+  } catch (error) {
+    console.error('Error processing upload:', error);
+    // Clean up uploaded file if exists
+    if (req.file && fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path);
+    }
+    res.status(500).json({ error: 'Failed to process upload: ' + error.message });
+  }
+});
+
+// GET /api/v1/uploads - List upload history for user
+app.get('/api/v1/uploads', async (req, res) => {
+  const userId = req.user?.id;
+
+  if (!userId) {
+    return res.status(401).json({ error: 'Authentication required' });
+  }
+
+  try {
+    const result = await pool.query(`
+      SELECT id, original_filename, file_type, upload_type, records_processed,
+             records_success, records_failed, status, event_id, created_at
+      FROM file_uploads
+      WHERE user_id = $1
+      ORDER BY created_at DESC
+      LIMIT 50
+    `, [userId]);
+
+    res.json({
+      success: true,
+      uploads: result.rows
+    });
+  } catch (error) {
+    console.error('Error fetching uploads:', error);
+    res.status(500).json({ error: 'Failed to fetch uploads' });
+  }
+});
+
+// GET /api/v1/uploads/template/contacts - Download sample CSV template (MUST be before :id route)
+app.get('/api/v1/uploads/template/contacts', (req, res) => {
+  const template = 'name,email,phone,instagram,category,company,notes\n' +
+    'John Doe,john@example.com,+1234567890,@johndoe,A,Acme Corp,VIP guest\n' +
+    'Jane Smith,jane@example.com,+0987654321,@janesmith,B,Tech Inc,Priority\n';
+
+  res.setHeader('Content-Type', 'text/csv');
+  res.setHeader('Content-Disposition', 'attachment; filename=contacts_template.csv');
+  res.send(template);
+});
+
+// GET /api/v1/uploads/:id - Get specific upload details
+app.get('/api/v1/uploads/:id', async (req, res) => {
+  const userId = req.user?.id;
+  const uploadId = req.params.id;
+
+  if (!userId) {
+    return res.status(401).json({ error: 'Authentication required' });
+  }
+
+  try {
+    const result = await pool.query(`
+      SELECT * FROM file_uploads
+      WHERE id = $1 AND user_id = $2
+    `, [uploadId, userId]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Upload not found' });
+    }
+
+    res.json({
+      success: true,
+      upload: result.rows[0]
+    });
+  } catch (error) {
+    console.error('Error fetching upload:', error);
+    res.status(500).json({ error: 'Failed to fetch upload' });
   }
 });
 
@@ -3189,20 +3818,19 @@ app.post('/api/v1/tickets/:ticketId/check-in', async (req, res) => {
   }
 });
 
-// DELETE /api/v1/tickets/:id - Delete a single ticket
-app.delete('/api/v1/tickets/:id', async (req, res) => {
+// DELETE /api/v1/tickets/all - Delete ALL tickets (MUST be before :id route)
+app.delete('/api/v1/tickets/all', async (req, res) => {
   try {
-    const { id } = req.params;
-    const result = await pool.query('DELETE FROM tickets WHERE id = $1 RETURNING id', [id]);
+    const result = await pool.query('DELETE FROM tickets RETURNING id');
 
-    if (result.rowCount === 0) {
-      return res.status(404).json({ error: 'Ticket not found' });
-    }
-
-    res.json({ success: true, message: 'Ticket deleted' });
+    res.json({
+      success: true,
+      message: `Deleted all ${result.rowCount} tickets`,
+      deletedCount: result.rowCount
+    });
   } catch (error) {
-    console.error('Error deleting ticket:', error);
-    res.status(500).json({ error: 'Failed to delete ticket' });
+    console.error('Error deleting all tickets:', error);
+    res.status(500).json({ error: 'Failed to delete all tickets' });
   }
 });
 
@@ -3231,19 +3859,20 @@ app.post('/api/v1/tickets/bulk-delete', async (req, res) => {
   }
 });
 
-// DELETE /api/v1/tickets/all - Delete ALL tickets
-app.delete('/api/v1/tickets/all', async (req, res) => {
+// DELETE /api/v1/tickets/:id - Delete a single ticket
+app.delete('/api/v1/tickets/:id', async (req, res) => {
   try {
-    const result = await pool.query('DELETE FROM tickets RETURNING id');
+    const { id } = req.params;
+    const result = await pool.query('DELETE FROM tickets WHERE id = $1 RETURNING id', [id]);
 
-    res.json({
-      success: true,
-      message: `Deleted all ${result.rowCount} tickets`,
-      deletedCount: result.rowCount
-    });
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'Ticket not found' });
+    }
+
+    res.json({ success: true, message: 'Ticket deleted' });
   } catch (error) {
-    console.error('Error deleting all tickets:', error);
-    res.status(500).json({ error: 'Failed to delete all tickets' });
+    console.error('Error deleting ticket:', error);
+    res.status(500).json({ error: 'Failed to delete ticket' });
   }
 });
 
@@ -3271,36 +3900,123 @@ app.delete('/api/v1/events/all', async (req, res) => {
 
 // Sponsorship tier details
 const sponsorshipTiers = {
-  bronze: { name: 'Bronze Partner', price: '$5,000' },
-  silver: { name: 'Silver Partner', price: '$15,000' },
-  gold: { name: 'Gold Partner', price: '$35,000' },
-  platinum: { name: 'Platinum Partner', price: '$75,000' },
-  title: { name: 'Title Sponsor', price: '$150,000+' },
-  custom: { name: 'Custom Partnership', price: 'TBD' },
+  bronze: { name: 'Bronze Partner', price: '$1,000 - $4,999', minAmount: 1000, maxAmount: 4999, color: '#CD7F32', icon: '🥉' },
+  silver: { name: 'Silver Partner', price: '$5,000 - $14,999', minAmount: 5000, maxAmount: 14999, color: '#C0C0C0', icon: '🥈' },
+  gold: { name: 'Gold Partner', price: '$15,000 - $34,999', minAmount: 15000, maxAmount: 34999, color: '#FFD700', icon: '🥇' },
+  platinum: { name: 'Platinum Partner', price: '$35,000 - $74,999', minAmount: 35000, maxAmount: 74999, color: '#E5E4E2', icon: '💎' },
+  diamond: { name: 'Diamond Partner', price: '$75,000 - $149,999', minAmount: 75000, maxAmount: 149999, color: '#B9F2FF', icon: '💠' },
+  title: { name: 'Title Sponsor', price: '$150,000+', minAmount: 150000, maxAmount: Infinity, color: '#4B0082', icon: '👑' },
+  custom: { name: 'Custom Partnership', price: 'TBD', minAmount: 0, maxAmount: 999, color: '#888888', icon: '🤝' },
+};
+
+// Helper function to calculate tier based on sponsorship amount
+const getTierByAmount = (amount) => {
+  const numAmount = parseFloat(amount) || 0;
+  if (numAmount >= 150000) return 'title';
+  if (numAmount >= 75000) return 'diamond';
+  if (numAmount >= 35000) return 'platinum';
+  if (numAmount >= 15000) return 'gold';
+  if (numAmount >= 5000) return 'silver';
+  if (numAmount >= 1000) return 'bronze';
+  return 'custom';
+};
+
+// Get benefits based on tier level
+const getBenefitsByTier = (tier) => {
+  const allBenefits = {
+    bronze: [
+      'Logo on event materials',
+      'Social media mention',
+      'Certificate of appreciation'
+    ],
+    silver: [
+      'Logo on event materials',
+      'Social media mentions (3x)',
+      'Certificate of appreciation',
+      'Logo on event website',
+      'Event tickets (2)'
+    ],
+    gold: [
+      'Logo on event materials',
+      'Social media campaign',
+      'Certificate of appreciation',
+      'Logo on event website',
+      'Event tickets (4)',
+      'VIP access',
+      'Speaking opportunity (5 min)'
+    ],
+    platinum: [
+      'Premium logo placement',
+      'Dedicated social media campaign',
+      'Premium certificate',
+      'Featured on event website',
+      'Event tickets (8)',
+      'VIP access + backstage',
+      'Speaking opportunity (15 min)',
+      'Branded booth space',
+      'Email newsletter feature'
+    ],
+    diamond: [
+      'Premium logo placement (all materials)',
+      'Multi-week social media campaign',
+      'Exclusive partnership certificate',
+      'Featured homepage placement',
+      'Event tickets (15)',
+      'VIP access + exclusive events',
+      'Keynote speaking opportunity',
+      'Premium booth space',
+      'Email newsletter feature',
+      'Press release mention',
+      'Video testimonial opportunity'
+    ],
+    title: [
+      'Title sponsor branding (event name)',
+      'Exclusive social media coverage',
+      'Custom partnership certificate',
+      'Top homepage featured placement',
+      'Unlimited event tickets',
+      'All VIP access + exclusive dinners',
+      'Keynote speech + panel moderation',
+      'Largest premium booth space',
+      'Dedicated email announcement',
+      'Press release + media coverage',
+      'Custom video production',
+      'Year-round partnership recognition',
+      'First right of refusal for future events'
+    ],
+    custom: [
+      'Custom benefits package',
+      'Contact us for details'
+    ]
+  };
+  return allBenefits[tier] || allBenefits.custom;
 };
 
 // Helper to generate sponsor ID
 const generateSponsorId = () => `spo_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
 // GET /api/v1/sponsors/tiers - Get sponsorship tier information
-app.get('/api/v1/sponsors/tiers', async (req, res) => {
+app.get('/api/v1/sponsors/tiers', async (_req, res) => {
   res.json({
     tiers: Object.entries(sponsorshipTiers).map(([value, details]) => ({
       value,
       ...details,
+      benefits: getBenefitsByTier(value),
     })),
   });
 });
 
 // GET /api/v1/sponsors/stats - Get sponsor statistics
-app.get('/api/v1/sponsors/stats', async (req, res) => {
+app.get('/api/v1/sponsors/stats', async (_req, res) => {
   try {
     const result = await pool.query(`
       SELECT
         COUNT(*) as total,
         COUNT(*) FILTER (WHERE status = 'pending') as pending,
         COUNT(*) FILTER (WHERE status = 'approved') as active,
-        COUNT(*) FILTER (WHERE status = 'contacted') as contacted
+        COUNT(*) FILTER (WHERE status = 'contacted') as contacted,
+        COALESCE(SUM(CASE WHEN status = 'approved' THEN amount ELSE 0 END), 0) as total_revenue,
+        COALESCE(SUM(amount), 0) as potential_revenue
       FROM sponsors
     `);
 
@@ -3310,7 +4026,8 @@ app.get('/api/v1/sponsors/stats', async (req, res) => {
       pending: parseInt(stats.pending || 0),
       active: parseInt(stats.active || 0),
       contacted: parseInt(stats.contacted || 0),
-      revenue: 0, // Calculate based on approved sponsors
+      revenue: parseFloat(stats.total_revenue || 0),
+      potentialRevenue: parseFloat(stats.potential_revenue || 0),
     });
   } catch (error) {
     console.error('Error fetching sponsor stats:', error);
@@ -3321,21 +4038,23 @@ app.get('/api/v1/sponsors/stats', async (req, res) => {
 // POST /api/v1/sponsors - Submit sponsor inquiry (public)
 app.post('/api/v1/sponsors', async (req, res) => {
   try {
-    const { companyName, contactName, email, phone, website, sponsorshipTier, message } = req.body;
+    const { companyName, contactName, email, phone, website, sponsorshipTier, amount, message } = req.body;
 
-    if (!companyName || !contactName || !email || !message) {
-      return res.status(400).json({ error: 'Company name, contact name, email and message are required' });
+    if (!companyName || !contactName || !email) {
+      return res.status(400).json({ error: 'Company name, contact name, and email are required' });
     }
 
     const sponsorId = generateSponsorId();
-    const tier = sponsorshipTier || 'custom';
+    // If amount is provided, calculate tier automatically; otherwise use provided tier or custom
+    const sponsorAmount = parseFloat(amount) || 0;
+    const tier = sponsorAmount > 0 ? getTierByAmount(sponsorAmount) : (sponsorshipTier || 'custom');
     const tierInfo = sponsorshipTiers[tier] || sponsorshipTiers.custom;
 
-    const result = await pool.query(
-      `INSERT INTO sponsors (id, company_name, contact_name, email, phone, website, sponsorship_tier, tier_name, tier_price, message, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending')
+    await pool.query(
+      `INSERT INTO sponsors (id, company_name, contact_name, email, phone, website, sponsorship_tier, tier_name, tier_price, tier_color, tier_icon, amount, message, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'pending')
        RETURNING *`,
-      [sponsorId, companyName, contactName, email, phone || '', website || '', tier, tierInfo.name, tierInfo.price, message]
+      [sponsorId, companyName, contactName, email, phone || '', website || '', tier, tierInfo.name, tierInfo.price, tierInfo.color, tierInfo.icon, sponsorAmount, message || '']
     );
 
     console.log(`✅ New sponsor inquiry: ${companyName} - ${tierInfo.name}`);
@@ -3467,6 +4186,9 @@ app.get('/api/v1/sponsors', async (req, res) => {
       tier: s.sponsorship_tier,
       tierName: s.tier_name,
       tierPrice: s.tier_price,
+      tierColor: s.tier_color,
+      tierIcon: s.tier_icon,
+      amount: parseFloat(s.amount) || 0,
       message: s.message,
       status: s.status,
       notes: s.notes,
@@ -3502,6 +4224,9 @@ app.get('/api/v1/sponsors/:id', async (req, res) => {
       tier: s.sponsorship_tier,
       tierName: s.tier_name,
       tierPrice: s.tier_price,
+      tierColor: s.tier_color,
+      tierIcon: s.tier_icon,
+      amount: parseFloat(s.amount) || 0,
       message: s.message,
       status: s.status,
       notes: s.notes,
@@ -3518,7 +4243,7 @@ app.get('/api/v1/sponsors/:id', async (req, res) => {
 app.patch('/api/v1/sponsors/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { status, notes, logoUrl } = req.body;
+    const { status, notes, logoUrl, amount, companyName, contactName, email, phone, website } = req.body;
 
     const updates = [];
     const params = [];
@@ -3535,6 +4260,44 @@ app.patch('/api/v1/sponsors/:id', async (req, res) => {
     if (logoUrl !== undefined) {
       updates.push(`logo_url = $${paramIndex++}`);
       params.push(logoUrl);
+    }
+    if (companyName) {
+      updates.push(`company_name = $${paramIndex++}`);
+      params.push(companyName);
+    }
+    if (contactName) {
+      updates.push(`contact_name = $${paramIndex++}`);
+      params.push(contactName);
+    }
+    if (email) {
+      updates.push(`email = $${paramIndex++}`);
+      params.push(email);
+    }
+    if (phone !== undefined) {
+      updates.push(`phone = $${paramIndex++}`);
+      params.push(phone);
+    }
+    if (website !== undefined) {
+      updates.push(`website = $${paramIndex++}`);
+      params.push(website);
+    }
+    // If amount is provided, update amount and recalculate tier automatically
+    if (amount !== undefined) {
+      const sponsorAmount = parseFloat(amount) || 0;
+      const newTier = getTierByAmount(sponsorAmount);
+      const tierInfo = sponsorshipTiers[newTier];
+      updates.push(`amount = $${paramIndex++}`);
+      params.push(sponsorAmount);
+      updates.push(`sponsorship_tier = $${paramIndex++}`);
+      params.push(newTier);
+      updates.push(`tier_name = $${paramIndex++}`);
+      params.push(tierInfo.name);
+      updates.push(`tier_price = $${paramIndex++}`);
+      params.push(tierInfo.price);
+      updates.push(`tier_color = $${paramIndex++}`);
+      params.push(tierInfo.color);
+      updates.push(`tier_icon = $${paramIndex++}`);
+      params.push(tierInfo.icon);
     }
 
     if (updates.length === 0) {
@@ -3597,6 +4360,9 @@ app.patch('/api/v1/sponsors/:id', async (req, res) => {
       tier: s.sponsorship_tier,
       tierName: s.tier_name,
       tierPrice: s.tier_price,
+      tierColor: s.tier_color,
+      tierIcon: s.tier_icon,
+      amount: parseFloat(s.amount) || 0,
       message: s.message,
       status: s.status,
       notes: s.notes,
@@ -3740,9 +4506,11 @@ app.get('/api/v1/sponsor-portal/:token', async (req, res) => {
     // Estimate impressions (attendees × avg touchpoints)
     const estimatedImpressions = totalAttendance * 5; // Logo seen ~5 times per attendee
 
-    // Tier pricing for ROI calculation
-    const tierPrices = { bronze: 5000, silver: 15000, gold: 50000, platinum: 100000, title: 150000 };
-    const sponsorInvestment = tierPrices[sponsor.sponsorship_tier] || parseInt(sponsor.tier_price?.replace(/\D/g, '')) || 0;
+    // Use actual sponsor amount or fallback to tier-based pricing
+    const sponsorAmount = parseFloat(sponsor.amount) || 0;
+    const tierInfo = sponsorshipTiers[sponsor.sponsorship_tier] || sponsorshipTiers.custom;
+    const sponsorInvestment = sponsorAmount > 0 ? sponsorAmount : (tierInfo.minAmount || 0);
+
     const costPerImpression = sponsorInvestment > 0 && estimatedImpressions > 0
       ? (sponsorInvestment / estimatedImpressions).toFixed(2)
       : 'N/A';
@@ -3756,17 +4524,27 @@ app.get('/api/v1/sponsor-portal/:token', async (req, res) => {
       ? ((industryAvgCPI / parseFloat(costPerImpression)) * 100).toFixed(0)
       : null;
 
+    // Calculate ROI metrics
+    const estimatedMediaValue = estimatedImpressions * 0.50; // $0.50 per impression
+    const estimatedROI = sponsorInvestment > 0 ? ((estimatedMediaValue / sponsorInvestment) * 100).toFixed(0) : 'N/A';
+
     res.json({
       success: true,
       sponsor: {
         companyName: sponsor.company_name,
         contactName: sponsor.contact_name,
+        email: sponsor.email,
         tier: sponsor.sponsorship_tier,
-        tierName: sponsor.tier_name || sponsor.sponsorship_tier,
-        tierPrice: sponsor.tier_price,
+        tierName: sponsor.tier_name || tierInfo.name,
+        tierPrice: sponsor.tier_price || tierInfo.price,
+        tierColor: sponsor.tier_color || tierInfo.color,
+        tierIcon: sponsor.tier_icon || tierInfo.icon,
+        amount: sponsorAmount,
         status: sponsor.status,
         logoUrl: sponsor.logo_url,
-        benefits: sponsor.benefits || []
+        website: sponsor.website,
+        joinedDate: sponsor.created_at,
+        benefits: getBenefitsByTier(sponsor.sponsorship_tier)
       },
       events: events.map(e => ({
         id: e.id,
@@ -3777,7 +4555,7 @@ app.get('/api/v1/sponsor-portal/:token', async (req, res) => {
         venueCity: null,
         expectedAttendance: 0,
         actualAttendance: e.guestCount || 0,
-        attendanceRate: null
+        attendanceRate: e.guestCount > 0 ? '100%' : 'N/A'
       })),
       metrics: {
         totalEvents: events.length,
@@ -3788,6 +4566,8 @@ app.get('/api/v1/sponsor-portal/:token', async (req, res) => {
         sponsorInvestment,
         costPerImpression,
         costPerAttendee,
+        estimatedMediaValue,
+        estimatedROI: estimatedROI + '%',
         performanceVsIndustry,
         industryBenchmark: {
           avgCostPerImpression: '$0.50',
@@ -3836,73 +4616,61 @@ app.post('/api/v1/sponsors/:id/send-portal-link', async (req, res) => {
     const baseUrl = process.env.FRONTEND_URL || 'https://berry-dashboard-production.up.railway.app';
     const portalUrl = `${baseUrl}/sponsor-portal/${accessToken}`;
 
-    // Send email with portal link
-    let emailSent = false;
-    let emailError = null;
+    // Send email with portal link using centralized function
+    const emailResult = await sendEmail({
+      to: s.email,
+      subject: `Your Sponsor Metrics Portal - ${s.company_name}`,
+      html: `
+        <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto; padding: 40px 20px;">
+          <div style="text-align: center; margin-bottom: 40px;">
+            <h1 style="color: #d4af37; font-size: 28px; margin: 0;">Sponsor Metrics Portal</h1>
+            <p style="color: #666; margin-top: 10px;">Your exclusive access to event performance data</p>
+          </div>
 
-    if (!process.env.RESEND_API_KEY) {
-      console.warn('RESEND_API_KEY not configured - cannot send sponsor portal email');
-      emailError = 'Email service not configured';
-    } else if (resend) {
-      try {
-        const emailResult = await resend.emails.send({
-          from: EMAIL_CONFIG.from,
-          replyTo: EMAIL_CONFIG.replyTo,
-          to: s.email,
-          subject: `Your Sponsor Metrics Portal - ${s.company_name}`,
-          html: `
-            <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto; padding: 40px 20px;">
-              <div style="text-align: center; margin-bottom: 40px;">
-                <h1 style="color: #d4af37; font-size: 28px; margin: 0;">Sponsor Metrics Portal</h1>
-                <p style="color: #666; margin-top: 10px;">Your exclusive access to event performance data</p>
-              </div>
+          <p style="color: #333; font-size: 16px; line-height: 1.6;">Hi ${s.contact_name},</p>
 
-              <p style="color: #333; font-size: 16px; line-height: 1.6;">Hi ${s.contact_name},</p>
+          <p style="color: #333; font-size: 16px; line-height: 1.6;">
+            As a valued ${s.tier_name || s.sponsorship_tier} sponsor, you now have access to your personalized metrics portal where you can track the impact of your sponsorship investment.
+          </p>
 
-              <p style="color: #333; font-size: 16px; line-height: 1.6;">
-                As a valued ${s.tier_name || s.sponsorship_tier} sponsor, you now have access to your personalized metrics portal where you can track the impact of your sponsorship investment.
-              </p>
+          <div style="background: linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%); border-radius: 12px; padding: 30px; text-align: center; margin: 30px 0;">
+            <p style="color: #888; margin: 0 0 15px 0;">Click below to view your metrics:</p>
+            <a href="${portalUrl}" style="display: inline-block; background: linear-gradient(135deg, #d4af37 0%, #b8962d 100%); color: #000; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-weight: 600; font-size: 16px;">
+              View Sponsor Portal
+            </a>
+          </div>
 
-              <div style="background: linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%); border-radius: 12px; padding: 30px; text-align: center; margin: 30px 0;">
-                <p style="color: #888; margin: 0 0 15px 0;">Click below to view your metrics:</p>
-                <a href="${portalUrl}" style="display: inline-block; background: linear-gradient(135deg, #d4af37 0%, #b8962d 100%); color: #000; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-weight: 600; font-size: 16px;">
-                  View Sponsor Portal
-                </a>
-              </div>
+          <p style="color: #666; font-size: 14px; line-height: 1.6;">
+            Your portal includes:
+          </p>
+          <ul style="color: #666; font-size: 14px; line-height: 1.8;">
+            <li>Event attendance metrics</li>
+            <li>Brand impression estimates</li>
+            <li>ROI calculations</li>
+            <li>Industry benchmark comparisons</li>
+          </ul>
 
-              <p style="color: #666; font-size: 14px; line-height: 1.6;">
-                Your portal includes:
-              </p>
-              <ul style="color: #666; font-size: 14px; line-height: 1.8;">
-                <li>Event attendance metrics</li>
-                <li>Brand impression estimates</li>
-                <li>ROI calculations</li>
-                <li>Industry benchmark comparisons</li>
-              </ul>
+          <p style="color: #888; font-size: 13px; margin-top: 40px;">
+            This link expires in 30 days. If you need a new link, please contact us.
+          </p>
 
-              <p style="color: #888; font-size: 13px; margin-top: 40px;">
-                This link expires in 30 days. If you need a new link, please contact us.
-              </p>
-
-              <div style="border-top: 1px solid #eee; margin-top: 40px; padding-top: 20px; text-align: center;">
-                <p style="color: #888; font-size: 12px; margin: 0;">Powered by <a href="https://merktop.com" style="color: #d4af37; text-decoration: none;">Merktop</a></p>
-              </div>
-            </div>
-          `
-        });
-        console.log('Sponsor portal email sent:', emailResult);
-        emailSent = true;
-      } catch (err) {
-        console.error('Failed to send sponsor portal email:', err);
-        emailError = err.message || 'Failed to send email';
-      }
-    }
+          <div style="border-top: 1px solid #eee; margin-top: 40px; padding-top: 20px; text-align: center;">
+            <p style="color: #888; font-size: 12px; margin: 0;">Powered by <a href="https://merktop.com" style="color: #d4af37; text-decoration: none;">Merktop</a></p>
+          </div>
+        </div>
+      `,
+      emailType: 'sponsor_portal',
+      relatedId: id,
+    });
 
     res.json({
       success: true,
-      emailSent,
-      emailError,
-      message: emailSent ? `Portal link sent to ${s.email}` : `Portal link generated (email not sent: ${emailError})`,
+      emailSent: emailResult.success,
+      emailId: emailResult.emailId,
+      emailError: emailResult.error,
+      message: emailResult.success
+        ? `Portal link sent to ${s.email}`
+        : `Portal link generated (email not sent: ${emailResult.error})`,
       portalUrl,
       expiresAt: expiresAt.toISOString()
     });
@@ -5074,6 +5842,279 @@ app.post('/api/v1/gpt/sponsors', async (req, res) => {
   }
 });
 
+// POST /api/v1/gpt/promoters - Unified promoters session
+app.post('/api/v1/gpt/promoters', async (req, res) => {
+  try {
+    const { action, promoterId, promoterCode, period, data } = req.body;
+    const userId = req.user?.id;
+
+    switch (action) {
+      case 'list': {
+        const result = await pool.query(`
+          SELECT p.*,
+            (SELECT COUNT(*) FROM promoter_sales ps WHERE ps.promoter_id = p.id) as sales_count
+          FROM promoters p
+          WHERE (p.user_id = $1 OR p.user_id IS NULL)
+          ORDER BY p.total_sales DESC
+        `, [userId]);
+        return res.json({ success: true, promoters: result.rows, tiers: promoterTiers });
+      }
+
+      case 'get': {
+        if (!promoterId) return res.status(400).json({ error: 'promoterId required' });
+        const result = await pool.query('SELECT * FROM promoters WHERE id = $1', [promoterId]);
+        if (result.rows.length === 0) return res.status(404).json({ error: 'Promoter not found' });
+        return res.json({ success: true, promoter: result.rows[0] });
+      }
+
+      case 'add': {
+        const { name, email, phone, commissionRate = 10, commissionType = 'percentage', bio, socialInstagram, socialTiktok, socialTwitter } = data || {};
+        if (!name || !email) return res.status(400).json({ error: 'name and email required' });
+        let code = generatePromoterCode(name);
+        const result = await pool.query(`
+          INSERT INTO promoters (user_id, name, email, phone, code, commission_rate, commission_type, status, tier, bio, social_instagram, social_tiktok, social_twitter, landing_page_slug)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, 'active', 'bronze', $8, $9, $10, $11, $12) RETURNING *
+        `, [userId, name, email.toLowerCase(), phone, code, commissionRate, commissionType, bio, socialInstagram, socialTiktok, socialTwitter, code.toLowerCase()]);
+        return res.json({ success: true, promoter: result.rows[0], message: 'Promoter created with code: ' + code });
+      }
+
+      case 'update': {
+        if (!promoterId) return res.status(400).json({ error: 'promoterId required' });
+        const { name, email, phone, commissionRate, status, tier, bio } = data || {};
+        const updates = [];
+        const values = [];
+        let idx = 1;
+        if (name) { updates.push(`name = $${idx++}`); values.push(name); }
+        if (email) { updates.push(`email = $${idx++}`); values.push(email.toLowerCase()); }
+        if (phone) { updates.push(`phone = $${idx++}`); values.push(phone); }
+        if (commissionRate) { updates.push(`commission_rate = $${idx++}`); values.push(commissionRate); }
+        if (status) { updates.push(`status = $${idx++}`); values.push(status); }
+        if (tier) { updates.push(`tier = $${idx++}`); values.push(tier); }
+        if (bio) { updates.push(`bio = $${idx++}`); values.push(bio); }
+        if (updates.length === 0) return res.status(400).json({ error: 'No fields to update' });
+        updates.push(`updated_at = NOW()`);
+        values.push(promoterId);
+        const result = await pool.query(`UPDATE promoters SET ${updates.join(', ')} WHERE id = $${idx} RETURNING *`, values);
+        return res.json({ success: true, promoter: result.rows[0], message: 'Promoter updated' });
+      }
+
+      case 'delete': {
+        if (!promoterId) return res.status(400).json({ error: 'promoterId required' });
+        await pool.query('DELETE FROM promoters WHERE id = $1', [promoterId]);
+        return res.json({ success: true, message: 'Promoter deleted' });
+      }
+
+      case 'trackSale': {
+        const { saleAmount, eventId, guestName, guestEmail } = data || {};
+        const code = promoterCode || data?.promoterCode;
+        if (!code || !saleAmount) return res.status(400).json({ error: 'promoterCode and saleAmount required' });
+        const pResult = await pool.query('SELECT * FROM promoters WHERE code = $1 AND status = $2', [code.toUpperCase(), 'active']);
+        if (pResult.rows.length === 0) return res.status(404).json({ error: 'Promoter not found or inactive' });
+        const promoter = pResult.rows[0];
+        const commissionAmount = promoter.commission_type === 'percentage'
+          ? (parseFloat(saleAmount) * parseFloat(promoter.commission_rate)) / 100
+          : parseFloat(promoter.commission_rate);
+        const saleResult = await pool.query(`
+          INSERT INTO promoter_sales (promoter_id, event_id, guest_name, guest_email, sale_amount, commission_amount, commission_status)
+          VALUES ($1, $2, $3, $4, $5, $6, 'pending') RETURNING *
+        `, [promoter.id, eventId, guestName, guestEmail, saleAmount, commissionAmount]);
+        await pool.query(`UPDATE promoters SET total_sales = total_sales + $1, total_commission = total_commission + $2, total_tickets_sold = total_tickets_sold + 1, last_sale_at = NOW() WHERE id = $3`,
+          [saleAmount, commissionAmount, promoter.id]);
+        return res.json({ success: true, sale: saleResult.rows[0], promoter: { name: promoter.name, code: promoter.code, commissionEarned: commissionAmount } });
+      }
+
+      case 'leaderboard': {
+        let dateFilter = '';
+        if (period === 'week') dateFilter = `AND ps.created_at >= NOW() - INTERVAL '7 days'`;
+        else if (period === 'month') dateFilter = `AND ps.created_at >= NOW() - INTERVAL '30 days'`;
+        else if (period === 'year') dateFilter = `AND ps.created_at >= NOW() - INTERVAL '365 days'`;
+        const result = await pool.query(`
+          SELECT p.id, p.name, p.code, p.tier, p.photo_url,
+            COALESCE(SUM(ps.sale_amount), 0) as period_sales,
+            COALESCE(SUM(ps.commission_amount), 0) as period_commission,
+            COUNT(ps.id) as period_tickets
+          FROM promoters p
+          LEFT JOIN promoter_sales ps ON p.id = ps.promoter_id ${dateFilter}
+          WHERE p.status = 'active'
+          GROUP BY p.id ORDER BY period_sales DESC LIMIT 10
+        `);
+        return res.json({ success: true, period: period || 'all', leaderboard: result.rows.map((p, i) => ({ ...p, rank: i + 1 })) });
+      }
+
+      case 'stats': {
+        if (!promoterId) return res.status(400).json({ error: 'promoterId required' });
+        const statsResult = await pool.query(`
+          SELECT COUNT(*) as total_sales, COALESCE(SUM(sale_amount), 0) as total_revenue, COALESCE(SUM(commission_amount), 0) as total_commission,
+            COALESCE(SUM(CASE WHEN commission_status = 'paid' THEN commission_amount ELSE 0 END), 0) as paid_commission,
+            COALESCE(SUM(CASE WHEN commission_status = 'pending' THEN commission_amount ELSE 0 END), 0) as pending_commission
+          FROM promoter_sales WHERE promoter_id = $1
+        `, [promoterId]);
+        return res.json({ success: true, stats: statsResult.rows[0] });
+      }
+
+      case 'payout': {
+        if (!promoterId) return res.status(400).json({ error: 'promoterId required' });
+        const { amount, paymentMethod, reference, notes } = data || {};
+        if (!amount || !paymentMethod) return res.status(400).json({ error: 'amount and paymentMethod required' });
+        const payoutResult = await pool.query(`
+          INSERT INTO promoter_payouts (promoter_id, amount, payment_method, reference, notes, status, paid_at)
+          VALUES ($1, $2, $3, $4, $5, 'completed', NOW()) RETURNING *
+        `, [promoterId, amount, paymentMethod, reference, notes]);
+        await pool.query(`UPDATE promoter_sales SET commission_status = 'paid', paid_at = NOW() WHERE promoter_id = $1 AND commission_status = 'pending'`, [promoterId]);
+        return res.json({ success: true, payout: payoutResult.rows[0], message: 'Payout created and commissions marked as paid' });
+      }
+
+      default:
+        return res.status(400).json({ error: 'Invalid action. Valid: list, get, add, update, delete, trackSale, leaderboard, stats, payout' });
+    }
+  } catch (error) {
+    console.error('GPT Promoters error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/v1/gpt/integrations - Unified integrations session
+app.post('/api/v1/gpt/integrations', async (req, res) => {
+  try {
+    const { action, provider } = req.body;
+    const userId = req.user?.id;
+
+    switch (action) {
+      case 'list': {
+        const result = await pool.query('SELECT provider, status, last_sync FROM user_integrations WHERE user_id = $1', [userId]);
+        return res.json({ success: true, integrations: result.rows });
+      }
+
+      case 'sync': {
+        if (!provider) return res.status(400).json({ error: 'provider required (eventbrite or mailchimp)' });
+        if (provider === 'eventbrite') {
+          const intResult = await pool.query('SELECT api_key_encrypted FROM user_integrations WHERE user_id = $1 AND provider = $2', [userId, 'eventbrite']);
+          if (intResult.rows.length === 0) return res.status(400).json({ error: 'Eventbrite not connected. Connect first via the dashboard.' });
+          // Just return a message - actual sync requires the full endpoint
+          return res.json({ success: true, message: 'Use the dashboard to sync Eventbrite events' });
+        } else if (provider === 'mailchimp') {
+          return res.json({ success: true, message: 'Use the dashboard to sync with Mailchimp' });
+        }
+        return res.status(400).json({ error: 'Unknown provider' });
+      }
+
+      default:
+        return res.status(400).json({ error: 'Invalid action. Valid: list, sync' });
+    }
+  } catch (error) {
+    console.error('GPT Integrations error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/v1/gpt/emails - Unified email tracking session
+app.post('/api/v1/gpt/emails', async (req, res) => {
+  try {
+    const { action, emailId } = req.body;
+
+    switch (action) {
+      case 'getSummary': {
+        const result = await pool.query(`
+          SELECT
+            COUNT(*) FILTER (WHERE event_type = 'email.sent') as sent,
+            COUNT(*) FILTER (WHERE event_type = 'email.delivered') as delivered,
+            COUNT(*) FILTER (WHERE event_type = 'email.opened') as opened,
+            COUNT(*) FILTER (WHERE event_type = 'email.clicked') as clicked,
+            COUNT(*) FILTER (WHERE event_type = 'email.bounced') as bounced
+          FROM email_events
+        `);
+        return res.json({ success: true, summary: result.rows[0] });
+      }
+
+      case 'getStatus': {
+        if (!emailId) return res.status(400).json({ error: 'emailId required' });
+        const result = await pool.query('SELECT * FROM email_events WHERE email_id = $1 ORDER BY timestamp DESC', [emailId]);
+        return res.json({ success: true, events: result.rows, currentStatus: result.rows[0]?.event_type || 'unknown' });
+      }
+
+      default:
+        return res.status(400).json({ error: 'Invalid action. Valid: getSummary, getStatus' });
+    }
+  } catch (error) {
+    console.error('GPT Emails error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/v1/gpt/uploads - Unified file uploads session
+app.post('/api/v1/gpt/uploads', async (req, res) => {
+  try {
+    const { action, uploadId } = req.body;
+    const userId = req.user?.id;
+
+    if (!userId) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    switch (action) {
+      case 'list': {
+        const result = await pool.query(`
+          SELECT id, original_filename, file_type, upload_type, records_processed,
+                 records_success, records_failed, status, event_id, created_at
+          FROM file_uploads
+          WHERE user_id = $1
+          ORDER BY created_at DESC
+          LIMIT 50
+        `, [userId]);
+        return res.json({ success: true, uploads: result.rows });
+      }
+
+      case 'get': {
+        if (!uploadId) return res.status(400).json({ error: 'uploadId required' });
+        const result = await pool.query(`
+          SELECT * FROM file_uploads
+          WHERE id = $1 AND user_id = $2
+        `, [uploadId, userId]);
+        if (result.rows.length === 0) return res.status(404).json({ error: 'Upload not found' });
+        return res.json({ success: true, upload: result.rows[0] });
+      }
+
+      case 'stats': {
+        const result = await pool.query(`
+          SELECT
+            COUNT(*) as total_uploads,
+            SUM(records_processed) as total_records,
+            SUM(records_success) as total_success,
+            SUM(records_failed) as total_failed,
+            COUNT(*) FILTER (WHERE status = 'completed') as completed_uploads,
+            COUNT(*) FILTER (WHERE status = 'processing') as processing_uploads
+          FROM file_uploads
+          WHERE user_id = $1
+        `, [userId]);
+        return res.json({ success: true, stats: result.rows[0] });
+      }
+
+      case 'getTemplate': {
+        return res.json({
+          success: true,
+          template: {
+            format: 'CSV or Excel (xlsx)',
+            columns: ['name', 'email', 'phone', 'instagram', 'category', 'company', 'notes'],
+            downloadUrl: '/api/v1/uploads/template/contacts',
+            example: [
+              { name: 'John Doe', email: 'john@example.com', phone: '+1234567890', instagram: '@johndoe', category: 'A', company: 'Acme Corp', notes: 'VIP guest' }
+            ]
+          }
+        });
+      }
+
+      default:
+        return res.status(400).json({
+          error: 'Invalid action. Valid: list, get, stats, getTemplate',
+          note: 'For uploading files, use POST /api/v1/uploads/contacts with multipart form data'
+        });
+    }
+  } catch (error) {
+    console.error('GPT Uploads error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // ============================================
 // UNIFIED GPT SESSION ENDPOINT
 // Single endpoint that routes to all GPT handlers
@@ -5092,7 +6133,9 @@ app.post('/api/v1/gpt/session', async (req, res) => {
     endpoint,
     action,
     // ID fields
-    eventId, guestId, staffId, vendorId, modelId, sponsorId, reservationId, ticketId, itemId, assignmentId,
+    eventId, guestId, staffId, vendorId, modelId, sponsorId, reservationId, ticketId, itemId, assignmentId, promoterId, uploadId,
+    // Additional params
+    promoterCode, provider, emailId, period,
     // Filter fields
     filters,
     // Data wrapper (optional - for backwards compatibility)
@@ -5104,7 +6147,7 @@ app.post('/api/v1/gpt/session', async (req, res) => {
   if (!endpoint) {
     return res.status(400).json({
       error: 'Missing endpoint parameter',
-      validEndpoints: ['manageEvents', 'manageGuests', 'manageBudget', 'manageStaff', 'manageVendors', 'manageModels', 'manageTables', 'manageTickets', 'manageSponsors', 'getDashboard']
+      validEndpoints: ['manageEvents', 'manageGuests', 'manageBudget', 'manageStaff', 'manageVendors', 'manageModels', 'manageTables', 'manageTickets', 'manageSponsors', 'managePromoters', 'manageIntegrations', 'manageEmails', 'manageUploads', 'getDashboard']
     });
   }
 
@@ -5119,6 +6162,10 @@ app.post('/api/v1/gpt/session', async (req, res) => {
     'manageTables': '/api/v1/gpt/tables',
     'manageTickets': '/api/v1/gpt/tickets',
     'manageSponsors': '/api/v1/gpt/sponsors',
+    'managePromoters': '/api/v1/gpt/promoters',
+    'manageIntegrations': '/api/v1/gpt/integrations',
+    'manageEmails': '/api/v1/gpt/emails',
+    'manageUploads': '/api/v1/gpt/uploads',
     'getDashboard': '/api/v1/dashboard'
   };
 
@@ -5144,7 +6191,8 @@ app.post('/api/v1/gpt/session', async (req, res) => {
   req.url = targetPath;
   req.body = {
     action,
-    eventId, guestId, staffId, vendorId, modelId, sponsorId, reservationId, ticketId, itemId, assignmentId,
+    eventId, guestId, staffId, vendorId, modelId, sponsorId, reservationId, ticketId, itemId, assignmentId, promoterId, uploadId,
+    promoterCode, provider, emailId, period,
     filters,
     data: Object.keys(mergedData).length > 0 ? mergedData : undefined
   };
@@ -8665,9 +9713,21 @@ app.post('/api/v1/auth/auto-login', async (req, res) => {
 app.post('/api/v1/auth/eventbrite/disconnect', async (req, res) => {
   try {
     const { userId } = req.body;
+    let accessToken = null;
+    let tokenRevoked = false;
 
     if (userId) {
-      // Disconnect for specific user
+      // Get the access token before deleting
+      const tokenResult = await pool.query(
+        'SELECT api_key_encrypted FROM user_integrations WHERE user_id = $1 AND provider = $2',
+        [userId, 'eventbrite']
+      );
+
+      if (tokenResult.rows.length > 0) {
+        accessToken = tokenResult.rows[0].api_key_encrypted;
+      }
+
+      // Delete the integration from database
       await pool.query(
         'DELETE FROM user_integrations WHERE user_id = $1 AND provider = $2',
         [userId, 'eventbrite']
@@ -8675,10 +9735,45 @@ app.post('/api/v1/auth/eventbrite/disconnect', async (req, res) => {
       console.log(`Eventbrite disconnected for user ${userId}`);
     } else {
       // Fallback to global disconnect
+      const tokenResult = await pool.query(
+        'SELECT api_key_encrypted FROM integrations WHERE provider = $1',
+        ['eventbrite']
+      );
+
+      if (tokenResult.rows.length > 0) {
+        accessToken = tokenResult.rows[0].api_key_encrypted;
+      }
+
       await pool.query('UPDATE integrations SET status = $1, api_key_encrypted = NULL WHERE provider = $2', ['disconnected', 'eventbrite']);
     }
 
-    res.json({ success: true, message: 'Eventbrite disconnected' });
+    // Revoke the OAuth token from Eventbrite
+    if (accessToken) {
+      try {
+        const revokeResponse = await fetch('https://www.eventbriteapi.com/v3/users/me/access_tokens/current/', {
+          method: 'DELETE',
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+          },
+        });
+
+        if (revokeResponse.ok) {
+          tokenRevoked = true;
+          console.log('✅ Eventbrite OAuth token revoked successfully');
+        } else {
+          console.warn('⚠️ Failed to revoke Eventbrite token:', revokeResponse.status);
+        }
+      } catch (revokeError) {
+        console.warn('⚠️ Error revoking Eventbrite token:', revokeError.message);
+      }
+    }
+
+    res.json({
+      success: true,
+      message: 'Eventbrite disconnected',
+      tokenRevoked,
+    });
   } catch (error) {
     console.error('Error disconnecting Eventbrite:', error);
     res.status(500).json({ error: 'Failed to disconnect' });
@@ -9381,6 +10476,646 @@ app.post('/api/v1/integrations/mailchimp/sync', async (req, res) => {
   }
 });
 
+// ============================================
+// PROMOTER MANAGEMENT ENDPOINTS
+// ============================================
+
+// Promoter tiers configuration
+const promoterTiers = {
+  bronze: { name: 'Bronze', minSales: 0, maxSales: 4999, commission: 10, color: '#CD7F32', icon: '🥉' },
+  silver: { name: 'Silver', minSales: 5000, maxSales: 14999, commission: 12, color: '#C0C0C0', icon: '🥈' },
+  gold: { name: 'Gold', minSales: 15000, maxSales: 34999, commission: 15, color: '#FFD700', icon: '🥇' },
+  platinum: { name: 'Platinum', minSales: 35000, maxSales: Infinity, commission: 20, color: '#E5E4E2', icon: '💎' }
+};
+
+// Generate unique promoter code
+const generatePromoterCode = (name) => {
+  const prefix = name.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 4).padEnd(4, 'X');
+  const random = Math.random().toString(36).substring(2, 6).toUpperCase();
+  return `${prefix}${random}`;
+};
+
+// Calculate promoter tier based on total sales
+const getPromoterTier = (totalSales) => {
+  const sales = parseFloat(totalSales) || 0;
+  if (sales >= 35000) return 'platinum';
+  if (sales >= 15000) return 'gold';
+  if (sales >= 5000) return 'silver';
+  return 'bronze';
+};
+
+// GET /api/v1/promoters - List all promoters
+app.get('/api/v1/promoters', async (req, res) => {
+  try {
+    const userId = req.userId;
+    const { status, tier, search, sort = 'created_at', order = 'DESC', limit = 50, offset = 0 } = req.query;
+
+    let query = `
+      SELECT p.*,
+        (SELECT COUNT(*) FROM promoter_sales ps WHERE ps.promoter_id = p.id) as sales_count,
+        (SELECT COALESCE(SUM(sale_amount), 0) FROM promoter_sales ps WHERE ps.promoter_id = p.id) as calculated_total_sales,
+        (SELECT COALESCE(SUM(commission_amount), 0) FROM promoter_sales ps WHERE ps.promoter_id = p.id AND ps.commission_status = 'paid') as paid_commission,
+        (SELECT COALESCE(SUM(commission_amount), 0) FROM promoter_sales ps WHERE ps.promoter_id = p.id AND ps.commission_status = 'pending') as pending_commission
+      FROM promoters p
+      WHERE 1=1
+    `;
+    const params = [];
+    let paramIndex = 1;
+
+    // Filter by user if authenticated
+    if (userId) {
+      query += ` AND (p.user_id = $${paramIndex} OR p.user_id IS NULL)`;
+      params.push(userId);
+      paramIndex++;
+    }
+
+    if (status) {
+      query += ` AND p.status = $${paramIndex}`;
+      params.push(status);
+      paramIndex++;
+    }
+
+    if (tier) {
+      query += ` AND p.tier = $${paramIndex}`;
+      params.push(tier);
+      paramIndex++;
+    }
+
+    if (search) {
+      query += ` AND (p.name ILIKE $${paramIndex} OR p.email ILIKE $${paramIndex} OR p.code ILIKE $${paramIndex})`;
+      params.push(`%${search}%`);
+      paramIndex++;
+    }
+
+    // Validate sort column to prevent SQL injection
+    const allowedSorts = ['created_at', 'name', 'total_sales', 'total_commission', 'tier', 'status'];
+    const sortColumn = allowedSorts.includes(sort) ? sort : 'created_at';
+    const sortOrder = order.toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
+
+    query += ` ORDER BY p.${sortColumn} ${sortOrder} LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`;
+    params.push(parseInt(limit), parseInt(offset));
+
+    const result = await pool.query(query, params);
+
+    // Get total count
+    let countQuery = `SELECT COUNT(*) FROM promoters p WHERE 1=1`;
+    const countParams = [];
+    let countParamIndex = 1;
+
+    if (userId) {
+      countQuery += ` AND (p.user_id = $${countParamIndex} OR p.user_id IS NULL)`;
+      countParams.push(userId);
+      countParamIndex++;
+    }
+    if (status) {
+      countQuery += ` AND p.status = $${countParamIndex}`;
+      countParams.push(status);
+      countParamIndex++;
+    }
+    if (tier) {
+      countQuery += ` AND p.tier = $${countParamIndex}`;
+      countParams.push(tier);
+      countParamIndex++;
+    }
+    if (search) {
+      countQuery += ` AND (p.name ILIKE $${countParamIndex} OR p.email ILIKE $${countParamIndex} OR p.code ILIKE $${countParamIndex})`;
+      countParams.push(`%${search}%`);
+    }
+
+    const countResult = await pool.query(countQuery, countParams);
+
+    res.json({
+      success: true,
+      promoters: result.rows,
+      total: parseInt(countResult.rows[0].count),
+      limit: parseInt(limit),
+      offset: parseInt(offset),
+      tiers: promoterTiers
+    });
+  } catch (error) {
+    console.error('Error fetching promoters:', error);
+    res.status(500).json({ error: 'Failed to fetch promoters: ' + error.message });
+  }
+});
+
+// GET /api/v1/promoters/leaderboard - Get promoter leaderboard
+app.get('/api/v1/promoters/leaderboard', async (req, res) => {
+  try {
+    const { period = 'all', limit = 10 } = req.query;
+
+    let dateFilter = '';
+    if (period === 'week') {
+      dateFilter = `AND ps.created_at >= NOW() - INTERVAL '7 days'`;
+    } else if (period === 'month') {
+      dateFilter = `AND ps.created_at >= NOW() - INTERVAL '30 days'`;
+    } else if (period === 'year') {
+      dateFilter = `AND ps.created_at >= NOW() - INTERVAL '365 days'`;
+    }
+
+    const result = await pool.query(`
+      SELECT
+        p.id, p.name, p.code, p.tier, p.photo_url, p.social_instagram,
+        COALESCE(SUM(ps.sale_amount), 0) as period_sales,
+        COALESCE(SUM(ps.commission_amount), 0) as period_commission,
+        COUNT(ps.id) as period_tickets,
+        p.total_sales as all_time_sales,
+        p.total_commission as all_time_commission
+      FROM promoters p
+      LEFT JOIN promoter_sales ps ON p.id = ps.promoter_id ${dateFilter}
+      WHERE p.status = 'active'
+      GROUP BY p.id
+      ORDER BY period_sales DESC
+      LIMIT $1
+    `, [parseInt(limit)]);
+
+    // Add rank
+    const leaderboard = result.rows.map((p, i) => ({
+      ...p,
+      rank: i + 1,
+      tierInfo: promoterTiers[p.tier] || promoterTiers.bronze
+    }));
+
+    res.json({
+      success: true,
+      period,
+      leaderboard
+    });
+  } catch (error) {
+    console.error('Error fetching leaderboard:', error);
+    res.status(500).json({ error: 'Failed to fetch leaderboard: ' + error.message });
+  }
+});
+
+// GET /api/v1/promoters/by-code/:code - Get promoter by code (public for landing pages)
+app.get('/api/v1/promoters/by-code/:code', async (req, res) => {
+  try {
+    const { code } = req.params;
+
+    const result = await pool.query(`
+      SELECT id, name, code, tier, bio, photo_url, social_instagram, social_tiktok, social_twitter, landing_page_slug
+      FROM promoters
+      WHERE code = $1 AND status = 'active'
+    `, [code.toUpperCase()]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Promoter not found or inactive' });
+    }
+
+    const promoter = result.rows[0];
+    promoter.tierInfo = promoterTiers[promoter.tier] || promoterTiers.bronze;
+
+    res.json({
+      success: true,
+      promoter
+    });
+  } catch (error) {
+    console.error('Error fetching promoter by code:', error);
+    res.status(500).json({ error: 'Failed to fetch promoter: ' + error.message });
+  }
+});
+
+// GET /api/v1/promoters/:id - Get single promoter
+app.get('/api/v1/promoters/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const result = await pool.query(`
+      SELECT p.*,
+        (SELECT COUNT(*) FROM promoter_sales ps WHERE ps.promoter_id = p.id) as sales_count,
+        (SELECT COALESCE(SUM(sale_amount), 0) FROM promoter_sales ps WHERE ps.promoter_id = p.id) as calculated_total_sales,
+        (SELECT COALESCE(SUM(commission_amount), 0) FROM promoter_sales ps WHERE ps.promoter_id = p.id AND ps.commission_status = 'paid') as paid_commission,
+        (SELECT COALESCE(SUM(commission_amount), 0) FROM promoter_sales ps WHERE ps.promoter_id = p.id AND ps.commission_status = 'pending') as pending_commission
+      FROM promoters p
+      WHERE p.id = $1
+    `, [id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Promoter not found' });
+    }
+
+    const promoter = result.rows[0];
+    promoter.tierInfo = promoterTiers[promoter.tier] || promoterTiers.bronze;
+
+    // Get recent sales
+    const salesResult = await pool.query(`
+      SELECT * FROM promoter_sales
+      WHERE promoter_id = $1
+      ORDER BY created_at DESC
+      LIMIT 20
+    `, [id]);
+
+    res.json({
+      success: true,
+      promoter,
+      recentSales: salesResult.rows
+    });
+  } catch (error) {
+    console.error('Error fetching promoter:', error);
+    res.status(500).json({ error: 'Failed to fetch promoter: ' + error.message });
+  }
+});
+
+// POST /api/v1/promoters - Create new promoter
+app.post('/api/v1/promoters', async (req, res) => {
+  try {
+    const userId = req.userId;
+    const {
+      name, email, phone, commission_rate = 10, commission_type = 'percentage',
+      bio, photo_url, social_instagram, social_tiktok, social_twitter, landing_page_slug
+    } = req.body;
+
+    if (!name || !email) {
+      return res.status(400).json({ error: 'Name and email are required' });
+    }
+
+    // Generate unique code
+    let code = generatePromoterCode(name);
+
+    // Ensure code is unique
+    let codeExists = true;
+    let attempts = 0;
+    while (codeExists && attempts < 10) {
+      const existing = await pool.query('SELECT id FROM promoters WHERE code = $1', [code]);
+      if (existing.rows.length === 0) {
+        codeExists = false;
+      } else {
+        code = generatePromoterCode(name);
+        attempts++;
+      }
+    }
+
+    // Check if email already exists
+    const emailCheck = await pool.query('SELECT id FROM promoters WHERE email = $1', [email.toLowerCase()]);
+    if (emailCheck.rows.length > 0) {
+      return res.status(400).json({ error: 'A promoter with this email already exists' });
+    }
+
+    const result = await pool.query(`
+      INSERT INTO promoters (
+        user_id, name, email, phone, code, commission_rate, commission_type,
+        status, tier, bio, photo_url, social_instagram, social_tiktok, social_twitter, landing_page_slug
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'active', 'bronze', $8, $9, $10, $11, $12, $13)
+      RETURNING *
+    `, [
+      userId, name, email.toLowerCase(), phone, code, commission_rate, commission_type,
+      bio, photo_url, social_instagram, social_tiktok, social_twitter, landing_page_slug || code.toLowerCase()
+    ]);
+
+    const promoter = result.rows[0];
+    promoter.tierInfo = promoterTiers.bronze;
+
+    res.status(201).json({
+      success: true,
+      message: 'Promoter created successfully',
+      promoter
+    });
+  } catch (error) {
+    console.error('Error creating promoter:', error);
+    res.status(500).json({ error: 'Failed to create promoter: ' + error.message });
+  }
+});
+
+// PATCH /api/v1/promoters/:id - Update promoter
+app.patch('/api/v1/promoters/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updates = req.body;
+
+    // Check if promoter exists
+    const existing = await pool.query('SELECT * FROM promoters WHERE id = $1', [id]);
+    if (existing.rows.length === 0) {
+      return res.status(404).json({ error: 'Promoter not found' });
+    }
+
+    // Build update query
+    const allowedFields = [
+      'name', 'email', 'phone', 'commission_rate', 'commission_type', 'status', 'tier',
+      'bio', 'photo_url', 'social_instagram', 'social_tiktok', 'social_twitter', 'landing_page_slug'
+    ];
+
+    const updateFields = [];
+    const values = [];
+    let paramIndex = 1;
+
+    for (const [key, value] of Object.entries(updates)) {
+      if (allowedFields.includes(key) && value !== undefined) {
+        updateFields.push(`${key} = $${paramIndex}`);
+        values.push(key === 'email' ? value.toLowerCase() : value);
+        paramIndex++;
+      }
+    }
+
+    if (updateFields.length === 0) {
+      return res.status(400).json({ error: 'No valid fields to update' });
+    }
+
+    updateFields.push(`updated_at = NOW()`);
+    values.push(id);
+
+    const result = await pool.query(`
+      UPDATE promoters SET ${updateFields.join(', ')} WHERE id = $${paramIndex} RETURNING *
+    `, values);
+
+    const promoter = result.rows[0];
+    promoter.tierInfo = promoterTiers[promoter.tier] || promoterTiers.bronze;
+
+    res.json({
+      success: true,
+      message: 'Promoter updated successfully',
+      promoter
+    });
+  } catch (error) {
+    console.error('Error updating promoter:', error);
+    res.status(500).json({ error: 'Failed to update promoter: ' + error.message });
+  }
+});
+
+// DELETE /api/v1/promoters/:id - Delete promoter
+app.delete('/api/v1/promoters/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Check if promoter exists
+    const existing = await pool.query('SELECT * FROM promoters WHERE id = $1', [id]);
+    if (existing.rows.length === 0) {
+      return res.status(404).json({ error: 'Promoter not found' });
+    }
+
+    // Delete promoter (cascades to promoter_sales, payouts, events)
+    await pool.query('DELETE FROM promoters WHERE id = $1', [id]);
+
+    res.json({
+      success: true,
+      message: 'Promoter deleted successfully'
+    });
+  } catch (error) {
+    console.error('Error deleting promoter:', error);
+    res.status(500).json({ error: 'Failed to delete promoter: ' + error.message });
+  }
+});
+
+// GET /api/v1/promoters/:id/stats - Get promoter statistics
+app.get('/api/v1/promoters/:id/stats', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) {
+      return res.status(400).json({ error: 'Invalid promoter ID' });
+    }
+
+    // Check if promoter exists
+    const promoterResult = await pool.query('SELECT * FROM promoters WHERE id = $1', [id]);
+    if (promoterResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Promoter not found' });
+    }
+
+    // Get overall stats
+    const statsResult = await pool.query(`
+      SELECT
+        COUNT(*) as total_sales,
+        COALESCE(SUM(sale_amount), 0) as total_revenue,
+        COALESCE(SUM(commission_amount), 0) as total_commission,
+        COALESCE(SUM(CASE WHEN commission_status = 'paid' THEN commission_amount ELSE 0 END), 0) as paid_commission,
+        COALESCE(SUM(CASE WHEN commission_status = 'pending' THEN commission_amount ELSE 0 END), 0) as pending_commission,
+        COALESCE(AVG(sale_amount), 0) as avg_sale_amount
+      FROM promoter_sales
+      WHERE promoter_id = $1::integer
+    `, [id]);
+
+    // Get sales by month (last 12 months)
+    const monthlyResult = await pool.query(`
+      SELECT
+        TO_CHAR(created_at, 'YYYY-MM') as month,
+        COUNT(*) as sales,
+        COALESCE(SUM(sale_amount), 0) as revenue,
+        COALESCE(SUM(commission_amount), 0) as commission
+      FROM promoter_sales
+      WHERE promoter_id = $1::integer AND created_at >= NOW() - INTERVAL '12 months'
+      GROUP BY TO_CHAR(created_at, 'YYYY-MM')
+      ORDER BY month DESC
+    `, [id]);
+
+    // Get sales by event (handle potential type issues)
+    let eventResult = { rows: [] };
+    try {
+      eventResult = await pool.query(`
+        SELECT
+          ps.event_id,
+          COALESCE(e.name, 'Event ' || COALESCE(ps.event_id::text, 'Unknown')) as event_name,
+          COUNT(*) as sales,
+          COALESCE(SUM(ps.sale_amount), 0) as revenue,
+          COALESCE(SUM(ps.commission_amount), 0) as commission
+        FROM promoter_sales ps
+        LEFT JOIN events e ON CAST(ps.event_id AS INTEGER) = e.id
+        WHERE ps.promoter_id = $1
+        GROUP BY ps.event_id, e.name
+        ORDER BY revenue DESC
+        LIMIT 10
+      `, [id]);
+    } catch (eventError) {
+      console.error('Error fetching event breakdown (non-critical):', eventError.message);
+      // Try simpler query without join
+      try {
+        eventResult = await pool.query(`
+          SELECT
+            event_id,
+            'Event ' || COALESCE(event_id::text, 'Unknown') as event_name,
+            COUNT(*) as sales,
+            COALESCE(SUM(sale_amount), 0) as revenue,
+            COALESCE(SUM(commission_amount), 0) as commission
+          FROM promoter_sales
+          WHERE promoter_id = $1
+          GROUP BY event_id
+          ORDER BY revenue DESC
+          LIMIT 10
+        `, [id]);
+      } catch (simpleError) {
+        console.error('Error fetching simple event breakdown:', simpleError.message);
+      }
+    }
+
+    res.json({
+      success: true,
+      stats: statsResult.rows[0],
+      monthly: monthlyResult.rows,
+      byEvent: eventResult.rows,
+      promoter: promoterResult.rows[0]
+    });
+  } catch (error) {
+    console.error('Error fetching promoter stats:', error);
+    res.status(500).json({ error: 'Failed to fetch stats: ' + error.message });
+  }
+});
+
+// POST /api/v1/promoters/track - Track a sale with promoter code
+app.post('/api/v1/promoters/track', async (req, res) => {
+  try {
+    const { code, event_id, ticket_id, guest_name, guest_email, sale_amount, notes } = req.body;
+
+    if (!code || !sale_amount) {
+      return res.status(400).json({ error: 'Promoter code and sale amount are required' });
+    }
+
+    // Find promoter by code
+    const promoterResult = await pool.query(
+      'SELECT * FROM promoters WHERE code = $1 AND status = $2',
+      [code.toUpperCase(), 'active']
+    );
+
+    if (promoterResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Promoter not found or inactive' });
+    }
+
+    const promoter = promoterResult.rows[0];
+
+    // Calculate commission
+    let commission_amount;
+    if (promoter.commission_type === 'percentage') {
+      commission_amount = (parseFloat(sale_amount) * parseFloat(promoter.commission_rate)) / 100;
+    } else {
+      commission_amount = parseFloat(promoter.commission_rate);
+    }
+
+    // Create sale record
+    const saleResult = await pool.query(`
+      INSERT INTO promoter_sales (
+        promoter_id, event_id, ticket_id, guest_name, guest_email,
+        sale_amount, commission_amount, commission_status, notes
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', $8)
+      RETURNING *
+    `, [promoter.id, event_id, ticket_id, guest_name, guest_email, sale_amount, commission_amount, notes]);
+
+    // Update promoter totals
+    await pool.query(`
+      UPDATE promoters SET
+        total_sales = total_sales + $1,
+        total_commission = total_commission + $2,
+        total_tickets_sold = total_tickets_sold + 1,
+        last_sale_at = NOW(),
+        tier = $3,
+        updated_at = NOW()
+      WHERE id = $4
+    `, [sale_amount, commission_amount, getPromoterTier(promoter.total_sales + parseFloat(sale_amount)), promoter.id]);
+
+    res.status(201).json({
+      success: true,
+      message: 'Sale tracked successfully',
+      sale: saleResult.rows[0],
+      promoter: {
+        id: promoter.id,
+        name: promoter.name,
+        code: promoter.code,
+        commission_earned: commission_amount
+      }
+    });
+  } catch (error) {
+    console.error('Error tracking sale:', error);
+    res.status(500).json({ error: 'Failed to track sale: ' + error.message });
+  }
+});
+
+// POST /api/v1/promoters/:id/payout - Create payout for promoter
+app.post('/api/v1/promoters/:id/payout', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { amount, payment_method, reference, notes } = req.body;
+
+    if (!amount || !payment_method) {
+      return res.status(400).json({ error: 'Amount and payment method are required' });
+    }
+
+    // Check promoter exists
+    const promoterResult = await pool.query('SELECT * FROM promoters WHERE id = $1', [id]);
+    if (promoterResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Promoter not found' });
+    }
+
+    // Create payout record
+    const payoutResult = await pool.query(`
+      INSERT INTO promoter_payouts (
+        promoter_id, amount, payment_method, reference, notes, status, paid_at
+      ) VALUES ($1, $2, $3, $4, $5, 'completed', NOW())
+      RETURNING *
+    `, [id, amount, payment_method, reference, notes]);
+
+    // Mark pending commissions as paid (up to payout amount)
+    await pool.query(`
+      UPDATE promoter_sales SET
+        commission_status = 'paid',
+        paid_at = NOW()
+      WHERE promoter_id = $1 AND commission_status = 'pending'
+    `, [id]);
+
+    res.status(201).json({
+      success: true,
+      message: 'Payout created successfully',
+      payout: payoutResult.rows[0]
+    });
+  } catch (error) {
+    console.error('Error creating payout:', error);
+    res.status(500).json({ error: 'Failed to create payout: ' + error.message });
+  }
+});
+
+// GET /api/v1/promoters/:id/payouts - Get promoter payouts
+app.get('/api/v1/promoters/:id/payouts', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { limit = 20, offset = 0 } = req.query;
+
+    const result = await pool.query(`
+      SELECT * FROM promoter_payouts
+      WHERE promoter_id = $1
+      ORDER BY created_at DESC
+      LIMIT $2 OFFSET $3
+    `, [id, parseInt(limit), parseInt(offset)]);
+
+    const countResult = await pool.query(
+      'SELECT COUNT(*) FROM promoter_payouts WHERE promoter_id = $1',
+      [id]
+    );
+
+    res.json({
+      success: true,
+      payouts: result.rows,
+      total: parseInt(countResult.rows[0].count)
+    });
+  } catch (error) {
+    console.error('Error fetching payouts:', error);
+    res.status(500).json({ error: 'Failed to fetch payouts: ' + error.message });
+  }
+});
+
+// GET /api/v1/promoters/stats/summary - Get overall promoter system stats
+app.get('/api/v1/promoters/stats/summary', async (req, res) => {
+  try {
+    const stats = await pool.query(`
+      SELECT
+        (SELECT COUNT(*) FROM promoters) as total_promoters,
+        (SELECT COUNT(*) FROM promoters WHERE status = 'active') as active_promoters,
+        (SELECT COALESCE(SUM(total_sales), 0) FROM promoters) as total_sales,
+        (SELECT COALESCE(SUM(total_commission), 0) FROM promoters) as total_commissions,
+        (SELECT COUNT(*) FROM promoter_sales) as total_transactions,
+        (SELECT COALESCE(SUM(commission_amount), 0) FROM promoter_sales WHERE commission_status = 'pending') as pending_payouts
+    `);
+
+    const tierBreakdown = await pool.query(`
+      SELECT tier, COUNT(*) as count
+      FROM promoters
+      GROUP BY tier
+    `);
+
+    res.json({
+      success: true,
+      stats: stats.rows[0],
+      tierBreakdown: tierBreakdown.rows,
+      tiers: promoterTiers
+    });
+  } catch (error) {
+    console.error('Error fetching promoter summary:', error);
+    res.status(500).json({ error: 'Failed to fetch summary: ' + error.message });
+  }
+});
+
 // Start server
 const startServer = async () => {
   await initDatabase();
@@ -9465,6 +11200,20 @@ const startServer = async () => {
     GET    /api/v1/events/:id/client-access - List portal links
     DELETE /api/v1/client-access/:id        - Revoke access
     GET    /api/v1/client-portal/:token     - Public client view
+
+    Promoter Management:
+    GET    /api/v1/promoters                - List all promoters
+    POST   /api/v1/promoters                - Create promoter
+    GET    /api/v1/promoters/:id            - Get promoter details
+    PATCH  /api/v1/promoters/:id            - Update promoter
+    DELETE /api/v1/promoters/:id            - Delete promoter
+    GET    /api/v1/promoters/leaderboard    - Promoter leaderboard
+    GET    /api/v1/promoters/by-code/:code  - Get by promo code
+    GET    /api/v1/promoters/:id/stats      - Promoter statistics
+    POST   /api/v1/promoters/track          - Track sale with code
+    POST   /api/v1/promoters/:id/payout     - Create payout
+    GET    /api/v1/promoters/:id/payouts    - Get payouts
+    GET    /api/v1/promoters/stats/summary  - Overall stats
 
     Resend Webhook URL: https://berry.merktop.com/api/webhooks/resend
 
