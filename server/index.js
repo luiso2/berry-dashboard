@@ -13,7 +13,7 @@ import yaml from 'js-yaml';
 import cookieParser from 'cookie-parser';
 
 // API Version - for tracking deployments
-const API_VERSION = '3.4.1-oauth-with-userid';
+const API_VERSION = '3.4.2-oauth-fix-config';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -8042,14 +8042,14 @@ app.get('/api/v1/auth/eventbrite/callback', async (req, res) => {
 
     // Upsert into integrations table
     await pool.query(`
-      INSERT INTO integrations (provider, api_key_encrypted, status, last_sync, config)
+      INSERT INTO integrations (provider, api_key_encrypted, status, last_sync, extra_config)
       VALUES ('eventbrite', $1, 'connected', NOW(), $2)
       ON CONFLICT (provider)
       DO UPDATE SET
         api_key_encrypted = $1,
         status = 'connected',
         last_sync = NOW(),
-        config = $2
+        extra_config = $2
     `, [
       encryptedToken,
       JSON.stringify({
@@ -8096,7 +8096,7 @@ app.get('/api/v1/auth/eventbrite/status', async (req, res) => {
     }
 
     const userData = await userResponse.json();
-    const config = integration.config ? JSON.parse(integration.config) : {};
+    const extraConfig = integration.extra_config ? (typeof integration.extra_config === 'string' ? JSON.parse(integration.extra_config) : integration.extra_config) : {};
 
     res.json({
       connected: true,
@@ -8104,7 +8104,7 @@ app.get('/api/v1/auth/eventbrite/status', async (req, res) => {
         name: userData.name,
         email: userData.emails?.[0]?.email
       },
-      connectedAt: config.connectedAt,
+      connectedAt: extraConfig.connectedAt,
       lastSync: integration.last_sync
     });
 
