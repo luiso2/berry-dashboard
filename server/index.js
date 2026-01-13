@@ -7763,12 +7763,17 @@ app.post('/api/v1/integrations/eventbrite/sync', async (req, res) => {
             event.id
           ]);
         } else {
-          // Insert new event - use only core columns that definitely exist
+          // Insert new event - generate ID and use berry-bly schema columns (title, date)
+          // Get next ID first
+          const maxIdResult = await pool.query('SELECT COALESCE(MAX(CAST(id AS INTEGER)), 0) + 1 as next_id FROM events');
+          const nextId = maxIdResult.rows[0].next_id;
+
           try {
             await pool.query(`
-              INSERT INTO events (title, description, date, time, status, category, external_id, external_source, eventbrite_url)
-              VALUES ($1, $2, $3, $4, $5, 'eventbrite', $6, 'eventbrite', $7)
+              INSERT INTO events (id, title, description, date, time, status, category, external_id, external_source, eventbrite_url)
+              VALUES ($1, $2, $3, $4, $5, $6, 'eventbrite', $7, 'eventbrite', $8)
             `, [
+              nextId.toString(),
               event.name?.text || 'Untitled Event',
               event.description?.text || '',
               eventDate,
@@ -7777,16 +7782,17 @@ app.post('/api/v1/integrations/eventbrite/sync', async (req, res) => {
               event.id,
               event.url || ''
             ]);
-            console.log(`✅ Inserted Eventbrite event: ${event.name?.text}`);
+            console.log(`✅ Inserted Eventbrite event: ${event.name?.text} (id: ${nextId})`);
           } catch (insertErr) {
             console.error(`❌ Failed to insert event ${event.name?.text}:`, insertErr.message);
             insertErrors.push({ event: event.name?.text, error: insertErr.message });
-            // Try fallback insert with minimal columns (name and event_date are required per schema)
+            // Try fallback insert with minimal columns (title and date are required)
             try {
               await pool.query(`
-                INSERT INTO events (name, event_date, status)
-                VALUES ($1, $2, $3)
+                INSERT INTO events (id, title, date, status, category)
+                VALUES ($1, $2, $3, $4, 'eventbrite')
               `, [
+                nextId.toString(),
                 event.name?.text || 'Untitled Event',
                 eventDate,
                 eventStatus
