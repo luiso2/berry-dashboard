@@ -9905,7 +9905,7 @@ app.post('/api/v1/integrations/eventbrite/sync', async (req, res) => {
         } else {
           // Insert new event - generate ID and use berry-bly schema columns (title, date)
           // Get next ID first
-          const maxIdResult = await pool.query('SELECT COALESCE(MAX(CAST(id AS INTEGER)), 0) + 1 as next_id FROM events');
+          const maxIdResult = await pool.query("SELECT COALESCE(MAX(CAST(id AS INTEGER)), 0) + 1 as next_id FROM events WHERE id ~ '^[0-9]+$'");
           const nextId = maxIdResult.rows[0].next_id;
 
           try {
