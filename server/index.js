@@ -7762,11 +7762,11 @@ app.post('/api/v1/integrations/eventbrite/sync', async (req, res) => {
             event.id
           ]);
         } else {
-          // Insert new event (use berry-bly schema: title, date, time, venue, category)
+          // Insert new event - use only core columns that definitely exist
           try {
             await pool.query(`
-              INSERT INTO events (title, description, date, time, status, external_id, external_source, eventbrite_url, ticket_types, flyer_url, category)
-              VALUES ($1, $2, $3, $4, $5, $6, 'eventbrite', $7, $8, $9, 'eventbrite')
+              INSERT INTO events (title, description, date, time, status, category, external_id, external_source, eventbrite_url)
+              VALUES ($1, $2, $3, $4, $5, 'eventbrite', $6, 'eventbrite', $7)
             `, [
               event.name?.text || 'Untitled Event',
               event.description?.text || '',
@@ -7774,13 +7774,25 @@ app.post('/api/v1/integrations/eventbrite/sync', async (req, res) => {
               startTime,
               eventStatus,
               event.id,
-              event.url || '',
-              JSON.stringify(ticketTypes),
-              event.logo?.url || null
+              event.url || ''
             ]);
             console.log(`✅ Inserted Eventbrite event: ${event.name?.text}`);
           } catch (insertErr) {
             console.error(`❌ Failed to insert event ${event.name?.text}:`, insertErr.message);
+            // Try fallback insert with minimal columns
+            try {
+              await pool.query(`
+                INSERT INTO events (title, date, status, category)
+                VALUES ($1, $2, $3, 'eventbrite')
+              `, [
+                event.name?.text || 'Untitled Event',
+                eventDate,
+                eventStatus
+              ]);
+              console.log(`✅ Inserted Eventbrite event with minimal columns: ${event.name?.text}`);
+            } catch (fallbackErr) {
+              console.error(`❌ Fallback insert also failed:`, fallbackErr.message);
+            }
           }
         }
 
