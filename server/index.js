@@ -13,7 +13,7 @@ import yaml from 'js-yaml';
 import cookieParser from 'cookie-parser';
 
 // API Version - for tracking deployments
-const API_VERSION = '3.7.0-bulk-delete-events';
+const API_VERSION = '3.8.0-delete-tickets-bulk';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -3186,6 +3186,80 @@ app.post('/api/v1/tickets/:ticketId/check-in', async (req, res) => {
   } catch (error) {
     console.error('Error checking in ticket:', error);
     res.status(500).json({ error: 'Failed to check in ticket' });
+  }
+});
+
+// DELETE /api/v1/tickets/:id - Delete a single ticket
+app.delete('/api/v1/tickets/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query('DELETE FROM tickets WHERE id = $1 RETURNING id', [id]);
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'Ticket not found' });
+    }
+
+    res.json({ success: true, message: 'Ticket deleted' });
+  } catch (error) {
+    console.error('Error deleting ticket:', error);
+    res.status(500).json({ error: 'Failed to delete ticket' });
+  }
+});
+
+// POST /api/v1/tickets/bulk-delete - Delete multiple tickets
+app.post('/api/v1/tickets/bulk-delete', async (req, res) => {
+  try {
+    const { ticketIds } = req.body;
+
+    if (!ticketIds || !Array.isArray(ticketIds) || ticketIds.length === 0) {
+      return res.status(400).json({ error: 'Ticket IDs required' });
+    }
+
+    const result = await pool.query(
+      'DELETE FROM tickets WHERE id = ANY($1) RETURNING id',
+      [ticketIds]
+    );
+
+    res.json({
+      success: true,
+      message: `Deleted ${result.rowCount} tickets`,
+      deletedCount: result.rowCount
+    });
+  } catch (error) {
+    console.error('Error bulk deleting tickets:', error);
+    res.status(500).json({ error: 'Failed to delete tickets' });
+  }
+});
+
+// DELETE /api/v1/tickets/all - Delete ALL tickets
+app.delete('/api/v1/tickets/all', async (req, res) => {
+  try {
+    const result = await pool.query('DELETE FROM tickets RETURNING id');
+
+    res.json({
+      success: true,
+      message: `Deleted all ${result.rowCount} tickets`,
+      deletedCount: result.rowCount
+    });
+  } catch (error) {
+    console.error('Error deleting all tickets:', error);
+    res.status(500).json({ error: 'Failed to delete all tickets' });
+  }
+});
+
+// DELETE /api/v1/events/all - Delete ALL events
+app.delete('/api/v1/events/all', async (req, res) => {
+  try {
+    const result = await pool.query('DELETE FROM events RETURNING id');
+
+    res.json({
+      success: true,
+      message: `Deleted all ${result.rowCount} events`,
+      deletedCount: result.rowCount
+    });
+  } catch (error) {
+    console.error('Error deleting all events:', error);
+    res.status(500).json({ error: 'Failed to delete all events' });
   }
 });
 

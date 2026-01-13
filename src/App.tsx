@@ -1720,6 +1720,71 @@ function App() {
     }
   }, [fetchEvents]);
 
+  // Delete All Events
+  const deleteAllEvents = useCallback(async () => {
+    if (!confirm(`Are you sure you want to delete ALL ${events.length} events? This action cannot be undone.`)) {
+      return;
+    }
+    try {
+      const res = await fetch(`${API_URL}/events/all`, {
+        method: 'DELETE',
+      });
+      if (res.ok) {
+        const data = await res.json();
+        fetchEvents();
+        addToast(`Deleted ${data.deletedCount} events`, 'success');
+      } else {
+        addToast('Failed to delete all events', 'error');
+      }
+    } catch (error) {
+      console.error('Error deleting all events:', error);
+      addToast('Failed to delete all events', 'error');
+    }
+  }, [events.length, fetchEvents]);
+
+  // Delete Ticket
+  const deleteTicket = useCallback(async (id: number | string) => {
+    if (!confirm('Are you sure you want to delete this ticket?')) {
+      return;
+    }
+    try {
+      const res = await fetch(`${API_URL}/tickets/${id}`, {
+        method: 'DELETE',
+      });
+      if (res.ok) {
+        fetchTickets();
+        addToast('Ticket deleted', 'success');
+      } else {
+        addToast('Failed to delete ticket', 'error');
+      }
+    } catch (error) {
+      console.error('Error deleting ticket:', error);
+      addToast('Failed to delete ticket', 'error');
+    }
+  }, [fetchTickets]);
+
+  // Delete All Tickets
+  const deleteAllTickets = useCallback(async () => {
+    if (!confirm(`Are you sure you want to delete ALL ${tickets.length} tickets? This action cannot be undone.`)) {
+      return;
+    }
+    try {
+      const res = await fetch(`${API_URL}/tickets/all`, {
+        method: 'DELETE',
+      });
+      if (res.ok) {
+        const data = await res.json();
+        fetchTickets();
+        addToast(`Deleted ${data.deletedCount} tickets`, 'success');
+      } else {
+        addToast('Failed to delete all tickets', 'error');
+      }
+    } catch (error) {
+      console.error('Error deleting all tickets:', error);
+      addToast('Failed to delete all tickets', 'error');
+    }
+  }, [tickets.length, fetchTickets]);
+
   // Fetch Budget for Event
   const fetchBudget = useCallback(async (eventId: number) => {
     try {
@@ -4126,7 +4191,17 @@ function App() {
             <div style={{ background: '#0a0a0a', borderRadius: 12, border: '1px solid #1a1a1a', overflow: 'hidden' }}>
               <div style={{ padding: '16px 20px', borderBottom: '1px solid #1a1a1a', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span style={{ fontSize: 15, fontWeight: 600 }}>Tickets</span>
-                <span style={{ fontSize: 14, color: '#666' }}>{tickets.length} tickets</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <span style={{ fontSize: 14, color: '#666' }}>{tickets.length} tickets</span>
+                  {tickets.length > 0 && (
+                    <button
+                      onClick={deleteAllTickets}
+                      style={{ background: '#ef444420', color: '#ef4444', border: '1px solid #ef444440', padding: '6px 12px', borderRadius: 6, fontSize: 12, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
+                    >
+                      🗑️ Delete All
+                    </button>
+                  )}
+                </div>
               </div>
               {tickets.map((ticket, idx) => (
                 <div
@@ -4173,6 +4248,13 @@ function App() {
                     }}>
                       {ticket.status}
                     </span>
+                    <button
+                      onClick={() => deleteTicket(ticket.id)}
+                      style={{ background: '#ef444420', color: '#ef4444', border: 'none', padding: '6px 10px', borderRadius: 6, fontSize: 14, cursor: 'pointer' }}
+                      title="Delete ticket"
+                    >
+                      🗑️
+                    </button>
                   </div>
                 </div>
               ))}
@@ -4523,13 +4605,24 @@ function App() {
             {/* Action Bar */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
               <h2 style={{ fontSize: 20, fontWeight: 600, margin: 0 }}>All Events</h2>
-              <button
-                onClick={() => setShowEventForm(true)}
-                className="btn-hover"
-                style={{ background: '#d4af37', color: '#000', border: 'none', padding: '10px 20px', borderRadius: 8, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8 }}
-              >
-                + New Event
-              </button>
+              <div style={{ display: 'flex', gap: 12 }}>
+                {events.length > 0 && (
+                  <button
+                    onClick={deleteAllEvents}
+                    className="btn-hover"
+                    style={{ background: '#ef444420', color: '#ef4444', border: '1px solid #ef444440', padding: '10px 20px', borderRadius: 8, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8 }}
+                  >
+                    🗑️ Delete All
+                  </button>
+                )}
+                <button
+                  onClick={() => setShowEventForm(true)}
+                  className="btn-hover"
+                  style={{ background: '#d4af37', color: '#000', border: 'none', padding: '10px 20px', borderRadius: 8, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8 }}
+                >
+                  + New Event
+                </button>
+              </div>
             </div>
 
             {/* Events Grid */}
