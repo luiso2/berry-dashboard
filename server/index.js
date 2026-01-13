@@ -963,13 +963,44 @@ const initDatabase = async () => {
         status VARCHAR(20) DEFAULT 'disconnected',
         last_sync TIMESTAMP,
         last_error TEXT,
+        webhook_id VARCHAR(100),
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
       CREATE INDEX IF NOT EXISTS idx_integrations_provider ON integrations(provider);
       CREATE INDEX IF NOT EXISTS idx_integrations_status ON integrations(status);
     `);
-    console.log('Integrations table initialized');
+
+    // Add webhook_id column if it doesn't exist
+    await client.query(`
+      ALTER TABLE integrations ADD COLUMN IF NOT EXISTS webhook_id VARCHAR(100);
+    `);
+
+    // ============================================
+    // ORDERS TABLE - Track ticket sales from Eventbrite
+    // ============================================
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS orders (
+        id VARCHAR(100) PRIMARY KEY,
+        event_id VARCHAR(100),
+        event_name VARCHAR(255),
+        source VARCHAR(50) DEFAULT 'eventbrite',
+        buyer_name VARCHAR(255),
+        buyer_email VARCHAR(255),
+        order_status VARCHAR(50) DEFAULT 'placed',
+        ticket_count INTEGER DEFAULT 1,
+        total_amount DECIMAL(10,2) DEFAULT 0,
+        currency VARCHAR(10) DEFAULT 'USD',
+        tickets JSONB DEFAULT '[]',
+        raw_data JSONB,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_orders_event ON orders(event_id);
+      CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(order_status);
+      CREATE INDEX IF NOT EXISTS idx_orders_created ON orders(created_at DESC);
+    `);
+    console.log('Integrations and Orders tables initialized');
 
     dbInitStatus.completed = true;
     console.log('Database tables initialized successfully (guests, email_events, tickets, activity_log, sponsors, events, budgets, vendors, staff, contracts, client_access, integrations)');
@@ -7713,6 +7744,357 @@ app.post('/api/v1/integrations/eventbrite/sync', async (req, res) => {
   } catch (error) {
     console.error('Error syncing Eventbrite:', error);
     res.status(500).json({ error: 'Failed to sync with Eventbrite: ' + error.message });
+  }
+});
+
+// ============================================
+// EVENTBRITE WEBHOOKS - Real-time ticket sales
+// ============================================
+
+// POST /api/webhooks/eventbrite - Receive webhook events from Eventbrite
+app.post('/api/webhooks/eventbrite', async (req, res) => {
+  try {
+    const payload = req.body;
+    console.log('Eventbrite webhook received:', payload?.config?.action);
+
+    // Verify we have the integration connected
+    const integration = await pool.query('SELECT * FROM integrations WHERE provider = $1', ['eventbrite']);
+    if (!integration.rows[0] || integration.rows[0].status !== 'connected') {
+      console.log('Eventbrite webhook received but integration not connected');
+      return res.status(200).json({ received: true });
+    }
+
+    const apiKey = decryptApiKey(integration.rows[0].api_key_encrypted);
+    const action = payload?.config?.action;
+    const apiUrl = payload?.api_url;
+
+    if (!apiUrl) {
+      return res.status(200).json({ received: true, message: 'No API URL provided' });
+    }
+
+    // Handle different webhook actions
+    switch (action) {
+      case 'order.placed':
+      case 'order.updated':
+        // Fetch the full order details from Eventbrite
+        const orderResponse = await fetch(apiUrl, {
+          headers: { 'Authorization': `Bearer ${apiKey}` }
+        });
+
+        if (orderResponse.ok) {
+          const order = await orderResponse.json();
+
+          // Get event details
+          const eventResponse = await fetch(`https://www.eventbriteapi.com/v3/events/${order.event_id}/`, {
+            headers: { 'Authorization': `Bearer ${apiKey}` }
+          });
+          const event = eventResponse.ok ? await eventResponse.json() : { name: { text: 'Unknown Event' } };
+
+          // Calculate total from costs
+          const totalAmount = order.costs?.gross?.value ? (order.costs.gross.value / 100) : 0;
+          const currency = order.costs?.gross?.currency || 'USD';
+
+          // Extract ticket info
+          const tickets = (order.attendees || []).map(att => ({
+            id: att.id,
+            name: att.profile?.name || '',
+            email: att.profile?.email || '',
+            ticketType: att.ticket_class_name || 'General',
+            checkedIn: att.checked_in || false
+          }));
+
+          // Upsert order
+          await pool.query(`
+            INSERT INTO orders (id, event_id, event_name, source, buyer_name, buyer_email, order_status, ticket_count, total_amount, currency, tickets, raw_data, updated_at)
+            VALUES ($1, $2, $3, 'eventbrite', $4, $5, $6, $7, $8, $9, $10, $11, NOW())
+            ON CONFLICT (id) DO UPDATE SET
+              order_status = $6,
+              ticket_count = $7,
+              total_amount = $8,
+              tickets = $10,
+              raw_data = $11,
+              updated_at = NOW()
+          `, [
+            order.id,
+            order.event_id,
+            event.name?.text || 'Unknown Event',
+            order.name || order.first_name + ' ' + order.last_name || '',
+            order.email || '',
+            order.status || 'placed',
+            order.attendees?.length || 1,
+            totalAmount,
+            currency,
+            JSON.stringify(tickets),
+            JSON.stringify(order)
+          ]);
+
+          // Also add attendees to tickets table
+          for (const attendee of (order.attendees || [])) {
+            const ticketId = `eb_${attendee.id}`;
+            await pool.query(`
+              INSERT INTO tickets (id, event_id, external_id, ticket_type, holder_name, holder_email, status, source, created_at)
+              VALUES ($1, $2, $3, $4, $5, $6, $7, 'eventbrite', NOW())
+              ON CONFLICT (id) DO UPDATE SET
+                holder_name = $5,
+                holder_email = $6,
+                status = $7,
+                updated_at = NOW()
+            `, [
+              ticketId,
+              order.event_id,
+              attendee.id,
+              attendee.ticket_class_name || 'General',
+              attendee.profile?.name || '',
+              attendee.profile?.email || '',
+              attendee.cancelled ? 'cancelled' : (attendee.refunded ? 'refunded' : 'valid')
+            ]);
+          }
+
+          // Log activity
+          await pool.query(`
+            INSERT INTO activity_log (action, details, guest_name, event_type)
+            VALUES ($1, $2, $3, $4)
+          `, [
+            action === 'order.placed' ? 'New ticket purchase' : 'Order updated',
+            `${order.attendees?.length || 1} ticket(s) for ${event.name?.text} - $${totalAmount} ${currency}`,
+            order.name || order.email || 'Unknown',
+            'ticket_sale'
+          ]);
+
+          // Broadcast to connected WebSocket clients
+          wss.clients.forEach((client) => {
+            if (client.readyState === 1) {
+              client.send(JSON.stringify({
+                type: 'ticket_sale',
+                data: {
+                  orderId: order.id,
+                  eventName: event.name?.text,
+                  buyerName: order.name || order.email,
+                  ticketCount: order.attendees?.length || 1,
+                  totalAmount,
+                  currency
+                }
+              }));
+            }
+          });
+
+          console.log(`Processed ${action}: Order ${order.id} with ${order.attendees?.length || 1} tickets`);
+        }
+        break;
+
+      case 'order.refunded':
+        // Update order status to refunded
+        const refundResponse = await fetch(apiUrl, {
+          headers: { 'Authorization': `Bearer ${apiKey}` }
+        });
+
+        if (refundResponse.ok) {
+          const refund = await refundResponse.json();
+          await pool.query(`
+            UPDATE orders SET order_status = 'refunded', updated_at = NOW() WHERE id = $1
+          `, [refund.id]);
+
+          // Update tickets as refunded
+          for (const attendee of (refund.attendees || [])) {
+            await pool.query(`
+              UPDATE tickets SET status = 'refunded', updated_at = NOW() WHERE external_id = $1
+            `, [attendee.id]);
+          }
+
+          console.log(`Processed refund: Order ${refund.id}`);
+        }
+        break;
+
+      case 'attendee.checked_in':
+        // Update ticket check-in status
+        const checkinResponse = await fetch(apiUrl, {
+          headers: { 'Authorization': `Bearer ${apiKey}` }
+        });
+
+        if (checkinResponse.ok) {
+          const attendee = await checkinResponse.json();
+          await pool.query(`
+            UPDATE tickets SET status = 'used', check_in_time = NOW(), updated_at = NOW() WHERE external_id = $1
+          `, [attendee.id]);
+
+          console.log(`Processed check-in: Attendee ${attendee.id}`);
+        }
+        break;
+
+      default:
+        console.log(`Unhandled Eventbrite webhook action: ${action}`);
+    }
+
+    res.status(200).json({ received: true, action });
+  } catch (error) {
+    console.error('Error processing Eventbrite webhook:', error);
+    // Always return 200 to Eventbrite so they don't retry
+    res.status(200).json({ received: true, error: error.message });
+  }
+});
+
+// POST /api/v1/integrations/eventbrite/setup-webhook - Register webhook with Eventbrite
+app.post('/api/v1/integrations/eventbrite/setup-webhook', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM integrations WHERE provider = $1', ['eventbrite']);
+    const saved = result.rows[0];
+
+    if (!saved?.api_key_encrypted || saved.status !== 'connected') {
+      return res.status(400).json({ error: 'Eventbrite not connected' });
+    }
+
+    const apiKey = decryptApiKey(saved.api_key_encrypted);
+    const webhookUrl = `${process.env.API_URL || 'https://berry-dashboard-api-production.up.railway.app'}/api/webhooks/eventbrite`;
+
+    // Get user's organizations
+    const orgResponse = await fetch('https://www.eventbriteapi.com/v3/users/me/organizations/', {
+      headers: { 'Authorization': `Bearer ${apiKey}` }
+    });
+
+    if (!orgResponse.ok) {
+      return res.status(400).json({ error: 'Failed to fetch organizations' });
+    }
+
+    const orgData = await orgResponse.json();
+    const organizations = orgData.organizations || [];
+
+    if (organizations.length === 0) {
+      return res.status(400).json({ error: 'No organizations found' });
+    }
+
+    // Create webhook for the first organization
+    const org = organizations[0];
+    const webhookResponse = await fetch(`https://www.eventbriteapi.com/v3/organizations/${org.id}/webhooks/`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        endpoint_url: webhookUrl,
+        actions: 'order.placed,order.updated,order.refunded,attendee.checked_in,attendee.checked_out'
+      })
+    });
+
+    if (!webhookResponse.ok) {
+      const errorData = await webhookResponse.json();
+      // Check if webhook already exists
+      if (errorData.error_description?.includes('already exists')) {
+        return res.json({ success: true, message: 'Webhook already configured' });
+      }
+      return res.status(400).json({ error: 'Failed to create webhook: ' + (errorData.error_description || 'Unknown error') });
+    }
+
+    const webhook = await webhookResponse.json();
+
+    // Save webhook ID
+    await pool.query(`
+      UPDATE integrations SET webhook_id = $1, updated_at = NOW() WHERE provider = 'eventbrite'
+    `, [webhook.id]);
+
+    res.json({
+      success: true,
+      message: 'Webhook configured successfully',
+      webhookId: webhook.id,
+      webhookUrl
+    });
+  } catch (error) {
+    console.error('Error setting up Eventbrite webhook:', error);
+    res.status(500).json({ error: 'Failed to setup webhook: ' + error.message });
+  }
+});
+
+// GET /api/v1/orders - Get all orders with stats
+app.get('/api/v1/orders', async (req, res) => {
+  try {
+    const { event_id, status, limit = 100, offset = 0 } = req.query;
+
+    let query = 'SELECT * FROM orders WHERE 1=1';
+    const params = [];
+    let paramIndex = 1;
+
+    if (event_id) {
+      query += ` AND event_id = $${paramIndex++}`;
+      params.push(event_id);
+    }
+
+    if (status) {
+      query += ` AND order_status = $${paramIndex++}`;
+      params.push(status);
+    }
+
+    query += ` ORDER BY created_at DESC LIMIT $${paramIndex++} OFFSET $${paramIndex++}`;
+    params.push(parseInt(limit), parseInt(offset));
+
+    const result = await pool.query(query, params);
+
+    // Get stats
+    const statsResult = await pool.query(`
+      SELECT
+        COUNT(*) as total_orders,
+        COALESCE(SUM(ticket_count), 0) as total_tickets,
+        COALESCE(SUM(total_amount), 0) as total_revenue,
+        COUNT(CASE WHEN order_status = 'placed' THEN 1 END) as active_orders,
+        COUNT(CASE WHEN order_status = 'refunded' THEN 1 END) as refunded_orders
+      FROM orders
+    `);
+
+    res.json({
+      orders: result.rows,
+      stats: statsResult.rows[0]
+    });
+  } catch (error) {
+    console.error('Error fetching orders:', error);
+    res.status(500).json({ error: 'Failed to fetch orders' });
+  }
+});
+
+// GET /api/v1/orders/stats - Get order statistics
+app.get('/api/v1/orders/stats', async (req, res) => {
+  try {
+    // Overall stats
+    const overallStats = await pool.query(`
+      SELECT
+        COUNT(*) as total_orders,
+        COALESCE(SUM(ticket_count), 0) as total_tickets,
+        COALESCE(SUM(total_amount), 0) as total_revenue,
+        COUNT(CASE WHEN order_status = 'placed' THEN 1 END) as active_orders,
+        COUNT(CASE WHEN order_status = 'refunded' THEN 1 END) as refunded_orders,
+        COUNT(CASE WHEN created_at > NOW() - INTERVAL '24 hours' THEN 1 END) as orders_today,
+        COALESCE(SUM(CASE WHEN created_at > NOW() - INTERVAL '24 hours' THEN total_amount ELSE 0 END), 0) as revenue_today
+      FROM orders
+    `);
+
+    // By event
+    const byEvent = await pool.query(`
+      SELECT
+        event_id,
+        event_name,
+        COUNT(*) as order_count,
+        SUM(ticket_count) as ticket_count,
+        SUM(total_amount) as revenue
+      FROM orders
+      GROUP BY event_id, event_name
+      ORDER BY revenue DESC
+      LIMIT 10
+    `);
+
+    // Recent orders
+    const recentOrders = await pool.query(`
+      SELECT id, event_name, buyer_name, ticket_count, total_amount, currency, order_status, created_at
+      FROM orders
+      ORDER BY created_at DESC
+      LIMIT 10
+    `);
+
+    res.json({
+      overall: overallStats.rows[0],
+      byEvent: byEvent.rows,
+      recentOrders: recentOrders.rows
+    });
+  } catch (error) {
+    console.error('Error fetching order stats:', error);
+    res.status(500).json({ error: 'Failed to fetch order stats' });
   }
 });
 

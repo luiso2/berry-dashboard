@@ -174,6 +174,31 @@ interface Ticket {
   createdAt: string;
 }
 
+interface Order {
+  id: string;
+  event_id: string;
+  event_name: string;
+  source: string;
+  buyer_name: string;
+  buyer_email: string;
+  order_status: string;
+  ticket_count: number;
+  total_amount: number;
+  currency: string;
+  tickets: { id: string; name: string; email: string; ticketType: string; checkedIn: boolean }[];
+  created_at: string;
+}
+
+interface OrderStats {
+  total_orders: number;
+  total_tickets: number;
+  total_revenue: number;
+  active_orders: number;
+  refunded_orders: number;
+  orders_today?: number;
+  revenue_today?: number;
+}
+
 interface Sponsor {
   id: string;
   companyName: string;
@@ -1069,6 +1094,10 @@ function App() {
   const [tableZone, setTableZone] = useState<'all' | 'VIP' | 'Premium' | 'Standard' | 'Lounge'>('all');
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [ticketStats, setTicketStats] = useState({ total: 0, valid: 0, used: 0, revenue: 0 });
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [orderStats, setOrderStats] = useState<OrderStats>({ total_orders: 0, total_tickets: 0, total_revenue: 0, active_orders: 0, refunded_orders: 0 });
+  const [ticketView, setTicketView] = useState<'tickets' | 'orders'>('orders');
+  const [syncingEventbrite, setSyncingEventbrite] = useState(false);
   const [sponsors, setSponsors] = useState<Sponsor[]>([]);
   const [sponsorStats, setSponsorStats] = useState({ total: 0, pending: 0, active: 0, revenue: 0 });
   const [selectedSponsor, setSelectedSponsor] = useState<Sponsor | null>(null);
@@ -1247,6 +1276,60 @@ function App() {
       console.error('Error fetching tickets:', error);
     }
   }, []);
+
+  // Fetch Orders from Eventbrite
+  const fetchOrders = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_URL}/orders`);
+      const data = await res.json();
+      setOrders(data.orders || []);
+      if (data.stats) {
+        setOrderStats({
+          total_orders: parseInt(data.stats.total_orders) || 0,
+          total_tickets: parseInt(data.stats.total_tickets) || 0,
+          total_revenue: parseFloat(data.stats.total_revenue) || 0,
+          active_orders: parseInt(data.stats.active_orders) || 0,
+          refunded_orders: parseInt(data.stats.refunded_orders) || 0,
+        });
+      }
+    } catch (error) {
+      console.error('Error fetching orders:', error);
+    }
+  }, []);
+
+  // Sync Eventbrite tickets and setup webhook
+  const syncEventbrite = async () => {
+    setSyncingEventbrite(true);
+    try {
+      // First sync events and tickets
+      const syncRes = await fetch(`${API_URL}/integrations/eventbrite/sync`, { method: 'POST' });
+      const syncData = await syncRes.json();
+
+      if (!syncRes.ok) {
+        addToast(syncData.error || 'Failed to sync Eventbrite', 'error');
+        return;
+      }
+
+      // Setup webhook for real-time updates
+      const webhookRes = await fetch(`${API_URL}/integrations/eventbrite/setup-webhook`, { method: 'POST' });
+      const webhookData = await webhookRes.json();
+
+      if (webhookRes.ok) {
+        addToast(`Synced ${syncData.eventsImported} events and ${syncData.ticketsImported} tickets. Webhooks configured for real-time updates!`, 'success');
+      } else {
+        addToast(`Synced ${syncData.eventsImported} events and ${syncData.ticketsImported} tickets. ${webhookData.message || ''}`, 'success');
+      }
+
+      // Refresh data
+      fetchTickets();
+      fetchOrders();
+    } catch (error) {
+      console.error('Error syncing Eventbrite:', error);
+      addToast('Failed to sync with Eventbrite', 'error');
+    } finally {
+      setSyncingEventbrite(false);
+    }
+  };
 
   // Fetch Integrations
   const fetchIntegrations = useCallback(async () => {
@@ -1877,7 +1960,7 @@ function App() {
   useEffect(() => {
     if (activeView === 'models') fetchModels();
     if (activeView === 'tables') fetchTables();
-    if (activeView === 'tickets') fetchTickets();
+    if (activeView === 'tickets') { fetchTickets(); fetchOrders(); }
     if (activeView === 'sponsors') fetchSponsors();
     if (activeView === 'events') fetchEvents();
     if (activeView === 'vendors') fetchVendors();
@@ -1885,7 +1968,7 @@ function App() {
     if (activeView === 'budget' && selectedEvent) fetchBudget(selectedEvent.id);
     if (activeView === 'monitoring') fetchHealthStatus();
     if (activeView === 'integrations') fetchIntegrations();
-  }, [activeView, fetchModels, fetchTables, fetchTickets, fetchSponsors, fetchEvents, fetchVendors, fetchStaff, fetchBudget, fetchHealthStatus, fetchIntegrations, selectedEvent]);
+  }, [activeView, fetchModels, fetchTables, fetchTickets, fetchOrders, fetchSponsors, fetchEvents, fetchVendors, fetchStaff, fetchBudget, fetchHealthStatus, fetchIntegrations, selectedEvent]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -3752,46 +3835,150 @@ function App() {
         {/* Tickets Page */}
         {activeView === 'tickets' && (
           <div className="page-content" style={{ padding: '32px', animation: 'fadeIn 0.3s ease' }}>
-            {/* Tickets Stats */}
+            {/* Stats - Show different stats based on view */}
             <div className="stats-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 32 }}>
               <div className="stat-card" style={{ background: '#0a0a0a', border: '1px solid #1a1a1a', borderRadius: 12, padding: 20 }}>
-                <div style={{ fontSize: 13, color: '#666', marginBottom: 4 }}>Total Tickets</div>
-                <div style={{ fontSize: 32, fontWeight: 700 }}>{ticketStats.total}</div>
+                <div style={{ fontSize: 13, color: '#666', marginBottom: 4 }}>Total Orders</div>
+                <div style={{ fontSize: 32, fontWeight: 700 }}>{orderStats.total_orders}</div>
               </div>
               <div className="stat-card" style={{ background: '#0a0a0a', border: '1px solid #22c55e40', borderRadius: 12, padding: 20 }}>
-                <div style={{ fontSize: 13, color: '#22c55e', marginBottom: 4 }}>Valid</div>
-                <div style={{ fontSize: 32, fontWeight: 700, color: '#22c55e' }}>{ticketStats.valid}</div>
-              </div>
-              <div className="stat-card" style={{ background: '#0a0a0a', border: '1px solid #fbbf2440', borderRadius: 12, padding: 20 }}>
-                <div style={{ fontSize: 13, color: '#fbbf24', marginBottom: 4 }}>Used</div>
-                <div style={{ fontSize: 32, fontWeight: 700, color: '#fbbf24' }}>{ticketStats.used}</div>
+                <div style={{ fontSize: 13, color: '#22c55e', marginBottom: 4 }}>Tickets Sold</div>
+                <div style={{ fontSize: 32, fontWeight: 700, color: '#22c55e' }}>{orderStats.total_tickets}</div>
               </div>
               <div className="stat-card" style={{ background: '#0a0a0a', border: '1px solid #d4af3740', borderRadius: 12, padding: 20 }}>
-                <div style={{ fontSize: 13, color: '#d4af37', marginBottom: 4 }}>Revenue</div>
-                <div style={{ fontSize: 32, fontWeight: 700, color: '#d4af37' }}>${ticketStats.revenue.toLocaleString()}</div>
+                <div style={{ fontSize: 13, color: '#d4af37', marginBottom: 4 }}>Total Revenue</div>
+                <div style={{ fontSize: 32, fontWeight: 700, color: '#d4af37' }}>${orderStats.total_revenue.toLocaleString()}</div>
+              </div>
+              <div className="stat-card" style={{ background: '#0a0a0a', border: '1px solid #ef444440', borderRadius: 12, padding: 20 }}>
+                <div style={{ fontSize: 13, color: '#ef4444', marginBottom: 4 }}>Refunded</div>
+                <div style={{ fontSize: 32, fontWeight: 700, color: '#ef4444' }}>{orderStats.refunded_orders}</div>
               </div>
             </div>
 
-            {/* Import Button */}
-            <div style={{ marginBottom: 24 }}>
+            {/* Action Buttons */}
+            <div style={{ display: 'flex', gap: 12, marginBottom: 24, flexWrap: 'wrap' }}>
               <button
-                onClick={() => addToast('CSV import coming soon!', 'info')}
+                onClick={syncEventbrite}
+                disabled={syncingEventbrite}
                 style={{
-                  background: '#d4af37',
+                  background: syncingEventbrite ? '#333' : '#F6682F',
                   border: 'none',
-                  color: '#000',
+                  color: '#fff',
                   padding: '12px 24px',
                   borderRadius: 8,
                   fontSize: 14,
                   fontWeight: 600,
-                  cursor: 'pointer'
+                  cursor: syncingEventbrite ? 'not-allowed' : 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8
                 }}
               >
-                Import Tickets (CSV)
+                {syncingEventbrite ? '⟳ Syncing...' : '🎪 Sync from Eventbrite'}
               </button>
+              <div style={{ display: 'flex', background: '#1a1a1a', borderRadius: 8, overflow: 'hidden' }}>
+                <button
+                  onClick={() => setTicketView('orders')}
+                  style={{
+                    background: ticketView === 'orders' ? '#333' : 'transparent',
+                    border: 'none',
+                    color: ticketView === 'orders' ? '#fff' : '#888',
+                    padding: '12px 20px',
+                    fontSize: 14,
+                    fontWeight: 500,
+                    cursor: 'pointer'
+                  }}
+                >
+                  Orders ({orders.length})
+                </button>
+                <button
+                  onClick={() => setTicketView('tickets')}
+                  style={{
+                    background: ticketView === 'tickets' ? '#333' : 'transparent',
+                    border: 'none',
+                    color: ticketView === 'tickets' ? '#fff' : '#888',
+                    padding: '12px 20px',
+                    fontSize: 14,
+                    fontWeight: 500,
+                    cursor: 'pointer'
+                  }}
+                >
+                  Tickets ({tickets.length})
+                </button>
+              </div>
             </div>
 
+            {/* Orders List */}
+            {ticketView === 'orders' && (
+              <div style={{ background: '#0a0a0a', borderRadius: 12, border: '1px solid #1a1a1a', overflow: 'hidden' }}>
+                <div style={{ padding: '16px 20px', borderBottom: '1px solid #1a1a1a', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: 15, fontWeight: 600 }}>Recent Orders</span>
+                  <span style={{ fontSize: 14, color: '#666' }}>{orders.length} orders</span>
+                </div>
+                {orders.map((order, idx) => (
+                  <div
+                    key={order.id}
+                    style={{
+                      padding: '16px 20px',
+                      borderBottom: '1px solid #1a1a1a',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      animation: `fadeIn 0.2s ease ${idx * 0.02}s both`,
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                      <div style={{
+                        width: 48,
+                        height: 48,
+                        borderRadius: 12,
+                        background: order.order_status === 'refunded' ? '#ef444420' : '#22c55e20',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontSize: 20,
+                        color: order.order_status === 'refunded' ? '#ef4444' : '#22c55e',
+                      }}>
+                        {order.order_status === 'refunded' ? '↩' : '🎫'}
+                      </div>
+                      <div>
+                        <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 2 }}>{order.buyer_name || order.buyer_email || 'Unknown Buyer'}</div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                          <span style={{ fontSize: 14, color: '#888' }}>{order.event_name}</span>
+                          <span style={{ fontSize: 13, color: '#666' }}>{order.ticket_count} ticket{order.ticket_count !== 1 ? 's' : ''}</span>
+                        </div>
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                      <div style={{ textAlign: 'right' }}>
+                        <div style={{ fontSize: 16, fontWeight: 600, color: '#d4af37' }}>${order.total_amount.toFixed(2)}</div>
+                        <div style={{ fontSize: 12, color: '#666' }}>{new Date(order.created_at).toLocaleDateString()}</div>
+                      </div>
+                      <span style={{
+                        background: order.order_status === 'refunded' ? '#ef444420' : '#22c55e20',
+                        color: order.order_status === 'refunded' ? '#ef4444' : '#22c55e',
+                        padding: '4px 12px',
+                        borderRadius: 6,
+                        fontSize: 12,
+                        textTransform: 'capitalize'
+                      }}>
+                        {order.order_status}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+                {orders.length === 0 && (
+                  <div style={{ padding: 40, textAlign: 'center' }}>
+                    <div style={{ color: '#333', fontSize: 48, marginBottom: 12 }}>🎪</div>
+                    <div style={{ color: '#666', fontSize: 15 }}>No orders yet</div>
+                    <div style={{ color: '#444', fontSize: 13, marginTop: 8 }}>Connect Eventbrite in Settings → Integrations, then click "Sync from Eventbrite"</div>
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Tickets List */}
+            {ticketView === 'tickets' && (
             <div style={{ background: '#0a0a0a', borderRadius: 12, border: '1px solid #1a1a1a', overflow: 'hidden' }}>
               <div style={{ padding: '16px 20px', borderBottom: '1px solid #1a1a1a', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span style={{ fontSize: 15, fontWeight: 600 }}>Tickets</span>
@@ -3849,10 +4036,11 @@ function App() {
                 <div style={{ padding: 40, textAlign: 'center' }}>
                   <div style={{ color: '#333', fontSize: 48, marginBottom: 12 }}>🎫</div>
                   <div style={{ color: '#666', fontSize: 15 }}>No tickets imported yet</div>
-                  <div style={{ color: '#444', fontSize: 13, marginTop: 8 }}>Import tickets from Eventbrite, DICE, or CSV to track check-ins</div>
+                  <div style={{ color: '#444', fontSize: 13, marginTop: 8 }}>Sync from Eventbrite or import CSV to track check-ins</div>
                 </div>
               )}
             </div>
+            )}
           </div>
         )}
 
