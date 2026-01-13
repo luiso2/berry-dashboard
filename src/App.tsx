@@ -2856,13 +2856,6 @@ function App() {
           </div>
         </div>
 
-        <div style={{ padding: '12px', background: '#0a0a0a', borderRadius: 10, border: '1px solid #1a1a1a' }}>
-          <div style={{ fontSize: 12, color: '#666', marginBottom: 4 }}>Avg AI Score</div>
-          <div style={{ fontSize: 28, fontWeight: 700, color: getScoreColor(stats.avgScore) }}>{stats.avgScore}</div>
-          <div style={{ height: 4, background: '#1a1a1a', borderRadius: 2, marginTop: 8, overflow: 'hidden' }}>
-            <div style={{ height: '100%', width: `${stats.avgScore}%`, background: getScoreColor(stats.avgScore), borderRadius: 2 }} />
-          </div>
-        </div>
       </aside>
 
       {/* Main */}
