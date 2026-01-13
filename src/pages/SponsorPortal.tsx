@@ -238,31 +238,32 @@ function SponsorPortal() {
               color="#22c55e"
             />
             <MetricCard
-              label="Total Attendance"
+              label="Total Guests"
               value={metrics.totalAttendance.toLocaleString()}
+              subtitle="On guest lists"
               icon="◉"
               color="#3b82f6"
             />
             <MetricCard
-              label="Est. Impressions"
-              value={metrics.estimatedImpressions.toLocaleString()}
-              subtitle="Logo views"
-              icon="◎"
+              label="Investment"
+              value={`$${metrics.sponsorInvestment.toLocaleString()}`}
+              subtitle={sponsor.tierName}
+              icon="◆"
               color="#d4af37"
             />
             <MetricCard
-              label="Social Reach"
-              value={metrics.estimatedSocialReach.toLocaleString()}
-              subtitle="Est. extended reach"
+              label="Cost Per Guest"
+              value={metrics.costPerAttendee !== 'N/A' ? `$${metrics.costPerAttendee}` : 'N/A'}
+              subtitle="Per registered guest"
               icon="◐"
               color="#a855f7"
             />
           </div>
         </section>
 
-        {/* ROI Analysis */}
+        {/* Sponsorship Summary */}
         <section style={{ marginBottom: 48 }}>
-          <h2 style={{ fontSize: 18, fontWeight: 600, marginBottom: 20, color: '#888' }}>ROI Analysis</h2>
+          <h2 style={{ fontSize: 18, fontWeight: 600, marginBottom: 20, color: '#888' }}>Sponsorship Summary</h2>
           <div style={{
             background: '#111',
             borderRadius: 12,
@@ -275,41 +276,35 @@ function SponsorPortal() {
               gap: 24
             }}>
               <div>
-                <div style={{ color: '#888', fontSize: 13, marginBottom: 4 }}>Investment</div>
+                <div style={{ color: '#888', fontSize: 13, marginBottom: 4 }}>Sponsorship Tier</div>
                 <div style={{ fontSize: 28, fontWeight: 700, color: tierColor }}>
+                  {sponsor.tierName}
+                </div>
+              </div>
+              <div>
+                <div style={{ color: '#888', fontSize: 13, marginBottom: 4 }}>Total Investment</div>
+                <div style={{ fontSize: 28, fontWeight: 700 }}>
                   ${metrics.sponsorInvestment.toLocaleString()}
                 </div>
               </div>
               <div>
-                <div style={{ color: '#888', fontSize: 13, marginBottom: 4 }}>Cost Per Impression</div>
+                <div style={{ color: '#888', fontSize: 13, marginBottom: 4 }}>Events Coverage</div>
                 <div style={{ fontSize: 28, fontWeight: 700 }}>
-                  ${metrics.costPerImpression}
+                  {metrics.totalEvents}
                 </div>
                 <div style={{ fontSize: 12, color: '#666', marginTop: 4 }}>
-                  Industry avg: {metrics.industryBenchmark.avgCostPerImpression}
+                  Events with your branding
                 </div>
               </div>
               <div>
-                <div style={{ color: '#888', fontSize: 13, marginBottom: 4 }}>Cost Per Attendee</div>
+                <div style={{ color: '#888', fontSize: 13, marginBottom: 4 }}>Guest Reach</div>
                 <div style={{ fontSize: 28, fontWeight: 700 }}>
-                  ${metrics.costPerAttendee}
+                  {metrics.totalAttendance.toLocaleString()}
+                </div>
+                <div style={{ fontSize: 12, color: '#666', marginTop: 4 }}>
+                  Registered attendees
                 </div>
               </div>
-              {metrics.performanceVsIndustry && (
-                <div>
-                  <div style={{ color: '#888', fontSize: 13, marginBottom: 4 }}>vs. Industry</div>
-                  <div style={{
-                    fontSize: 28,
-                    fontWeight: 700,
-                    color: parseInt(metrics.performanceVsIndustry) > 100 ? '#22c55e' : '#ef4444'
-                  }}>
-                    {metrics.performanceVsIndustry}%
-                  </div>
-                  <div style={{ fontSize: 12, color: '#666', marginTop: 4 }}>
-                    {parseInt(metrics.performanceVsIndustry) > 100 ? 'Better than average' : 'Below average'}
-                  </div>
-                </div>
-              )}
             </div>
           </div>
         </section>
@@ -380,32 +375,6 @@ function SponsorPortal() {
           </div>
         </section>
 
-        {/* Industry Benchmarks */}
-        <section>
-          <h2 style={{ fontSize: 18, fontWeight: 600, marginBottom: 20, color: '#888' }}>Industry Benchmarks</h2>
-          <div style={{
-            background: '#111',
-            borderRadius: 12,
-            border: '1px solid #222',
-            padding: 24,
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-            gap: 24
-          }}>
-            <div>
-              <div style={{ color: '#888', fontSize: 13, marginBottom: 4 }}>Avg. Cost Per Impression</div>
-              <div style={{ fontSize: 20, fontWeight: 600 }}>{metrics.industryBenchmark.avgCostPerImpression}</div>
-            </div>
-            <div>
-              <div style={{ color: '#888', fontSize: 13, marginBottom: 4 }}>Avg. Cost Per Lead</div>
-              <div style={{ fontSize: 20, fontWeight: 600 }}>{metrics.industryBenchmark.avgCostPerLead}</div>
-            </div>
-            <div>
-              <div style={{ color: '#888', fontSize: 13, marginBottom: 4 }}>Avg. Event ROI</div>
-              <div style={{ fontSize: 20, fontWeight: 600 }}>{metrics.industryBenchmark.avgEventROI}</div>
-            </div>
-          </div>
-        </section>
       </main>
 
       {/* Footer */}
@@ -416,7 +385,7 @@ function SponsorPortal() {
         color: '#666',
         fontSize: 13
       }}>
-        <p>Powered by Berry Bly Productions</p>
+        <p>Powered by <a href="https://merktop.com" target="_blank" rel="noopener noreferrer" style={{ color: '#d4af37', textDecoration: 'none', fontWeight: 600 }}>Merktop</a></p>
         <p style={{ marginTop: 8, fontSize: 12 }}>
           Questions about your sponsorship? Contact us at sponsors@berryblyproductions.com
         </p>

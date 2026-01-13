@@ -3768,7 +3768,7 @@ app.post('/api/v1/sponsors/:id/send-portal-link', async (req, res) => {
             </p>
 
             <div style="border-top: 1px solid #eee; margin-top: 40px; padding-top: 20px; text-align: center;">
-              <p style="color: #888; font-size: 12px; margin: 0;">Berry Bly Productions</p>
+              <p style="color: #888; font-size: 12px; margin: 0;">Powered by <a href="https://merktop.com" style="color: #d4af37; text-decoration: none;">Merktop</a></p>
             </div>
           </div>
         `
