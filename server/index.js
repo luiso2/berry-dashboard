@@ -16,7 +16,7 @@ import * as XLSX from 'xlsx';
 import { parse as csvParse } from 'csv-parse/sync';
 
 // API Version - for tracking deployments
-const API_VERSION = '3.15.0-sms';
+const API_VERSION = '3.15.1-sms';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
