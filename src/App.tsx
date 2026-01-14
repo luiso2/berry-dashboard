@@ -2692,6 +2692,7 @@ function App() {
 
   const removeGuest = async (id: string) => {
     const guest = guests.find((g) => g.id === id);
+    if (!confirm(`Are you sure you want to remove ${guest?.name || 'this guest'}? This action cannot be undone.`)) return;
     try {
       await fetch(`${API_URL}${ENDPOINTS.guests}/${id}`, { method: 'DELETE' });
       setGuests((prev) => prev.filter((g) => g.id !== id));
