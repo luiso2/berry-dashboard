@@ -3784,10 +3784,10 @@ function App() {
               <CategoryCard label="Standard" value={stats.standard} color="#6b7280" onClick={() => navigateTo('guests')} />
             </div>
 
-            {/* Top Scored Guests */}
-            <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 16, color: '#888' }}>Top AI-Scored Guests</h3>
+            {/* Recent Guests */}
+            <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 16, color: '#888' }}>Recent Guests</h3>
             <div style={{ background: '#0a0a0a', borderRadius: 12, border: '1px solid #1a1a1a', overflow: 'hidden', marginBottom: 32 }}>
-              {guests.sort((a, b) => (b.aiScore || 0) - (a.aiScore || 0)).slice(0, 5).map((guest, idx) => (
+              {guests.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).slice(0, 5).map((guest, idx) => (
                 <div key={guest.id} style={{ padding: '14px 16px', borderBottom: idx < 4 ? '1px solid #1a1a1a' : 'none', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0, flex: 1 }}>
                     <div style={{ width: 28, height: 28, borderRadius: 6, background: '#1a1a1a', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, color: '#666' }}>
@@ -3804,8 +3804,8 @@ function App() {
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                     <StatusBadge category={guest.category} />
-                    <div style={{ width: 50, textAlign: 'right' }}>
-                      <span style={{ fontSize: 18, fontWeight: 700, color: getScoreColor(guest.aiScore || 0) }}>{guest.aiScore || 0}</span>
+                    <div style={{ minWidth: 100, textAlign: 'right' }}>
+                      <span style={{ fontSize: 13, fontWeight: 500, color: guest.phone ? '#22c55e' : '#666' }}>{guest.phone || 'No phone'}</span>
                     </div>
                   </div>
                 </div>
@@ -4092,10 +4092,10 @@ function App() {
                         <span style={{ color: '#ccc' }}>Strong guest list approval rate: <strong style={{ color: '#22c55e' }}>{stats.conversionRate}%</strong></span>
                       </div>
                     )}
-                    {stats.highScoreGuests > 10 && (
+                    {guests.filter(g => g.phone).length > 0 && (
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 13 }}>
-                        <span style={{ color: '#fbbf24', fontSize: 16 }}>★</span>
-                        <span style={{ color: '#ccc' }}><strong style={{ color: '#fbbf24' }}>{stats.highScoreGuests}</strong> high-value guests (AI Score 70+)</span>
+                        <span style={{ color: '#fbbf24', fontSize: 16 }}>📱</span>
+                        <span style={{ color: '#ccc' }}><strong style={{ color: '#fbbf24' }}>{guests.filter(g => g.phone).length}</strong> guests with phone numbers</span>
                       </div>
                     )}
                     {sponsorStats.active > 0 && (
@@ -4171,7 +4171,7 @@ function App() {
             <div className="stats-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, marginBottom: 32 }}>
               <MetricCard label="Conversion Rate" value={`${stats.conversionRate}%`} subtitle="Accepted / Total" color="#22c55e" />
               <MetricCard label="Email Rate" value={`${stats.emailRate}%`} subtitle="Emails Sent / Total" color="#3b82f6" />
-              <MetricCard label="High-Value Guests" value={stats.highScoreGuests} subtitle="Score >= 70" color="#fbbf24" />
+              <MetricCard label="With Phone" value={guests.filter(g => g.phone).length} subtitle="Contact available" color="#fbbf24" />
             </div>
 
             {/* Charts */}
@@ -4225,16 +4225,16 @@ function App() {
               </div>
             </div>
 
-            {/* Score Distribution */}
+            {/* Party Size Distribution */}
             <div style={{ background: '#0a0a0a', borderRadius: 12, border: '1px solid #1a1a1a', padding: 24, marginBottom: 24 }}>
-              <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 24, color: '#fff' }}>AI Score Distribution</h3>
+              <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 24, color: '#fff' }}>Party Size Distribution</h3>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', height: 150, paddingBottom: 40 }}>
                 {[
-                  { range: '0-20', count: guests.filter(g => (g.aiScore || 0) <= 20).length, color: '#ef4444' },
-                  { range: '21-40', count: guests.filter(g => (g.aiScore || 0) > 20 && (g.aiScore || 0) <= 40).length, color: '#f97316' },
-                  { range: '41-60', count: guests.filter(g => (g.aiScore || 0) > 40 && (g.aiScore || 0) <= 60).length, color: '#fbbf24' },
-                  { range: '61-80', count: guests.filter(g => (g.aiScore || 0) > 60 && (g.aiScore || 0) <= 80).length, color: '#60a5fa' },
-                  { range: '81-100', count: guests.filter(g => (g.aiScore || 0) > 80).length, color: '#22c55e' },
+                  { range: '1', count: guests.filter(g => g.partySize === 1).length, color: '#22c55e' },
+                  { range: '2', count: guests.filter(g => g.partySize === 2).length, color: '#60a5fa' },
+                  { range: '3-4', count: guests.filter(g => g.partySize >= 3 && g.partySize <= 4).length, color: '#a78bfa' },
+                  { range: '5-6', count: guests.filter(g => g.partySize >= 5 && g.partySize <= 6).length, color: '#fbbf24' },
+                  { range: '7+', count: guests.filter(g => g.partySize >= 7).length, color: '#d4af37' },
                 ].map((item, idx) => (
                   <ChartBar key={idx} value={item.count} max={stats.total || 1} label={item.range} color={item.color} />
                 ))}
@@ -10079,7 +10079,7 @@ const GuestList = ({ guests, selectedGuests, toggleSelect, selectAll, openModal,
             <th style={thStyle}>Name</th>
             <th style={thStyle}>Email</th>
             <th style={{ ...thStyle }} className="hide-tablet">Instagram</th>
-            <th style={{ ...thStyle, width: 80 }}>AI Score</th>
+            <th style={{ ...thStyle, width: 120 }}>Phone</th>
             <th style={thStyle}>Status</th>
             <th style={{ ...thStyle, width: 180 }}>Actions</th>
           </tr>
@@ -10135,8 +10135,8 @@ const GuestList = ({ guests, selectedGuests, toggleSelect, selectAll, openModal,
                   <span style={{ color: '#333' }}>—</span>
                 )}
               </td>
-              <td style={tdStyle}>
-                <ScoreBadge score={guest.aiScore || 0} getScoreColor={getScoreColor} />
+              <td style={{ ...tdStyle, fontSize: 13, color: guest.phone ? '#22c55e' : '#666' }}>
+                {guest.phone || '—'}
               </td>
               <td style={tdStyle}>
                 <StatusBadge category={guest.category} />
