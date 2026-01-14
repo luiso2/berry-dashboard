@@ -3932,9 +3932,9 @@ function App() {
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 32 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
-            <div style={{ width: 36, height: 36, background: 'linear-gradient(135deg, #fff 0%, #999 100%)', borderRadius: 8 }} />
-            <span style={{ fontSize: 18, fontWeight: 600, letterSpacing: '-0.3px' }}>{user?.name || 'Dashboard'}</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{ width: 32, height: 32, background: 'linear-gradient(135deg, #d4af37 0%, #b8972e 100%)', borderRadius: 8 }} />
+            <span style={{ fontSize: 16, fontWeight: 600, letterSpacing: '-0.3px' }}>Berry Bly</span>
           </div>
           <button
             className="mobile-menu-btn"
@@ -3988,64 +3988,35 @@ function App() {
           </div>
         </nav>
 
-        {/* User Info & Logout */}
-        {user && (
-          <div style={{ padding: '12px', borderTop: '1px solid #1a1a1a', marginBottom: 8 }}>
-            <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>{user.email}</div>
-            <div style={{ fontSize: 14, color: '#d4af37', fontWeight: 500 }}>{user.name}</div>
-          </div>
-        )}
-
-        {/* Settings Row */}
-        <div style={{ padding: '12px', borderTop: '1px solid #1a1a1a', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <button
-            onClick={() => setTheme(prev => prev === 'dark' ? 'light' : 'dark')}
-            style={{ background: 'none', border: 'none', color: '#666', cursor: 'pointer', fontSize: 14, display: 'flex', alignItems: 'center', gap: 6 }}
-          >
-            {theme === 'dark' ? '☀' : '◐'} {theme === 'dark' ? 'Light' : 'Dark'}
-          </button>
-          <button
-            onClick={() => setAutoRefresh(prev => !prev)}
-            style={{ background: autoRefresh ? '#22c55e20' : 'transparent', border: 'none', color: autoRefresh ? '#22c55e' : '#666', cursor: 'pointer', fontSize: 12, padding: '4px 8px', borderRadius: 4 }}
-          >
-            {autoRefresh ? '● Live' : '○ Paused'}
-          </button>
-        </div>
-
-        {/* Logout Button */}
-        <div style={{ padding: '12px', borderTop: '1px solid #1a1a1a' }}>
-          <button
-            onClick={handleLogout}
-            style={{
-              width: '100%',
-              background: 'rgba(239, 68, 68, 0.1)',
-              border: '1px solid rgba(239, 68, 68, 0.3)',
-              color: '#ef4444',
-              padding: '10px 16px',
-              borderRadius: 8,
-              cursor: 'pointer',
-              fontSize: 14,
-              fontWeight: 500,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: 8,
-              transition: 'all 0.2s'
-            }}
-            onMouseOver={(e) => { e.currentTarget.style.background = 'rgba(239, 68, 68, 0.2)'; }}
-            onMouseOut={(e) => { e.currentTarget.style.background = 'rgba(239, 68, 68, 0.1)'; }}
-          >
-            <span>↩</span> Logout
-          </button>
-        </div>
-
-        <div style={{ padding: '12px', borderTop: '1px solid #1a1a1a' }}>
-          <div style={{ fontSize: 11, color: '#666', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 8 }}>Guest Categories</div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
-            <span style={{ color: '#a78bfa' }}>VIP: {stats.vip}</span>
-            <span style={{ color: '#60a5fa' }}>Priority: {stats.priority}</span>
-            <span style={{ color: '#6b7280' }}>Std: {stats.standard}</span>
-          </div>
+        {/* Minimal Footer - Resend Style */}
+        <div style={{ padding: '16px 12px', marginTop: 'auto' }}>
+          {user && (
+            <button
+              onClick={handleLogout}
+              style={{
+                width: '100%',
+                background: 'transparent',
+                border: 'none',
+                color: '#666',
+                padding: '10px 12px',
+                borderRadius: 8,
+                cursor: 'pointer',
+                fontSize: 13,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 10,
+                transition: 'all 0.15s'
+              }}
+              onMouseOver={(e) => { e.currentTarget.style.background = '#1a1a1a'; e.currentTarget.style.color = '#fff'; }}
+              onMouseOut={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#666'; }}
+            >
+              <div style={{ width: 28, height: 28, borderRadius: 6, background: '#d4af37', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, color: '#000', fontWeight: 600 }}>
+                {user.name?.charAt(0).toUpperCase() || 'U'}
+              </div>
+              <span style={{ flex: 1, textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{user.name}</span>
+              <span style={{ fontSize: 16, opacity: 0.5 }}>↩</span>
+            </button>
+          )}
         </div>
 
       </aside>
