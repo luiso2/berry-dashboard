@@ -6498,13 +6498,16 @@ app.post('/api/v1/gpt/sms', async (req, res) => {
     return res.status(401).json({ error: 'Authentication required' });
   }
 
-  const { action, guestId, eventId, data } = req.body;
+  // Extract known fields and treat rest as potential flat data
+  const { action, guestId, eventId, data, ...flatFields } = req.body;
+  // Merge data object with flat fields (flat fields take precedence for backwards compatibility)
+  const mergedData = { ...(data || {}), ...flatFields };
 
   try {
     switch (action) {
       case 'send': {
-        // Send SMS to a specific phone number
-        const { to, message } = data || {};
+        // Send SMS to a specific phone number - supports both { data: { to, message } } and flat { to, message }
+        const { to, message } = mergedData;
         if (!to || !message) {
           return res.status(400).json({ error: 'Missing required fields: to, message' });
         }
@@ -6521,7 +6524,7 @@ app.post('/api/v1/gpt/sms', async (req, res) => {
         if (!guestId) {
           return res.status(400).json({ error: 'Missing guestId' });
         }
-        const { message } = data || {};
+        const { message } = mergedData;
         if (!message) {
           return res.status(400).json({ error: 'Missing message' });
         }
@@ -6554,7 +6557,7 @@ app.post('/api/v1/gpt/sms', async (req, res) => {
         if (!eventId) {
           return res.status(400).json({ error: 'Missing eventId' });
         }
-        const { message } = data || {};
+        const { message } = mergedData;
         if (!message) {
           return res.status(400).json({ error: 'Missing message' });
         }
