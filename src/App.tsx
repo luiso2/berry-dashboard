@@ -1197,7 +1197,7 @@ function App() {
   const [reminderModal, setReminderModal] = useState<{ show: boolean; guests: Guest[] }>({ show: false, guests: [] });
   const [reminderData, setReminderData] = useState({ eventName: '', eventDate: '', eventTime: '', eventVenue: '', customMessage: '' });
   const [sending, setSending] = useState(false);
-  const [activeView, setActiveView] = useState<ViewType>('overview');
+  const [activeView, setActiveView] = useState<ViewType>('analytics');
   const [guestTab, setGuestTab] = useState<'pending' | 'all'>('pending');
   const [formData, setFormData] = useState({ name: '', email: '', phone: '', instagram: '', partySize: 1, eventDate: '', notes: '' });
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -1364,17 +1364,7 @@ function App() {
   const [isLoadingHealth, setIsLoadingHealth] = useState(false);
   const [lastHealthCheck, setLastHealthCheck] = useState<string | null>(null);
 
-  // Collapsible menu state
-  const [expandedMenus, setExpandedMenus] = useState<Set<string>>(new Set(['main', 'intelligence']));
-  const toggleMenu = (menu: string) => {
-    setExpandedMenus(prev => {
-      const next = new Set(prev);
-      if (next.has(menu)) next.delete(menu);
-      else next.add(menu);
-      return next;
-    });
-  };
-
+  // Toast notifications
   const addToast = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
     const id = Date.now().toString();
     setToasts((prev) => [...prev, { id, message, type }]);
@@ -3426,71 +3416,39 @@ function App() {
           </button>
         </div>
 
-        <nav style={{ flex: 1, overflowY: 'auto' }}>
-          {/* HOME */}
-          <CollapsibleMenu
-            title="Home"
-            expanded={expandedMenus.has('home')}
-            onToggle={() => toggleMenu('home')}
-          >
-            <NavItem label="Overview" active={activeView === 'overview'} icon="◈" onClick={() => navigateTo('overview')} />
-            <NavItem label="Analytics" active={activeView === 'analytics'} icon="◐" onClick={() => navigateTo('analytics')} />
-          </CollapsibleMenu>
+        <nav style={{ flex: 1, overflowY: 'auto', padding: '8px 0' }}>
+          {/* SIMPLE RESEND-STYLE NAVIGATION */}
+          <div style={{ padding: '0 12px' }}>
+            {/* Main Section Label */}
+            <div style={{ fontSize: 10, fontWeight: 600, color: '#555', textTransform: 'uppercase', letterSpacing: '0.5px', padding: '16px 8px 8px', marginTop: 8 }}>
+              Main
+            </div>
+            <NavItem label="Dashboard" active={activeView === 'analytics'} icon="📊" onClick={() => navigateTo('analytics')} />
+            <NavItem label="Events" active={activeView === 'events'} icon="📅" count={eventStats.total} onClick={() => navigateTo('events')} />
+            <NavItem label="Guest Lists" active={activeView === 'guests'} icon="👥" count={stats.total} onClick={() => navigateTo('guests')} />
 
-          {/* GUESTS */}
-          <CollapsibleMenu
-            title="Guests"
-            expanded={expandedMenus.has('guests')}
-            onToggle={() => toggleMenu('guests')}
-            count={stats.total}
-          >
-            <NavItem label="All Guests" active={activeView === 'guests'} icon="◉" count={stats.total} onClick={() => navigateTo('guests')} />
+            {/* Revenue Section Label */}
+            <div style={{ fontSize: 10, fontWeight: 600, color: '#555', textTransform: 'uppercase', letterSpacing: '0.5px', padding: '16px 8px 8px', marginTop: 8 }}>
+              Revenue
+            </div>
+            <NavItem label="Tickets" active={activeView === 'tickets'} icon="🎫" count={ticketStats.total} onClick={() => navigateTo('tickets')} />
+            <NavItem label="Tables" active={activeView === 'tables'} icon="🪑" count={tableStats.total} onClick={() => navigateTo('tables')} />
+            <NavItem label="Sponsors" active={activeView === 'sponsors'} icon="💎" count={sponsorStats.total} onClick={() => navigateTo('sponsors')} />
+
+            {/* Operations Section Label */}
+            <div style={{ fontSize: 10, fontWeight: 600, color: '#555', textTransform: 'uppercase', letterSpacing: '0.5px', padding: '16px 8px 8px', marginTop: 8 }}>
+              Operations
+            </div>
             <NavItem label="Check-In" active={activeView === 'checkin'} icon="✓" count={stats.checkedIn} onClick={() => navigateTo('checkin')} />
             <NavItem label="Emails" active={activeView === 'emails'} icon="✉" count={stats.emailsSent} onClick={() => navigateTo('emails')} />
-            <NavItem label="Automation" active={activeView === 'automation'} icon="⚡" count={scheduledEmails.filter(e => e.status === 'pending').length} onClick={() => navigateTo('automation')} />
-          </CollapsibleMenu>
+            <NavItem label="Staff" active={activeView === 'staff'} icon="🧑‍💼" count={staffStats.total} onClick={() => navigateTo('staff')} />
 
-          {/* EVENTS */}
-          <CollapsibleMenu
-            title="Events"
-            expanded={expandedMenus.has('events')}
-            onToggle={() => toggleMenu('events')}
-            count={eventStats.total}
-          >
-            <NavItem label="All Events" active={activeView === 'events'} icon="📅" count={eventStats.total} onClick={() => navigateTo('events')} />
-            <NavItem label="Tickets" active={activeView === 'tickets'} icon="🎫" count={ticketStats.total} onClick={() => navigateTo('tickets')} />
-            <NavItem label="Tables" active={activeView === 'tables'} icon="▣" count={tableStats.total} onClick={() => navigateTo('tables')} />
-          </CollapsibleMenu>
-
-          {/* BUSINESS */}
-          <CollapsibleMenu
-            title="Business"
-            expanded={expandedMenus.has('business')}
-            onToggle={() => toggleMenu('business')}
-            count={sponsorStats.total + vendors.length}
-          >
-            <NavItem label="Sponsors" active={activeView === 'sponsors'} icon="◆" count={sponsorStats.total} onClick={() => navigateTo('sponsors')} />
-            <NavItem label="Promoters" active={activeView === 'promoters'} icon="📣" count={promoterStats.total} onClick={() => navigateTo('promoters')} />
-            <NavItem label="Vendors" active={activeView === 'vendors'} icon="🏢" count={vendors.length} onClick={() => navigateTo('vendors')} />
-            <NavItem label="Staff" active={activeView === 'staff'} icon="👥" count={staffStats.total} onClick={() => navigateTo('staff')} />
-            <NavItem label="Budget" active={activeView === 'budget'} icon="💰" onClick={() => navigateTo('budget')} />
-          </CollapsibleMenu>
-
-          {/* TALENT */}
-          <CollapsibleMenu
-            title="Talent"
-            expanded={expandedMenus.has('talent')}
-            onToggle={() => toggleMenu('talent')}
-            count={modelStats.total}
-          >
-            <NavItem label="Models" active={activeView === 'models'} icon="🔥" count={modelStats.total} onClick={() => navigateTo('models')} />
-          </CollapsibleMenu>
-
-          {/* SETTINGS */}
-          <CollapsibleMenu title="Settings" expanded={expandedMenus.has('settings')} onToggle={() => toggleMenu('settings')}>
+            {/* Settings Section Label */}
+            <div style={{ fontSize: 10, fontWeight: 600, color: '#555', textTransform: 'uppercase', letterSpacing: '0.5px', padding: '16px 8px 8px', marginTop: 8 }}>
+              Settings
+            </div>
             <NavItem label="Integrations" active={activeView === 'integrations'} icon="🔌" count={integrations.filter(i => i.status === 'connected').length} onClick={() => navigateTo('integrations')} />
-            <NavItem label="Monitoring" active={activeView === 'monitoring'} icon="📊" onClick={() => navigateTo('monitoring')} />
-          </CollapsibleMenu>
+          </div>
         </nav>
 
         {/* User Info & Logout */}
@@ -9700,71 +9658,6 @@ function App() {
 }
 
 // Components
-const CollapsibleMenu = ({
-  title,
-  expanded,
-  onToggle,
-  children,
-  count
-}: {
-  title: string;
-  expanded: boolean;
-  onToggle: () => void;
-  children: React.ReactNode;
-  count?: number;
-}) => (
-  <div style={{ marginBottom: 4 }}>
-    <div
-      onClick={onToggle}
-      className="nav-hover"
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        padding: '10px 12px',
-        borderRadius: 8,
-        cursor: 'pointer',
-        background: expanded ? 'rgba(255,255,255,0.02)' : 'transparent',
-      }}
-    >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <span style={{
-          fontSize: 12,
-          color: '#666',
-          transition: 'transform 0.2s',
-          transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)',
-        }}>▶</span>
-        <span style={{
-          fontSize: 12,
-          color: expanded ? '#888' : '#555',
-          textTransform: 'uppercase',
-          letterSpacing: '1px',
-          fontWeight: 600,
-        }}>{title}</span>
-      </div>
-      {count !== undefined && count > 0 && (
-        <span style={{
-          fontSize: 11,
-          color: '#555',
-          background: '#1a1a1a',
-          padding: '2px 6px',
-          borderRadius: 4,
-        }}>
-          {count}
-        </span>
-      )}
-    </div>
-    <div style={{
-      overflow: 'hidden',
-      maxHeight: expanded ? '500px' : '0',
-      transition: 'max-height 0.3s ease-in-out',
-      paddingLeft: 8,
-    }}>
-      {children}
-    </div>
-  </div>
-);
-
 const NavItem = ({ label, active, icon, count, onClick }: { label: string; active: boolean; icon: string; count?: number; onClick: () => void }) => (
   <div
     onClick={onClick}
