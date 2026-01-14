@@ -3563,6 +3563,209 @@ app.post('/api/v1/guest-lists/:id/send-invitation', async (req, res) => {
   }
 });
 
+// POST /api/v1/guest-lists/:id/send-reminder - Send event reminder email (day before event)
+app.post('/api/v1/guest-lists/:id/send-reminder', async (req, res) => {
+  const { id } = req.params;
+  const { eventName, eventDate, eventTime, eventVenue, customMessage } = req.body;
+
+  try {
+    const result = await pool.query('SELECT * FROM guest_lists WHERE id = $1', [id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Not Found', message: 'Guest not found' });
+    }
+
+    const guestRow = result.rows[0];
+    const guest = {
+      id: guestRow.id,
+      name: guestRow.name,
+      email: guestRow.email,
+      partySize: guestRow.number_of_guests || 1,
+    };
+
+    console.log(`📅 Sending event reminder to: ${guest.name} (${guest.email})`);
+
+    const emailHtml = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      </head>
+      <body style="margin: 0; padding: 0; background-color: #0a0a0a; font-family: Georgia, serif;">
+        <div style="max-width: 600px; margin: 0 auto; padding: 40px 20px;">
+          <div style="text-align: center; margin-bottom: 40px;">
+            <h1 style="color: #d4af37; font-size: 32px; margin: 0;">Berry Bly</h1>
+            <p style="color: #666; font-size: 12px; text-transform: uppercase; letter-spacing: 3px; margin-top: 8px;">Event Reminder</p>
+          </div>
+          <div style="background: linear-gradient(180deg, rgba(212, 175, 55, 0.1) 0%, transparent 100%); border: 1px solid rgba(212, 175, 55, 0.3); border-radius: 16px; padding: 40px; margin-bottom: 30px;">
+            <h2 style="color: #ffffff; font-size: 24px; margin: 0 0 20px 0;">Hi ${guest.name}!</h2>
+            <p style="color: #cccccc; font-size: 16px; line-height: 1.8; margin: 0 0 20px 0;">
+              This is a friendly reminder that <strong style="color: #d4af37;">${eventName || 'our exclusive event'}</strong> is coming up soon!
+            </p>
+            ${customMessage ? `
+            <div style="background: rgba(255,255,255,0.05); border-left: 3px solid #d4af37; padding: 20px; margin: 20px 0; border-radius: 0 8px 8px 0;">
+              <p style="color: #ffffff; font-size: 16px; line-height: 1.6; margin: 0;">${customMessage}</p>
+            </div>
+            ` : ''}
+            <div style="margin-top: 30px; padding-top: 30px; border-top: 1px solid rgba(255,255,255,0.1);">
+              <h3 style="color: #d4af37; font-size: 14px; text-transform: uppercase; letter-spacing: 2px; margin: 0 0 20px 0;">Event Details</h3>
+              <table style="width: 100%; color: #999;">
+                ${eventDate ? `
+                <tr>
+                  <td style="padding: 8px 0; color: #666;">📅 Date</td>
+                  <td style="padding: 8px 0; color: #ffffff; text-align: right;">${eventDate}</td>
+                </tr>
+                ` : ''}
+                ${eventTime ? `
+                <tr>
+                  <td style="padding: 8px 0; color: #666;">🕐 Time</td>
+                  <td style="padding: 8px 0; color: #ffffff; text-align: right;">${eventTime}</td>
+                </tr>
+                ` : ''}
+                ${eventVenue ? `
+                <tr>
+                  <td style="padding: 8px 0; color: #666;">📍 Venue</td>
+                  <td style="padding: 8px 0; color: #ffffff; text-align: right;">${eventVenue}</td>
+                </tr>
+                ` : ''}
+                <tr>
+                  <td style="padding: 8px 0; color: #666;">👥 Party Size</td>
+                  <td style="padding: 8px 0; color: #d4af37; text-align: right;">${guest.partySize} ${guest.partySize > 1 ? 'guests' : 'guest'}</td>
+                </tr>
+              </table>
+            </div>
+          </div>
+          <div style="text-align: center; color: #666; font-size: 12px;">
+            <p style="margin: 0 0 10px 0;">We can't wait to see you there!</p>
+            <p style="margin: 0; color: #444;">Berry Bly Events. All rights reserved.</p>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+
+    const { data: emailData, error: emailError } = await resend.emails.send({
+      from: EMAIL_CONFIG.from,
+      to: guest.email,
+      replyTo: EMAIL_CONFIG.replyTo,
+      subject: `Reminder: ${eventName || 'Event'} is Tomorrow! - Berry Bly`,
+      html: emailHtml,
+    });
+
+    if (emailError) {
+      console.error('Resend error:', emailError);
+      return res.status(500).json({ error: 'Failed to send reminder', details: emailError.message });
+    }
+
+    console.log(`✅ Reminder sent to ${guest.email} - Email ID: ${emailData?.id}`);
+
+    await pool.query(
+      `UPDATE guest_lists SET notes = COALESCE(notes, '') || $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
+      [`\n📅 Reminder sent: ${new Date().toISOString()}`, id]
+    );
+
+    res.json({
+      success: true,
+      emailId: emailData?.id,
+      guest: { id: guest.id, name: guest.name, email: guest.email }
+    });
+
+  } catch (error) {
+    console.error('Send reminder error:', error);
+    res.status(500).json({ error: 'Failed to send reminder', details: error.message });
+  }
+});
+
+// POST /api/v1/guest-lists/bulk-reminder - Send reminders to multiple guests
+app.post('/api/v1/guest-lists/bulk-reminder', async (req, res) => {
+  const { guestIds, eventName, eventDate, eventTime, eventVenue, customMessage } = req.body;
+
+  if (!guestIds || !Array.isArray(guestIds) || guestIds.length === 0) {
+    return res.status(400).json({ error: 'guestIds array is required' });
+  }
+
+  const results = [];
+  const errors = [];
+
+  for (const id of guestIds) {
+    try {
+      const result = await pool.query('SELECT * FROM guest_lists WHERE id = $1', [id]);
+      if (result.rows.length === 0) {
+        errors.push({ id, error: 'Guest not found' });
+        continue;
+      }
+
+      const guestRow = result.rows[0];
+      const guest = {
+        id: guestRow.id,
+        name: guestRow.name,
+        email: guestRow.email,
+        partySize: guestRow.number_of_guests || 1,
+      };
+
+      const emailHtml = `
+        <!DOCTYPE html>
+        <html>
+        <body style="margin: 0; padding: 0; background-color: #0a0a0a; font-family: Georgia, serif;">
+          <div style="max-width: 600px; margin: 0 auto; padding: 40px 20px;">
+            <div style="text-align: center; margin-bottom: 40px;">
+              <h1 style="color: #d4af37; font-size: 32px; margin: 0;">Berry Bly</h1>
+              <p style="color: #666; font-size: 12px; text-transform: uppercase; letter-spacing: 3px; margin-top: 8px;">Event Reminder</p>
+            </div>
+            <div style="background: linear-gradient(180deg, rgba(212, 175, 55, 0.1) 0%, transparent 100%); border: 1px solid rgba(212, 175, 55, 0.3); border-radius: 16px; padding: 40px;">
+              <h2 style="color: #ffffff; font-size: 24px; margin: 0 0 20px 0;">Hi ${guest.name}!</h2>
+              <p style="color: #cccccc; font-size: 16px; line-height: 1.8;">
+                This is a friendly reminder that <strong style="color: #d4af37;">${eventName || 'our exclusive event'}</strong> is coming up soon!
+              </p>
+              ${customMessage ? `<p style="color: #ffffff; margin-top: 20px;">${customMessage}</p>` : ''}
+              <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.1);">
+                ${eventDate ? `<p style="color: #999; margin: 8px 0;">📅 ${eventDate}</p>` : ''}
+                ${eventTime ? `<p style="color: #999; margin: 8px 0;">🕐 ${eventTime}</p>` : ''}
+                ${eventVenue ? `<p style="color: #999; margin: 8px 0;">📍 ${eventVenue}</p>` : ''}
+                <p style="color: #d4af37; margin: 8px 0;">👥 Party of ${guest.partySize}</p>
+              </div>
+            </div>
+            <p style="text-align: center; color: #666; font-size: 12px; margin-top: 30px;">We can't wait to see you there!</p>
+          </div>
+        </body>
+        </html>
+      `;
+
+      const { data, error } = await resend.emails.send({
+        from: EMAIL_CONFIG.from,
+        to: guest.email,
+        replyTo: EMAIL_CONFIG.replyTo,
+        subject: `Reminder: ${eventName || 'Event'} is Tomorrow! - Berry Bly`,
+        html: emailHtml,
+      });
+
+      if (error) {
+        errors.push({ id, email: guest.email, error: error.message });
+        continue;
+      }
+
+      await pool.query(
+        `UPDATE guest_lists SET notes = COALESCE(notes, '') || $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
+        [`\n📅 Reminder sent: ${new Date().toISOString()}`, id]
+      );
+
+      results.push({ id, email: guest.email, emailId: data?.id, name: guest.name });
+      console.log(`📅 Bulk reminder: ${guest.name} (${guest.email})`);
+    } catch (error) {
+      errors.push({ id, error: error.message });
+    }
+  }
+
+  res.json({
+    success: true,
+    sent: results.length,
+    failed: errors.length,
+    results,
+    errors: errors.length > 0 ? errors : undefined,
+  });
+});
+
 // POST /api/v1/guest-lists/bulk-send - Send invitations to multiple guests (LOCAL - uses guest_lists table)
 app.post('/api/v1/guest-lists/bulk-send', async (req, res) => {
   const { guestIds, category, customMessages } = req.body;

@@ -1087,6 +1087,8 @@ function App() {
   const [selectedGuests, setSelectedGuests] = useState<Set<string>>(new Set());
   const [confirmation, setConfirmation] = useState<ConfirmationModal>({ show: false, guests: [], category: null, emailOnly: false });
   const [customMessage, setCustomMessage] = useState('');
+  const [reminderModal, setReminderModal] = useState<{ show: boolean; guests: Guest[] }>({ show: false, guests: [] });
+  const [reminderData, setReminderData] = useState({ eventName: '', eventDate: '', eventTime: '', eventVenue: '', customMessage: '' });
   const [sending, setSending] = useState(false);
   const [activeView, setActiveView] = useState<ViewType>('overview');
   const [guestTab, setGuestTab] = useState<'pending' | 'all'>('pending');
@@ -2702,6 +2704,71 @@ function App() {
     }
   };
 
+  // Reminder functions
+  const openReminderModal = (guestList: Guest[]) => {
+    setReminderModal({ show: true, guests: guestList });
+    setReminderData({ eventName: '', eventDate: '', eventTime: '', eventVenue: '', customMessage: '' });
+  };
+
+  const handleBulkReminder = () => {
+    const list = guests.filter((g) => selectedGuests.has(g.id));
+    openReminderModal(list);
+  };
+
+  const sendReminders = async () => {
+    if (!reminderModal.guests.length) return;
+    if (!reminderData.eventName || !reminderData.eventDate) {
+      addToast('Event name and date are required', 'error');
+      return;
+    }
+    setSending(true);
+
+    try {
+      if (reminderModal.guests.length === 1) {
+        // Single reminder
+        const guest = reminderModal.guests[0];
+        const response = await fetch(`${API_URL}${ENDPOINTS.guests}/${guest.id}/send-reminder`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(reminderData),
+        });
+
+        if (response.ok) {
+          addToast(`Reminder sent to ${guest.name}!`, 'success');
+        } else {
+          addToast('Failed to send reminder', 'error');
+        }
+      } else {
+        // Bulk reminders
+        const guestIds = reminderModal.guests.map((g) => g.id);
+        const response = await fetch(`${API_URL}${ENDPOINTS.guests}/bulk-reminder`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ guestIds, ...reminderData }),
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          addToast(`${data.successCount} reminder${data.successCount !== 1 ? 's' : ''} sent!`, 'success');
+          if (data.failedCount > 0) {
+            addToast(`${data.failedCount} failed to send`, 'error');
+          }
+        } else {
+          addToast('Failed to send reminders', 'error');
+        }
+      }
+
+      setSelectedGuests(new Set());
+      setReminderModal({ show: false, guests: [] });
+      setReminderData({ eventName: '', eventDate: '', eventTime: '', eventVenue: '', customMessage: '' });
+    } catch (e) {
+      console.error(e);
+      addToast('Failed to send reminders', 'error');
+    } finally {
+      setSending(false);
+    }
+  };
+
   const addGuest = async () => {
     if (!formData.name || !formData.email) {
       addToast('Name and email are required', 'error');
@@ -3593,6 +3660,7 @@ function App() {
                     {selectedGuests.size} selected
                   </span>
                   <ActionBtn onClick={() => handleBulkAction(null, true)} color="#22c55e" label="✉" />
+                  <ActionBtn onClick={handleBulkReminder} color="#f59e0b" label="🔔" />
                   <ActionBtn onClick={() => handleBulkAction('A')} color="#a78bfa" label="VIP" />
                   <ActionBtn onClick={() => handleBulkAction('B')} color="#60a5fa" label="Pri" />
                   <ActionBtn onClick={() => handleBulkAction('C')} color="#6b7280" label="Std" />
@@ -3609,6 +3677,7 @@ function App() {
               showActions={guestTab === 'pending'}
               setShowForm={setShowForm}
               getScoreColor={getScoreColor}
+              openReminderModal={openReminderModal}
             />
           </>
         )}
@@ -3626,6 +3695,7 @@ function App() {
                     {selectedGuests.size} selected
                   </span>
                   <ActionBtn onClick={() => handleBulkAction(null, true)} color="#22c55e" label="↻ Resend" />
+                  <ActionBtn onClick={handleBulkReminder} color="#f59e0b" label="🔔 Reminder" />
                 </div>
               )}
             </div>
@@ -7136,6 +7206,235 @@ function App() {
         </div>
       )}
 
+      {/* Event Reminder Modal */}
+      {reminderModal.show && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,0.9)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 200,
+            animation: 'fadeIn 0.2s ease',
+            padding: 16,
+          }}
+          onClick={() => setReminderModal({ show: false, guests: [] })}
+        >
+          <div
+            className="modal-content"
+            style={{
+              background: '#0a0a0a',
+              border: '1px solid #1a1a1a',
+              borderRadius: 16,
+              width: '100%',
+              maxWidth: 520,
+              padding: 24,
+              animation: 'slideUp 0.3s ease',
+              boxShadow: '0 20px 60px rgba(0,0,0,0.5)',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
+              <div>
+                <h2 style={{ margin: 0, fontSize: 20, fontWeight: 600 }}>
+                  🔔 Send Event Reminder
+                </h2>
+                <p style={{ margin: '6px 0 0', fontSize: 15, color: '#666' }}>
+                  {reminderModal.guests.length === 1 ? reminderModal.guests[0].name : `${reminderModal.guests.length} guests selected`}
+                </p>
+              </div>
+              <button
+                onClick={() => setReminderModal({ show: false, guests: [] })}
+                style={{
+                  background: '#1a1a1a',
+                  border: 'none',
+                  color: '#888',
+                  fontSize: 18,
+                  cursor: 'pointer',
+                  width: 32,
+                  height: 32,
+                  borderRadius: 8,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                ×
+              </button>
+            </div>
+
+            <div style={{ background: '#111', borderRadius: 10, padding: 4, marginBottom: 16, maxHeight: 100, overflow: 'auto' }}>
+              {reminderModal.guests.slice(0, 5).map((g) => (
+                <div
+                  key={g.id}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    padding: '8px 12px',
+                    borderRadius: 8,
+                    gap: 10,
+                  }}
+                >
+                  <div style={{
+                    width: 28,
+                    height: 28,
+                    borderRadius: 6,
+                    background: '#1a1a1a',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: 13,
+                    color: '#666',
+                  }}>
+                    {g.name.charAt(0)}
+                  </div>
+                  <span style={{ fontSize: 14 }}>{g.name}</span>
+                </div>
+              ))}
+              {reminderModal.guests.length > 5 && (
+                <div style={{ fontSize: 13, color: '#666', padding: '8px 12px' }}>
+                  +{reminderModal.guests.length - 5} more guests...
+                </div>
+              )}
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
+              <div>
+                <label style={{ display: 'block', fontSize: 13, color: '#666', marginBottom: 6, fontWeight: 500 }}>Event Name *</label>
+                <input
+                  value={reminderData.eventName}
+                  onChange={(e) => setReminderData(prev => ({ ...prev, eventName: e.target.value }))}
+                  placeholder="e.g. VIP Night"
+                  className="input-focus"
+                  style={{
+                    width: '100%',
+                    background: '#111',
+                    border: '1px solid #222',
+                    borderRadius: 8,
+                    padding: 10,
+                    color: '#fff',
+                    fontSize: 14,
+                    outline: 'none',
+                  }}
+                />
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: 13, color: '#666', marginBottom: 6, fontWeight: 500 }}>Event Date *</label>
+                <input
+                  type="date"
+                  value={reminderData.eventDate}
+                  onChange={(e) => setReminderData(prev => ({ ...prev, eventDate: e.target.value }))}
+                  className="input-focus"
+                  style={{
+                    width: '100%',
+                    background: '#111',
+                    border: '1px solid #222',
+                    borderRadius: 8,
+                    padding: 10,
+                    color: '#fff',
+                    fontSize: 14,
+                    outline: 'none',
+                  }}
+                />
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: 13, color: '#666', marginBottom: 6, fontWeight: 500 }}>Event Time</label>
+                <input
+                  value={reminderData.eventTime}
+                  onChange={(e) => setReminderData(prev => ({ ...prev, eventTime: e.target.value }))}
+                  placeholder="e.g. 10:00 PM"
+                  className="input-focus"
+                  style={{
+                    width: '100%',
+                    background: '#111',
+                    border: '1px solid #222',
+                    borderRadius: 8,
+                    padding: 10,
+                    color: '#fff',
+                    fontSize: 14,
+                    outline: 'none',
+                  }}
+                />
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: 13, color: '#666', marginBottom: 6, fontWeight: 500 }}>Venue</label>
+                <input
+                  value={reminderData.eventVenue}
+                  onChange={(e) => setReminderData(prev => ({ ...prev, eventVenue: e.target.value }))}
+                  placeholder="e.g. Club XYZ"
+                  className="input-focus"
+                  style={{
+                    width: '100%',
+                    background: '#111',
+                    border: '1px solid #222',
+                    borderRadius: 8,
+                    padding: 10,
+                    color: '#fff',
+                    fontSize: 14,
+                    outline: 'none',
+                  }}
+                />
+              </div>
+            </div>
+
+            <div style={{ marginBottom: 20 }}>
+              <label style={{ display: 'block', fontSize: 13, color: '#666', marginBottom: 6, fontWeight: 500 }}>Custom Message (optional)</label>
+              <textarea
+                value={reminderData.customMessage}
+                onChange={(e) => setReminderData(prev => ({ ...prev, customMessage: e.target.value }))}
+                placeholder="Add a personal message to the reminder email..."
+                className="input-focus"
+                style={{
+                  width: '100%',
+                  background: '#111',
+                  border: '1px solid #222',
+                  borderRadius: 8,
+                  padding: 10,
+                  color: '#fff',
+                  fontSize: 14,
+                  resize: 'none',
+                  height: 70,
+                  outline: 'none',
+                  lineHeight: 1.5,
+                }}
+              />
+            </div>
+
+            <button
+              onClick={sendReminders}
+              disabled={sending || !reminderData.eventName || !reminderData.eventDate}
+              className="btn-hover"
+              style={{
+                width: '100%',
+                background: sending || !reminderData.eventName || !reminderData.eventDate ? '#333' : '#f59e0b',
+                color: sending || !reminderData.eventName || !reminderData.eventDate ? '#666' : '#000',
+                border: 'none',
+                padding: '14px 20px',
+                borderRadius: 10,
+                fontSize: 16,
+                fontWeight: 600,
+                cursor: sending || !reminderData.eventName || !reminderData.eventDate ? 'not-allowed' : 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 10,
+              }}
+            >
+              {sending ? (
+                <>
+                  <div style={{ width: 18, height: 18, border: '2px solid #888', borderTopColor: '#000', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+                  Sending Reminders...
+                </>
+              ) : (
+                `🔔 Send ${reminderModal.guests.length > 1 ? reminderModal.guests.length + ' Reminders' : 'Reminder'}`
+              )}
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Add Guest Modal */}
       {showForm && (
         <div
@@ -7662,7 +7961,7 @@ const Input = ({ label, placeholder, value, onChange, type = 'text', prefix, req
 );
 
 // Guest List Component
-const GuestList = ({ guests, selectedGuests, toggleSelect, selectAll, openModal, removeGuest, showActions, setShowForm, getScoreColor }: {
+const GuestList = ({ guests, selectedGuests, toggleSelect, selectAll, openModal, removeGuest, showActions, setShowForm, getScoreColor, openReminderModal }: {
   guests: Guest[];
   selectedGuests: Set<string>;
   toggleSelect: (id: string) => void;
@@ -7672,6 +7971,7 @@ const GuestList = ({ guests, selectedGuests, toggleSelect, selectAll, openModal,
   showActions: boolean;
   setShowForm: (show: boolean) => void;
   getScoreColor: (score: number) => string;
+  openReminderModal: (guests: Guest[]) => void;
 }) => (
   <div className="page-content" style={{ padding: '0 32px 32px', animation: 'fadeIn 0.3s ease' }}>
     {/* Desktop Table */}
@@ -7757,6 +8057,7 @@ const GuestList = ({ guests, selectedGuests, toggleSelect, selectAll, openModal,
                   {showActions && (
                     <>
                       <SmallBtn onClick={() => openModal([guest], null, true)} label="✉" title="Send Email" color="#22c55e" />
+                      <SmallBtn onClick={() => openReminderModal([guest])} label="🔔" title="Send Reminder" color="#f59e0b" />
                       <SmallBtn onClick={() => openModal([guest], 'A')} label="VIP" title="Move to VIP" color="#a78bfa" />
                       <SmallBtn onClick={() => openModal([guest], 'B')} label="Pri" title="Move to Priority" color="#60a5fa" />
                       <SmallBtn onClick={() => openModal([guest], 'C')} label="Std" title="Move to Standard" />
@@ -7843,6 +8144,7 @@ const GuestList = ({ guests, selectedGuests, toggleSelect, selectAll, openModal,
                 {showActions && (
                   <>
                     <SmallBtn onClick={() => openModal([guest], null, true)} label="✉ Email" title="Send Email" color="#22c55e" />
+                    <SmallBtn onClick={() => openReminderModal([guest])} label="🔔 Reminder" title="Send Reminder" color="#f59e0b" />
                     <SmallBtn onClick={() => openModal([guest], 'A')} label="VIP" title="Move to VIP" color="#a78bfa" />
                     <SmallBtn onClick={() => openModal([guest], 'B')} label="Priority" title="Move to Priority" color="#60a5fa" />
                     <SmallBtn onClick={() => openModal([guest], 'C')} label="Standard" title="Move to Standard" />
