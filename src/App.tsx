@@ -4614,6 +4614,192 @@ function App() {
                     )}
                   </div>
                 )}
+
+                {/* Ticket Types Breakdown & Daily Sales */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.5fr', gap: 24, marginBottom: 24 }}>
+                  {/* Ticket Types Breakdown */}
+                  <div style={{ background: '#0a0a0a', borderRadius: 12, border: '1px solid #1a1a1a', padding: 24 }}>
+                    <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 20, color: '#fff', display: 'flex', alignItems: 'center', gap: 8 }}>
+                      🎟️ Ticket Types
+                    </h3>
+                    {eventbriteMetrics.events.length > 0 && eventbriteMetrics.events[0].ticketTypes?.length > 0 ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                        {eventbriteMetrics.events[0].ticketTypes.map((ticketType, idx) => {
+                          const total = eventbriteMetrics.events[0].ticketTypes.reduce((sum, t) => sum + t.sold, 0);
+                          const percentage = total > 0 ? (ticketType.sold / total) * 100 : 0;
+                          const colors = ['#d4af37', '#a78bfa', '#22c55e', '#3b82f6', '#f97316'];
+                          return (
+                            <div key={idx}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                                <span style={{ fontSize: 13, color: '#fff', fontWeight: 500 }}>{ticketType.name}</span>
+                                <span style={{ fontSize: 13, color: '#888' }}>
+                                  {ticketType.sold} sold · ${ticketType.revenue.toLocaleString()}
+                                </span>
+                              </div>
+                              <div style={{ height: 8, background: '#1a1a1a', borderRadius: 4, overflow: 'hidden' }}>
+                                <div style={{
+                                  width: `${percentage}%`,
+                                  height: '100%',
+                                  background: colors[idx % colors.length],
+                                  borderRadius: 4,
+                                  transition: 'width 0.5s ease'
+                                }} />
+                              </div>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4 }}>
+                                <span style={{ fontSize: 11, color: '#666' }}>${ticketType.price} each</span>
+                                <span style={{ fontSize: 11, color: '#666' }}>{ticketType.remaining} left</span>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div style={{ textAlign: 'center', padding: 32 }}>
+                        <div style={{ fontSize: 32, marginBottom: 8 }}>🎫</div>
+                        <div style={{ color: '#666', fontSize: 13 }}>
+                          {eventbriteMetrics.events.length > 0
+                            ? 'No ticket type data available'
+                            : 'Connect an event to see ticket breakdown'
+                          }
+                        </div>
+                        <div style={{ color: '#555', fontSize: 11, marginTop: 8 }}>
+                          Sample: VIP ($500), General ($150), Early Bird ($100)
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Daily Sales Chart */}
+                  <div style={{ background: '#0a0a0a', borderRadius: 12, border: '1px solid #1a1a1a', padding: 24 }}>
+                    <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 20, color: '#fff', display: 'flex', alignItems: 'center', gap: 8 }}>
+                      📈 Daily Sales Trend
+                      {eventbriteMetrics.salesTrend && (
+                        <span style={{
+                          marginLeft: 'auto',
+                          fontSize: 12,
+                          padding: '4px 10px',
+                          borderRadius: 6,
+                          background: eventbriteMetrics.salesTrend === 'up' ? 'rgba(34,197,94,0.1)' : eventbriteMetrics.salesTrend === 'down' ? 'rgba(239,68,68,0.1)' : 'rgba(107,114,128,0.1)',
+                          color: eventbriteMetrics.salesTrend === 'up' ? '#22c55e' : eventbriteMetrics.salesTrend === 'down' ? '#ef4444' : '#6b7280'
+                        }}>
+                          {eventbriteMetrics.salesTrend === 'up' ? '↑ Trending Up' : eventbriteMetrics.salesTrend === 'down' ? '↓ Trending Down' : '→ Stable'}
+                        </span>
+                      )}
+                    </h3>
+                    {eventbriteMetrics.events.length > 0 && eventbriteMetrics.events[0].salesByDay?.length > 0 ? (
+                      <div>
+                        {/* Chart */}
+                        <div style={{ display: 'flex', alignItems: 'flex-end', height: 140, gap: 4, marginBottom: 16 }}>
+                          {eventbriteMetrics.events[0].salesByDay.slice(-14).map((day, idx) => {
+                            const maxTickets = Math.max(...eventbriteMetrics.events[0].salesByDay.map(d => d.tickets));
+                            const height = maxTickets > 0 ? (day.tickets / maxTickets) * 100 : 0;
+                            return (
+                              <div key={idx} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                                <div style={{
+                                  width: '100%',
+                                  height: `${height}%`,
+                                  minHeight: day.tickets > 0 ? 4 : 2,
+                                  background: day.tickets > 0 ? 'linear-gradient(to top, #f05537, #ff7847)' : '#1a1a1a',
+                                  borderRadius: '4px 4px 0 0',
+                                  transition: 'height 0.3s ease'
+                                }} />
+                                <div style={{ fontSize: 9, color: '#555', marginTop: 4, transform: 'rotate(-45deg)', transformOrigin: 'top left', whiteSpace: 'nowrap' }}>
+                                  {new Date(day.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                        {/* Summary */}
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, paddingTop: 16, borderTop: '1px solid #1a1a1a' }}>
+                          <div>
+                            <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>Avg Daily Sales</div>
+                            <div style={{ fontSize: 18, fontWeight: 600, color: '#fff' }}>{eventbriteMetrics.avgDailySales.toFixed(1)}</div>
+                            <div style={{ fontSize: 10, color: '#666' }}>tickets/day</div>
+                          </div>
+                          <div>
+                            <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>Best Day</div>
+                            <div style={{ fontSize: 18, fontWeight: 600, color: '#22c55e' }}>
+                              {Math.max(...eventbriteMetrics.events[0].salesByDay.map(d => d.tickets))}
+                            </div>
+                            <div style={{ fontSize: 10, color: '#666' }}>tickets sold</div>
+                          </div>
+                          <div>
+                            <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>Total Revenue</div>
+                            <div style={{ fontSize: 18, fontWeight: 600, color: '#f05537' }}>
+                              ${eventbriteMetrics.events[0].salesByDay.reduce((sum, d) => sum + d.revenue, 0).toLocaleString()}
+                            </div>
+                            <div style={{ fontSize: 10, color: '#666' }}>last 14 days</div>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div style={{ textAlign: 'center', padding: 32 }}>
+                        <div style={{ fontSize: 32, marginBottom: 8 }}>📊</div>
+                        <div style={{ color: '#666', fontSize: 13 }}>
+                          {eventbriteMetrics.events.length > 0
+                            ? 'No daily sales data available yet'
+                            : 'Connect an event to see sales trends'
+                          }
+                        </div>
+                        <div style={{ color: '#555', fontSize: 11, marginTop: 8 }}>
+                          Track daily ticket sales and identify peak demand periods
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Attendee Summary */}
+                <div style={{ background: '#0a0a0a', borderRadius: 12, border: '1px solid #1a1a1a', padding: 24, marginBottom: 24 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+                    <h3 style={{ fontSize: 16, fontWeight: 600, color: '#fff', display: 'flex', alignItems: 'center', gap: 8, margin: 0 }}>
+                      👥 Attendee Overview
+                    </h3>
+                    <button
+                      onClick={() => {
+                        // Export attendee data as CSV
+                        const csvContent = "data:text/csv;charset=utf-8,"
+                          + "Event,Registered,Checked In,No Show,Check-in Rate\n"
+                          + eventbriteMetrics.events.map(e =>
+                              `"${e.name}",${e.attendees.registered},${e.attendees.checkedIn},${e.attendees.noShow},${e.attendees.registered > 0 ? Math.round((e.attendees.checkedIn / e.attendees.registered) * 100) : 0}%`
+                            ).join("\n");
+                        const encodedUri = encodeURI(csvContent);
+                        const link = document.createElement("a");
+                        link.setAttribute("href", encodedUri);
+                        link.setAttribute("download", "eventbrite_attendees.csv");
+                        document.body.appendChild(link);
+                        link.click();
+                        document.body.removeChild(link);
+                      }}
+                      style={{ background: '#1a1a1a', border: '1px solid #333', color: '#888', padding: '8px 16px', borderRadius: 8, fontSize: 12, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
+                    >
+                      📥 Export CSV
+                    </button>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16 }}>
+                    <div style={{ background: '#111', borderRadius: 10, padding: 16, textAlign: 'center' }}>
+                      <div style={{ fontSize: 28, fontWeight: 700, color: '#fff' }}>{eventbriteMetrics.totalAttendees}</div>
+                      <div style={{ fontSize: 12, color: '#888' }}>Total Registered</div>
+                    </div>
+                    <div style={{ background: '#111', borderRadius: 10, padding: 16, textAlign: 'center' }}>
+                      <div style={{ fontSize: 28, fontWeight: 700, color: '#22c55e' }}>{eventbriteMetrics.checkedIn}</div>
+                      <div style={{ fontSize: 12, color: '#888' }}>Checked In</div>
+                    </div>
+                    <div style={{ background: '#111', borderRadius: 10, padding: 16, textAlign: 'center' }}>
+                      <div style={{ fontSize: 28, fontWeight: 700, color: '#ef4444' }}>
+                        {eventbriteMetrics.events.reduce((sum, e) => sum + e.attendees.noShow, 0)}
+                      </div>
+                      <div style={{ fontSize: 12, color: '#888' }}>No Show</div>
+                    </div>
+                    <div style={{ background: '#111', borderRadius: 10, padding: 16, textAlign: 'center' }}>
+                      <div style={{ fontSize: 28, fontWeight: 700, color: '#3b82f6' }}>
+                        {eventbriteMetrics.totalAttendees > 0 ? Math.round((eventbriteMetrics.checkedIn / eventbriteMetrics.totalAttendees) * 100) : 0}%
+                      </div>
+                      <div style={{ fontSize: 12, color: '#888' }}>Check-in Rate</div>
+                    </div>
+                  </div>
+                </div>
               </>
             )}
 
