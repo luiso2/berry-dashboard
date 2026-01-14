@@ -6428,8 +6428,7 @@ app.post('/api/v1/gpt/session', async (req, res) => {
 // ============================================
 // GPT CODE ACCESS ENDPOINT - Allow GPT to read/write project files
 // ============================================
-const fs = require('fs').promises;
-const pathModule = require('path');
+const fsPromises = fs.promises;
 
 app.post('/api/v1/gpt/code', async (req, res) => {
   // Require authentication
@@ -6437,10 +6436,10 @@ app.post('/api/v1/gpt/code', async (req, res) => {
     return res.status(401).json({ error: 'Authentication required' });
   }
 
-  const { action, path, content, searchQuery, extension } = req.body;
+  const { action, path: requestPath, content, searchQuery, extension } = req.body;
 
   // Base project directory - adjust based on your deployment
-  const PROJECT_ROOT = process.env.PROJECT_ROOT || pathModule.join(__dirname, '..');
+  const PROJECT_ROOT = process.env.PROJECT_ROOT || path.join(__dirname, '..');
 
   // Allowed directories (relative to PROJECT_ROOT)
   const ALLOWED_PATHS = ['src', 'server', 'public'];
@@ -6448,9 +6447,9 @@ app.post('/api/v1/gpt/code', async (req, res) => {
   // Blocked file patterns for security
   const BLOCKED_PATTERNS = ['.env', 'node_modules', '.git', 'credentials', 'secret', 'password', '.pem', '.key'];
 
-  const isPathAllowed = (filePath) => {
-    const normalizedPath = pathModule.normalize(filePath);
-    const relativePath = pathModule.relative(PROJECT_ROOT, normalizedPath);
+  const isPathAllowed = (checkPath) => {
+    const normalizedPath = path.normalize(checkPath);
+    const relativePath = path.relative(PROJECT_ROOT, normalizedPath);
 
     // Must be within allowed directories
     const isAllowed = ALLOWED_PATHS.some(allowed => relativePath.startsWith(allowed));
@@ -6467,24 +6466,24 @@ app.post('/api/v1/gpt/code', async (req, res) => {
     switch (action) {
       case 'list': {
         // List files in a directory
-        const targetDir = path ? pathModule.join(PROJECT_ROOT, path) : PROJECT_ROOT;
+        const targetDir = requestPath ? path.join(PROJECT_ROOT, requestPath) : PROJECT_ROOT;
 
         if (!isPathAllowed(targetDir)) {
           return res.status(403).json({ error: 'Access denied to this path' });
         }
 
-        const entries = await fs.readdir(targetDir, { withFileTypes: true });
+        const entries = await fsPromises.readdir(targetDir, { withFileTypes: true });
         const files = entries
           .filter(entry => !BLOCKED_PATTERNS.some(p => entry.name.includes(p)))
           .map(entry => ({
             name: entry.name,
             type: entry.isDirectory() ? 'directory' : 'file',
-            path: pathModule.join(path || '', entry.name)
+            path: path.join(requestPath || '', entry.name)
           }));
 
         return res.json({
           success: true,
-          path: path || '/',
+          path: requestPath || '/',
           files,
           count: files.length
         });
@@ -6492,23 +6491,23 @@ app.post('/api/v1/gpt/code', async (req, res) => {
 
       case 'read': {
         // Read a file's contents
-        if (!path) {
+        if (!requestPath) {
           return res.status(400).json({ error: 'Path is required' });
         }
 
-        const filePath = pathModule.join(PROJECT_ROOT, path);
+        const filePath = path.join(PROJECT_ROOT, requestPath);
 
         if (!isPathAllowed(filePath)) {
           return res.status(403).json({ error: 'Access denied to this file' });
         }
 
-        const content = await fs.readFile(filePath, 'utf-8');
-        const stats = await fs.stat(filePath);
+        const fileContent = await fsPromises.readFile(filePath, 'utf-8');
+        const stats = await fsPromises.stat(filePath);
 
         return res.json({
           success: true,
-          path,
-          content,
+          path: requestPath,
+          content: fileContent,
           size: stats.size,
           modified: stats.mtime
         });
@@ -6516,37 +6515,37 @@ app.post('/api/v1/gpt/code', async (req, res) => {
 
       case 'write': {
         // Write/update a file
-        if (!path) {
+        if (!requestPath) {
           return res.status(400).json({ error: 'Path is required' });
         }
         if (content === undefined) {
           return res.status(400).json({ error: 'Content is required' });
         }
 
-        const filePath = pathModule.join(PROJECT_ROOT, path);
+        const filePath = path.join(PROJECT_ROOT, requestPath);
 
         if (!isPathAllowed(filePath)) {
           return res.status(403).json({ error: 'Access denied to this file' });
         }
 
         // Create directory if it doesn't exist
-        await fs.mkdir(pathModule.dirname(filePath), { recursive: true });
+        await fsPromises.mkdir(path.dirname(filePath), { recursive: true });
 
         // Backup existing file if it exists
         try {
-          const existing = await fs.readFile(filePath, 'utf-8');
+          const existing = await fsPromises.readFile(filePath, 'utf-8');
           const backupPath = `${filePath}.backup.${Date.now()}`;
-          await fs.writeFile(backupPath, existing);
+          await fsPromises.writeFile(backupPath, existing);
         } catch (e) {
           // File doesn't exist, no backup needed
         }
 
-        await fs.writeFile(filePath, content, 'utf-8');
+        await fsPromises.writeFile(filePath, content, 'utf-8');
 
         return res.json({
           success: true,
-          message: `File ${path} has been updated`,
-          path
+          message: `File ${requestPath} has been updated`,
+          path: requestPath
         });
       }
 
@@ -6556,15 +6555,15 @@ app.post('/api/v1/gpt/code', async (req, res) => {
           return res.status(400).json({ error: 'searchQuery is required' });
         }
 
-        const searchDir = path ? pathModule.join(PROJECT_ROOT, path) : PROJECT_ROOT;
+        const searchDir = requestPath ? path.join(PROJECT_ROOT, requestPath) : PROJECT_ROOT;
         const results = [];
 
         const searchInDirectory = async (dir, relativePath = '') => {
-          const entries = await fs.readdir(dir, { withFileTypes: true });
+          const entries = await fsPromises.readdir(dir, { withFileTypes: true });
 
           for (const entry of entries) {
-            const fullPath = pathModule.join(dir, entry.name);
-            const relPath = pathModule.join(relativePath, entry.name);
+            const fullPath = path.join(dir, entry.name);
+            const relPath = path.join(relativePath, entry.name);
 
             if (BLOCKED_PATTERNS.some(p => entry.name.includes(p))) continue;
 
@@ -6572,13 +6571,13 @@ app.post('/api/v1/gpt/code', async (req, res) => {
               await searchInDirectory(fullPath, relPath);
             } else if (entry.isFile()) {
               // Only search allowed extensions
-              const ext = pathModule.extname(entry.name).toLowerCase();
+              const ext = path.extname(entry.name).toLowerCase();
               const allowedExts = extension ? [extension] : ['.js', '.ts', '.tsx', '.jsx', '.json', '.css', '.html', '.yaml', '.yml', '.md'];
 
               if (allowedExts.includes(ext)) {
                 try {
-                  const content = await fs.readFile(fullPath, 'utf-8');
-                  const lines = content.split('\n');
+                  const fileContent = await fsPromises.readFile(fullPath, 'utf-8');
+                  const lines = fileContent.split('\n');
                   const matches = [];
 
                   lines.forEach((line, index) => {
@@ -6619,20 +6618,20 @@ app.post('/api/v1/gpt/code', async (req, res) => {
         const getStructure = async (dir, relativePath = '', depth = 0) => {
           if (depth > 3) return []; // Limit depth
 
-          const entries = await fs.readdir(dir, { withFileTypes: true });
+          const entries = await fsPromises.readdir(dir, { withFileTypes: true });
           const structure = [];
 
           for (const entry of entries) {
             if (BLOCKED_PATTERNS.some(p => entry.name.includes(p))) continue;
 
-            const relPath = pathModule.join(relativePath, entry.name);
+            const relPath = path.join(relativePath, entry.name);
 
             if (entry.isDirectory() && ALLOWED_PATHS.some(a => relPath.startsWith(a) || a.startsWith(relPath.split('/')[0]))) {
               structure.push({
                 name: entry.name,
                 type: 'directory',
                 path: relPath,
-                children: await getStructure(pathModule.join(dir, entry.name), relPath, depth + 1)
+                children: await getStructure(path.join(dir, entry.name), relPath, depth + 1)
               });
             } else if (entry.isFile() && depth > 0) {
               structure.push({
