@@ -77,9 +77,9 @@ paths:
         { "endpoint": "manageEvents", "action": "create", "data": { "name": "NYE Gala", "eventDate": "2025-12-31" } }
         ```
 
-        Add Guest:
+        Add Guest (flat format - recommended):
         ```json
-        { "endpoint": "manageGuests", "action": "add", "eventId": 1, "data": { "name": "John Doe", "email": "john@example.com" } }
+        { "endpoint": "manageGuests", "action": "add", "eventId": 1, "name": "John Doe", "email": "john@example.com" }
         ```
 
         Add Sponsor:
@@ -192,6 +192,21 @@ paths:
                 searchQuery:
                   type: string
                   description: Text to search for in files (for manageCode search action)
+                to:
+                  type: string
+                  description: Phone number to send SMS to (for manageSMS send action). Can be sent directly or inside data object.
+                message:
+                  type: string
+                  description: SMS message text (for manageSMS actions). Can be sent directly or inside data object.
+                name:
+                  type: string
+                  description: Name field (for guests/staff/vendors/etc). Can be sent directly or inside data object.
+                email:
+                  type: string
+                  description: Email field (for guests/staff/vendors/etc). Can be sent directly or inside data object.
+                phone:
+                  type: string
+                  description: Phone field (for guests/staff/vendors/etc). Can be sent directly or inside data object.
                 filters:
                   type: object
                   description: Optional filters for list operations
@@ -252,10 +267,8 @@ paths:
                   endpoint: manageGuests
                   action: add
                   eventId: 1
-                  data:
-                    name: "John Smith"
-                    email: "john@example.com"
-                    instagram: "@johnsmith"
+                  name: "John Smith"
+                  email: "john@example.com"
               approveGuest:
                 summary: Approve a guest
                 value:
@@ -422,25 +435,22 @@ paths:
                 value:
                   endpoint: manageSMS
                   action: send
-                  data:
-                    to: "+1234567890"
-                    message: "Hello! You're confirmed for our event tonight at 8PM."
+                  to: "+1234567890"
+                  message: "Hello! You're confirmed for our event tonight at 8PM."
               sendSMSToGuest:
                 summary: Send SMS to a guest by ID
                 value:
                   endpoint: manageSMS
                   action: sendToGuest
                   guestId: 5
-                  data:
-                    message: "Hi! Just confirming your attendance for tonight's event."
+                  message: "Hi! Just confirming your attendance for tonight's event."
               sendSMSToEvent:
                 summary: Send SMS to all event guests
                 value:
                   endpoint: manageSMS
                   action: sendToEvent
                   eventId: 1
-                  data:
-                    message: "Reminder: Our event starts in 2 hours! See you there."
+                  message: "Reminder: Our event starts in 2 hours! See you there."
               checkSMSStatus:
                 summary: Check if SMS is configured
                 value:
