@@ -134,7 +134,7 @@ paths:
                     **manageEmails:** getStatus, getSummary
                     **manageUploads:** list, get, stats, getTemplate
                     **manageCode:** list, read, write, search, structure
-                    **manageSMS:** send, sendToGuest, sendToEvent, status
+                    **manageSMS:** send, sendToGuest, sendToEvent, status, schedule, listScheduled, cancelScheduled, bulkSend
                 eventId:
                   type: integer
                   description: Event ID (for event-specific operations)
@@ -198,6 +198,18 @@ paths:
                 message:
                   type: string
                   description: SMS message text (for manageSMS actions). Can be sent directly or inside data object.
+                recipients:
+                  type: array
+                  items:
+                    type: string
+                  description: Array of phone numbers for bulk/scheduled SMS (for manageSMS bulkSend/schedule actions)
+                scheduledAt:
+                  type: string
+                  format: date-time
+                  description: ISO timestamp for when to send scheduled message (for manageSMS schedule action)
+                scheduledId:
+                  type: integer
+                  description: ID of scheduled message to cancel (for manageSMS cancelScheduled action)
                 name:
                   type: string
                   description: Name field (for guests/staff/vendors/etc). Can be sent directly or inside data object.
@@ -456,6 +468,33 @@ paths:
                 value:
                   endpoint: manageSMS
                   action: status
+              scheduleSMS:
+                summary: Schedule SMS for later
+                value:
+                  endpoint: manageSMS
+                  action: schedule
+                  recipients: ["+1234567890", "+0987654321"]
+                  message: "Reminder: Our event starts tomorrow at 8PM!"
+                  scheduledAt: "2025-12-31T20:00:00Z"
+                  eventId: 1
+              listScheduledSMS:
+                summary: List all scheduled messages
+                value:
+                  endpoint: manageSMS
+                  action: listScheduled
+              cancelScheduledSMS:
+                summary: Cancel a scheduled message
+                value:
+                  endpoint: manageSMS
+                  action: cancelScheduled
+                  scheduledId: 1
+              bulkSendSMS:
+                summary: Send SMS to multiple recipients now
+                value:
+                  endpoint: manageSMS
+                  action: bulkSend
+                  recipients: ["+1234567890", "+0987654321", "+1122334455"]
+                  message: "Thank you for attending our event!"
 
       responses:
         '200':

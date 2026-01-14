@@ -82,7 +82,7 @@ const categoryToStatus = (category: GuestCategory): string => {
 
 type GuestCategory = 'pending' | 'A' | 'B' | 'C' | 'rejected';
 type GuestStatus = 'pending' | 'approved' | 'declined' | 'rejected';
-type ViewType = 'overview' | 'guests' | 'emails' | 'analytics' | 'automation' | 'checkin' | 'models' | 'tables' | 'tickets' | 'sponsors' | 'promoters' | 'events' | 'budget' | 'vendors' | 'staff' | 'monitoring' | 'integrations' | 'chatgpt';
+type ViewType = 'overview' | 'guests' | 'emails' | 'analytics' | 'automation' | 'checkin' | 'models' | 'tables' | 'tickets' | 'sponsors' | 'promoters' | 'events' | 'budget' | 'vendors' | 'staff' | 'monitoring' | 'integrations' | 'chatgpt' | 'sms';
 type ThemeMode = 'dark' | 'light';
 
 interface Purchase {
@@ -598,6 +598,37 @@ interface ClientPortalData {
     contract_title: string;
     status: string;
   }>;
+}
+
+// SMS Conversation interfaces
+interface SMSMessage {
+  id: number;
+  user_id: number | null;
+  from_number: string;
+  to_number: string;
+  direction: 'inbound' | 'outbound';
+  message: string;
+  ai_response: string | null;
+  is_read: boolean;
+  is_human_takeover: boolean;
+  created_at: string;
+}
+
+interface SMSThread {
+  phone: string;
+  message_count: number;
+  unread_count: number;
+  is_human_takeover: boolean;
+  last_message: string;
+  last_message_time: string;
+}
+
+interface SMSStats {
+  total_conversations: number;
+  total_messages: number;
+  unread_messages: number;
+  human_takeover_count: number;
+  messages_today: number;
 }
 
 // Instagram-based AI Score Calculator
@@ -1601,6 +1632,15 @@ function App() {
   const [serverStatus, setServerStatus] = useState<ServerStatus | null>(null);
   const [isLoadingHealth, setIsLoadingHealth] = useState(false);
   const [lastHealthCheck, setLastHealthCheck] = useState<string | null>(null);
+
+  // SMS Conversations state
+  const [smsThreads, setSmsThreads] = useState<SMSThread[]>([]);
+  const [smsMessages, setSmsMessages] = useState<SMSMessage[]>([]);
+  const [smsStats, setSmsStats] = useState<SMSStats>({ total_conversations: 0, total_messages: 0, unread_messages: 0, human_takeover_count: 0, messages_today: 0 });
+  const [selectedSmsThread, setSelectedSmsThread] = useState<string | null>(null);
+  const [smsReplyText, setSmsReplyText] = useState('');
+  const [smsSendingReply, setSmsSendingReply] = useState(false);
+  const [loadingSmsThreads, setLoadingSmsThreads] = useState(false);
 
   // Toast notifications
   const addToast = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
@@ -3034,6 +3074,122 @@ function App() {
     }
   }, []);
 
+  // SMS Conversations functions
+  const fetchSmsThreads = useCallback(async () => {
+    setLoadingSmsThreads(true);
+    try {
+      const res = await fetch(`${API_URL}/api/v1/sms/conversations/threads`);
+      if (res.ok) {
+        const data = await res.json();
+        setSmsThreads(data.threads || []);
+      }
+    } catch (error) {
+      console.error('Error fetching SMS threads:', error);
+    } finally {
+      setLoadingSmsThreads(false);
+    }
+  }, []);
+
+  const fetchSmsStats = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/v1/sms/conversations/stats`);
+      if (res.ok) {
+        const data = await res.json();
+        setSmsStats(data);
+      }
+    } catch (error) {
+      console.error('Error fetching SMS stats:', error);
+    }
+  }, []);
+
+  const fetchSmsMessages = useCallback(async (phone: string) => {
+    try {
+      const res = await fetch(`${API_URL}/api/v1/sms/conversations/thread/${encodeURIComponent(phone)}`);
+      if (res.ok) {
+        const data = await res.json();
+        setSmsMessages(data.messages || []);
+      }
+    } catch (error) {
+      console.error('Error fetching SMS messages:', error);
+    }
+  }, []);
+
+  const sendSmsReply = useCallback(async (toPhone: string, message: string) => {
+    setSmsSendingReply(true);
+    try {
+      const res = await fetch(`${API_URL}/api/v1/sms/conversations/reply`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ to: toPhone, message })
+      });
+      if (res.ok) {
+        addToast('Reply sent successfully!', 'success');
+        setSmsReplyText('');
+        fetchSmsMessages(toPhone);
+        fetchSmsStats();
+      } else {
+        addToast('Failed to send reply', 'error');
+      }
+    } catch (error) {
+      console.error('Error sending SMS reply:', error);
+      addToast('Failed to send reply', 'error');
+    } finally {
+      setSmsSendingReply(false);
+    }
+  }, [fetchSmsMessages, fetchSmsStats]);
+
+  const toggleHumanTakeover = useCallback(async (phone: string, enable: boolean) => {
+    try {
+      const res = await fetch(`${API_URL}/api/v1/sms/conversations/takeover/${encodeURIComponent(phone)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enable })
+      });
+      if (res.ok) {
+        addToast(enable ? 'Human mode enabled' : 'AI mode restored', 'success');
+        fetchSmsThreads();
+      }
+    } catch (error) {
+      console.error('Error toggling human takeover:', error);
+      addToast('Failed to toggle mode', 'error');
+    }
+  }, [fetchSmsThreads]);
+
+  const deleteSmsThread = useCallback(async (phone: string) => {
+    if (!confirm('Are you sure you want to delete this entire conversation?')) return;
+    try {
+      const res = await fetch(`${API_URL}/api/v1/sms/conversations/thread/${encodeURIComponent(phone)}`, {
+        method: 'DELETE'
+      });
+      if (res.ok) {
+        addToast('Conversation deleted', 'success');
+        setSelectedSmsThread(null);
+        setSmsMessages([]);
+        fetchSmsThreads();
+        fetchSmsStats();
+      }
+    } catch (error) {
+      console.error('Error deleting SMS thread:', error);
+      addToast('Failed to delete conversation', 'error');
+    }
+  }, [fetchSmsThreads, fetchSmsStats]);
+
+  const deleteSmsMessage = useCallback(async (id: number, phone: string) => {
+    try {
+      const res = await fetch(`${API_URL}/api/v1/sms/conversations/${id}`, {
+        method: 'DELETE'
+      });
+      if (res.ok) {
+        addToast('Message deleted', 'success');
+        fetchSmsMessages(phone);
+        fetchSmsStats();
+      }
+    } catch (error) {
+      console.error('Error deleting SMS message:', error);
+      addToast('Failed to delete message', 'error');
+    }
+  }, [fetchSmsMessages, fetchSmsStats]);
+
   // Flyer ref for html-to-image
   const flyerRef = useRef<HTMLDivElement>(null);
 
@@ -3091,7 +3247,8 @@ function App() {
     if (activeView === 'budget' && selectedEvent) fetchBudget(selectedEvent.id);
     if (activeView === 'monitoring') fetchHealthStatus();
     if (activeView === 'integrations') fetchIntegrations();
-  }, [activeView, fetchModels, fetchTables, fetchTickets, fetchOrders, fetchSponsors, fetchPromoters, fetchPromoterLeaderboard, fetchEvents, fetchVendors, fetchStaff, fetchBudget, fetchHealthStatus, fetchIntegrations, selectedEvent]);
+    if (activeView === 'sms') { fetchSmsThreads(); fetchSmsStats(); }
+  }, [activeView, fetchModels, fetchTables, fetchTickets, fetchOrders, fetchSponsors, fetchPromoters, fetchPromoterLeaderboard, fetchEvents, fetchVendors, fetchStaff, fetchBudget, fetchHealthStatus, fetchIntegrations, fetchSmsThreads, fetchSmsStats, selectedEvent]);
 
   // Sync All Data - refreshes all data sources
   const syncAllData = useCallback(async () => {
@@ -3827,6 +3984,7 @@ function App() {
               AI
             </div>
             <NavItem label="ChatGPT" active={activeView === 'chatgpt'} icon="🤖" onClick={() => navigateTo('chatgpt')} />
+            <NavItem label="SMS AI" active={activeView === 'sms'} icon="💬" count={smsStats.unread_messages} onClick={() => navigateTo('sms')} />
           </div>
         </nav>
 
@@ -9433,6 +9591,246 @@ function App() {
               </div>
             </div>
 
+          </div>
+        )}
+
+        {/* SMS AI Conversations View */}
+        {activeView === 'sms' && (
+          <div className="page-content" style={{ padding: 32, animation: 'fadeIn 0.3s ease' }}>
+            <div style={{ marginBottom: 24 }}>
+              <h2 style={{ fontSize: 20, fontWeight: 600, margin: 0 }}>SMS AI Conversations</h2>
+              <p style={{ color: '#666', margin: '8px 0 0', fontSize: 14 }}>View and manage AI-powered SMS conversations with users</p>
+            </div>
+
+            {/* Stats Cards */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 16, marginBottom: 24 }}>
+              <div style={{ background: 'rgba(59,130,246,0.1)', border: '1px solid rgba(59,130,246,0.3)', borderRadius: 12, padding: 16 }}>
+                <div style={{ fontSize: 24, fontWeight: 700, color: '#3b82f6' }}>{smsStats.total_conversations}</div>
+                <div style={{ fontSize: 12, color: '#888' }}>Total Threads</div>
+              </div>
+              <div style={{ background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.3)', borderRadius: 12, padding: 16 }}>
+                <div style={{ fontSize: 24, fontWeight: 700, color: '#10b981' }}>{smsStats.total_messages}</div>
+                <div style={{ fontSize: 12, color: '#888' }}>Total Messages</div>
+              </div>
+              <div style={{ background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.3)', borderRadius: 12, padding: 16 }}>
+                <div style={{ fontSize: 24, fontWeight: 700, color: '#f59e0b' }}>{smsStats.unread_messages}</div>
+                <div style={{ fontSize: 12, color: '#888' }}>Unread</div>
+              </div>
+              <div style={{ background: 'rgba(139,92,246,0.1)', border: '1px solid rgba(139,92,246,0.3)', borderRadius: 12, padding: 16 }}>
+                <div style={{ fontSize: 24, fontWeight: 700, color: '#8b5cf6' }}>{smsStats.human_takeover_count}</div>
+                <div style={{ fontSize: 12, color: '#888' }}>Human Mode</div>
+              </div>
+            </div>
+
+            {/* Main Content - Thread List + Chat */}
+            <div style={{ display: 'grid', gridTemplateColumns: selectedSmsThread ? '320px 1fr' : '1fr', gap: 24, minHeight: 500 }}>
+              {/* Thread List */}
+              <div style={{ background: '#111', borderRadius: 12, border: '1px solid #222', overflow: 'hidden' }}>
+                <div style={{ padding: 16, borderBottom: '1px solid #222', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <h3 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>Conversations</h3>
+                  <button
+                    onClick={() => { fetchSmsThreads(); fetchSmsStats(); }}
+                    style={{ background: 'none', border: 'none', color: '#3b82f6', cursor: 'pointer', fontSize: 12 }}
+                  >
+                    Refresh
+                  </button>
+                </div>
+                <div style={{ maxHeight: 450, overflowY: 'auto' }}>
+                  {loadingSmsThreads ? (
+                    <div style={{ padding: 24, textAlign: 'center', color: '#666' }}>Loading...</div>
+                  ) : smsThreads.length === 0 ? (
+                    <div style={{ padding: 24, textAlign: 'center', color: '#666' }}>No conversations yet</div>
+                  ) : (
+                    smsThreads.map((thread) => (
+                      <div
+                        key={thread.phone}
+                        onClick={() => { setSelectedSmsThread(thread.phone); fetchSmsMessages(thread.phone); }}
+                        style={{
+                          padding: '12px 16px',
+                          borderBottom: '1px solid #1a1a1a',
+                          cursor: 'pointer',
+                          background: selectedSmsThread === thread.phone ? 'rgba(59,130,246,0.1)' : 'transparent',
+                          transition: 'background 0.2s'
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
+                          <span style={{ fontWeight: 600, fontSize: 14 }}>{thread.phone}</span>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            {thread.is_human_takeover && (
+                              <span style={{ background: '#8b5cf6', color: '#fff', fontSize: 10, padding: '2px 6px', borderRadius: 4 }}>Human</span>
+                            )}
+                            {thread.unread_count > 0 && (
+                              <span style={{ background: '#3b82f6', color: '#fff', fontSize: 10, padding: '2px 6px', borderRadius: 10, minWidth: 18, textAlign: 'center' }}>{thread.unread_count}</span>
+                            )}
+                          </div>
+                        </div>
+                        <div style={{ fontSize: 12, color: '#888', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {thread.last_message}
+                        </div>
+                        <div style={{ fontSize: 11, color: '#555', marginTop: 4 }}>
+                          {new Date(thread.last_message_time).toLocaleString()}
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              {/* Chat View */}
+              {selectedSmsThread && (
+                <div style={{ background: '#111', borderRadius: 12, border: '1px solid #222', display: 'flex', flexDirection: 'column' }}>
+                  {/* Chat Header */}
+                  <div style={{ padding: 16, borderBottom: '1px solid #222', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div>
+                      <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>{selectedSmsThread}</h3>
+                      <span style={{ fontSize: 12, color: '#888' }}>{smsMessages.length} messages</span>
+                    </div>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button
+                        onClick={() => {
+                          const thread = smsThreads.find(t => t.phone === selectedSmsThread);
+                          toggleHumanTakeover(selectedSmsThread, !thread?.is_human_takeover);
+                        }}
+                        style={{
+                          background: smsThreads.find(t => t.phone === selectedSmsThread)?.is_human_takeover ? '#8b5cf6' : '#333',
+                          border: 'none',
+                          color: '#fff',
+                          padding: '8px 12px',
+                          borderRadius: 6,
+                          fontSize: 12,
+                          cursor: 'pointer'
+                        }}
+                      >
+                        {smsThreads.find(t => t.phone === selectedSmsThread)?.is_human_takeover ? 'Switch to AI' : 'Take Over'}
+                      </button>
+                      <button
+                        onClick={() => deleteSmsThread(selectedSmsThread)}
+                        style={{ background: '#ef4444', border: 'none', color: '#fff', padding: '8px 12px', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}
+                      >
+                        Delete
+                      </button>
+                      <button
+                        onClick={() => { setSelectedSmsThread(null); setSmsMessages([]); }}
+                        style={{ background: '#333', border: 'none', color: '#fff', padding: '8px 12px', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}
+                      >
+                        Close
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Messages */}
+                  <div style={{ flex: 1, overflowY: 'auto', padding: 16, display: 'flex', flexDirection: 'column', gap: 12, maxHeight: 350 }}>
+                    {smsMessages.map((msg) => (
+                      <div
+                        key={msg.id}
+                        style={{
+                          alignSelf: msg.direction === 'inbound' ? 'flex-start' : 'flex-end',
+                          maxWidth: '70%'
+                        }}
+                      >
+                        <div
+                          style={{
+                            background: msg.direction === 'inbound' ? '#1a1a1a' : '#3b82f6',
+                            padding: '10px 14px',
+                            borderRadius: 12,
+                            borderBottomLeftRadius: msg.direction === 'inbound' ? 4 : 12,
+                            borderBottomRightRadius: msg.direction === 'outbound' ? 4 : 12
+                          }}
+                        >
+                          <div style={{ fontSize: 14 }}>{msg.message}</div>
+                          {msg.ai_response && (
+                            <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid rgba(255,255,255,0.1)', fontSize: 13, color: '#10b981' }}>
+                              AI: {msg.ai_response}
+                            </div>
+                          )}
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 }}>
+                          <span style={{ fontSize: 10, color: '#555' }}>
+                            {new Date(msg.created_at).toLocaleString()}
+                          </span>
+                          <button
+                            onClick={() => deleteSmsMessage(msg.id, selectedSmsThread)}
+                            style={{ background: 'none', border: 'none', color: '#ef4444', fontSize: 10, cursor: 'pointer', padding: '2px 6px' }}
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Reply Input */}
+                  <div style={{ padding: 16, borderTop: '1px solid #222' }}>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <input
+                        type="text"
+                        value={smsReplyText}
+                        onChange={(e) => setSmsReplyText(e.target.value)}
+                        placeholder="Type a reply..."
+                        style={{
+                          flex: 1,
+                          background: '#0a0a0a',
+                          border: '1px solid #333',
+                          borderRadius: 8,
+                          padding: '12px 16px',
+                          color: '#fff',
+                          fontSize: 14
+                        }}
+                        onKeyPress={(e) => {
+                          if (e.key === 'Enter' && smsReplyText.trim()) {
+                            sendSmsReply(selectedSmsThread, smsReplyText.trim());
+                          }
+                        }}
+                      />
+                      <button
+                        onClick={() => {
+                          if (smsReplyText.trim()) {
+                            sendSmsReply(selectedSmsThread, smsReplyText.trim());
+                          }
+                        }}
+                        disabled={smsSendingReply || !smsReplyText.trim()}
+                        style={{
+                          background: smsSendingReply ? '#333' : '#3b82f6',
+                          border: 'none',
+                          color: '#fff',
+                          padding: '12px 20px',
+                          borderRadius: 8,
+                          fontSize: 14,
+                          fontWeight: 600,
+                          cursor: smsSendingReply ? 'not-allowed' : 'pointer'
+                        }}
+                      >
+                        {smsSendingReply ? 'Sending...' : 'Send'}
+                      </button>
+                    </div>
+                    <p style={{ fontSize: 11, color: '#555', margin: '8px 0 0' }}>
+                      Messages are sent via Telnyx. Human takeover mode disables AI auto-responses.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* Empty State */}
+              {!selectedSmsThread && smsThreads.length > 0 && (
+                <div style={{ background: '#111', borderRadius: 12, border: '1px solid #222', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <div style={{ textAlign: 'center', padding: 40 }}>
+                    <div style={{ fontSize: 48, marginBottom: 16 }}>💬</div>
+                    <h3 style={{ margin: '0 0 8px', fontSize: 18, fontWeight: 600 }}>Select a Conversation</h3>
+                    <p style={{ margin: 0, fontSize: 14, color: '#888' }}>Click on a thread to view messages and respond</p>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Info Section */}
+            <div style={{ marginTop: 24, background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.3)', borderRadius: 12, padding: 20 }}>
+              <h4 style={{ margin: '0 0 12px', fontSize: 14, fontWeight: 600, color: '#10b981' }}>About SMS AI</h4>
+              <div style={{ fontSize: 13, color: '#888', lineHeight: 1.6 }}>
+                <p style={{ margin: '0 0 8px' }}>The Berry Bly AI Assistant automatically responds to incoming SMS messages with event information, VIP tables, dress code, and more.</p>
+                <p style={{ margin: '0 0 8px' }}><strong>Human Takeover:</strong> Enable human mode to temporarily disable AI responses and respond manually.</p>
+                <p style={{ margin: 0 }}><strong>API Endpoint:</strong> <code style={{ background: '#1a1a1a', padding: '2px 6px', borderRadius: 4 }}>/api/v1/sms/conversations/*</code></p>
+              </div>
+            </div>
           </div>
         )}
       </main>

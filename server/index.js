@@ -880,6 +880,48 @@ const initDatabase = async () => {
       CREATE INDEX IF NOT EXISTS idx_client_event ON client_access(event_id);
     `);
 
+    // Create sms_conversations table - For AI chat history
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS sms_conversations (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER,
+        from_number VARCHAR(50) NOT NULL,
+        to_number VARCHAR(50) NOT NULL,
+        direction VARCHAR(20) NOT NULL,
+        message TEXT NOT NULL,
+        ai_response TEXT,
+        is_read BOOLEAN DEFAULT false,
+        is_human_takeover BOOLEAN DEFAULT false,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_sms_from ON sms_conversations(from_number);
+      CREATE INDEX IF NOT EXISTS idx_sms_to ON sms_conversations(to_number);
+      CREATE INDEX IF NOT EXISTS idx_sms_user ON sms_conversations(user_id);
+      CREATE INDEX IF NOT EXISTS idx_sms_created ON sms_conversations(created_at DESC);
+    `);
+
+    // Create scheduled_messages table - For scheduled/bulk SMS
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS scheduled_messages (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER,
+        event_id INTEGER,
+        recipients JSONB NOT NULL,
+        message TEXT NOT NULL,
+        scheduled_at TIMESTAMP NOT NULL,
+        status VARCHAR(50) DEFAULT 'pending',
+        sent_at TIMESTAMP,
+        sent_count INTEGER DEFAULT 0,
+        failed_count INTEGER DEFAULT 0,
+        results JSONB,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_scheduled_status ON scheduled_messages(status);
+      CREATE INDEX IF NOT EXISTS idx_scheduled_time ON scheduled_messages(scheduled_at);
+      CREATE INDEX IF NOT EXISTS idx_scheduled_user ON scheduled_messages(user_id);
+    `);
+
     // Add user_id to staff table (after table creation)
     try {
       const checkStaffColumn = await client.query(`
@@ -6608,10 +6650,142 @@ app.post('/api/v1/gpt/sms', async (req, res) => {
         });
       }
 
+      case 'schedule': {
+        // Schedule a message for later
+        const { recipients, message, scheduledAt } = mergedData;
+
+        if (!recipients || !Array.isArray(recipients) || recipients.length === 0) {
+          return res.status(400).json({ error: 'Recipients array is required' });
+        }
+        if (!message) {
+          return res.status(400).json({ error: 'Message is required' });
+        }
+        if (!scheduledAt) {
+          return res.status(400).json({ error: 'scheduledAt timestamp is required (ISO format)' });
+        }
+
+        const scheduledTime = new Date(scheduledAt);
+        if (scheduledTime <= new Date()) {
+          return res.status(400).json({ error: 'Scheduled time must be in the future' });
+        }
+
+        const scheduleResult = await pool.query(`
+          INSERT INTO scheduled_messages (user_id, event_id, recipients, message, scheduled_at)
+          VALUES ($1, $2, $3, $4, $5)
+          RETURNING *
+        `, [req.user.id, eventId || null, JSON.stringify(recipients), message, scheduledTime]);
+
+        return res.json({
+          success: true,
+          message: 'Message scheduled successfully',
+          scheduledMessage: scheduleResult.rows[0]
+        });
+      }
+
+      case 'listScheduled': {
+        // List scheduled messages
+        let query = 'SELECT * FROM scheduled_messages WHERE user_id = $1';
+        const params = [req.user.id];
+
+        if (eventId) {
+          query += ' AND event_id = $2';
+          params.push(eventId);
+        }
+
+        query += ' ORDER BY scheduled_at ASC';
+
+        const listResult = await pool.query(query, params);
+        return res.json({
+          success: true,
+          scheduledMessages: listResult.rows,
+          total: listResult.rows.length
+        });
+      }
+
+      case 'cancelScheduled': {
+        // Cancel a scheduled message
+        const { scheduledId } = mergedData;
+        if (!scheduledId) {
+          return res.status(400).json({ error: 'scheduledId is required' });
+        }
+
+        const cancelResult = await pool.query(
+          'UPDATE scheduled_messages SET status = $1, updated_at = NOW() WHERE id = $2 AND user_id = $3 AND status = $4 RETURNING *',
+          ['cancelled', scheduledId, req.user.id, 'pending']
+        );
+
+        if (cancelResult.rows.length === 0) {
+          return res.status(404).json({ error: 'Scheduled message not found or already processed' });
+        }
+
+        return res.json({
+          success: true,
+          message: 'Scheduled message cancelled',
+          scheduledMessage: cancelResult.rows[0]
+        });
+      }
+
+      case 'bulkSend': {
+        // Send SMS to multiple recipients immediately
+        const { recipients, message } = mergedData;
+
+        if (!recipients || !Array.isArray(recipients) || recipients.length === 0) {
+          return res.status(400).json({ error: 'Recipients array is required' });
+        }
+        if (!message) {
+          return res.status(400).json({ error: 'Message is required' });
+        }
+
+        let apiKey = process.env.TELNYX_API_KEY;
+        const fromNumber = process.env.TELNYX_PHONE_NUMBER;
+
+        if (!apiKey) {
+          const telnyxInt = await pool.query('SELECT * FROM integrations WHERE provider = $1', ['telnyx']);
+          if (telnyxInt.rows[0]?.api_key_encrypted) {
+            apiKey = decryptApiKey(telnyxInt.rows[0].api_key_encrypted);
+          }
+        }
+
+        if (!apiKey || !fromNumber) {
+          return res.status(400).json({ error: 'Telnyx not configured' });
+        }
+
+        const results = [];
+        for (const recipient of recipients) {
+          try {
+            const telnyxResponse = await fetch('https://api.telnyx.com/v2/messages', {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${apiKey}`,
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({ from: fromNumber, to: recipient, text: message })
+            });
+            const telnyxData = await telnyxResponse.json();
+            results.push({
+              to: recipient,
+              success: telnyxResponse.ok,
+              messageId: telnyxData.data?.id
+            });
+          } catch (e) {
+            results.push({ to: recipient, success: false, error: e.message });
+          }
+        }
+
+        const sentCount = results.filter(r => r.success).length;
+        return res.json({
+          success: true,
+          message: `Sent ${sentCount}/${recipients.length} messages`,
+          totalSent: sentCount,
+          totalFailed: recipients.length - sentCount,
+          results
+        });
+      }
+
       default:
         return res.status(400).json({
           error: `Invalid action: ${action}`,
-          validActions: ['send', 'sendToGuest', 'sendToEvent', 'status']
+          validActions: ['send', 'sendToGuest', 'sendToEvent', 'status', 'schedule', 'listScheduled', 'cancelScheduled', 'bulkSend']
         });
     }
   } catch (error) {
@@ -10018,6 +10192,207 @@ app.post('/api/v1/telnyx/send-bulk-sms', async (req, res) => {
   }
 });
 
+// ============================================
+// SCHEDULED SMS ENDPOINTS
+// ============================================
+
+// POST /api/v1/sms/schedule - Schedule a message for later
+app.post('/api/v1/sms/schedule', async (req, res) => {
+  try {
+    const { recipients, message, scheduledAt, eventId } = req.body;
+    const userId = req.user?.id || null;
+
+    if (!recipients || !Array.isArray(recipients) || recipients.length === 0) {
+      return res.status(400).json({ error: 'Recipients array is required' });
+    }
+
+    if (!message) {
+      return res.status(400).json({ error: 'Message is required' });
+    }
+
+    if (!scheduledAt) {
+      return res.status(400).json({ error: 'scheduledAt timestamp is required' });
+    }
+
+    const scheduledTime = new Date(scheduledAt);
+    if (scheduledTime <= new Date()) {
+      return res.status(400).json({ error: 'Scheduled time must be in the future' });
+    }
+
+    const result = await pool.query(`
+      INSERT INTO scheduled_messages (user_id, event_id, recipients, message, scheduled_at)
+      VALUES ($1, $2, $3, $4, $5)
+      RETURNING *
+    `, [userId, eventId || null, JSON.stringify(recipients), message, scheduledTime]);
+
+    res.json({
+      success: true,
+      message: 'Message scheduled successfully',
+      scheduledMessage: result.rows[0]
+    });
+  } catch (error) {
+    console.error('Error scheduling SMS:', error);
+    res.status(500).json({ error: 'Failed to schedule message' });
+  }
+});
+
+// GET /api/v1/sms/scheduled - List scheduled messages
+app.get('/api/v1/sms/scheduled', async (req, res) => {
+  try {
+    const userId = req.user?.id;
+    const { status, eventId } = req.query;
+
+    let query = 'SELECT * FROM scheduled_messages WHERE 1=1';
+    const params = [];
+    let paramIndex = 1;
+
+    if (userId) {
+      query += ` AND (user_id = $${paramIndex}::integer OR user_id IS NULL)`;
+      params.push(userId);
+      paramIndex++;
+    }
+
+    if (status) {
+      query += ` AND status = $${paramIndex}`;
+      params.push(status);
+      paramIndex++;
+    }
+
+    if (eventId) {
+      query += ` AND event_id = $${paramIndex}`;
+      params.push(eventId);
+      paramIndex++;
+    }
+
+    query += ' ORDER BY scheduled_at ASC';
+
+    const result = await pool.query(query, params);
+
+    res.json({
+      success: true,
+      scheduledMessages: result.rows,
+      total: result.rows.length
+    });
+  } catch (error) {
+    console.error('Error fetching scheduled messages:', error);
+    res.status(500).json({ error: 'Failed to fetch scheduled messages' });
+  }
+});
+
+// DELETE /api/v1/sms/scheduled/:id - Cancel a scheduled message
+app.delete('/api/v1/sms/scheduled/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const result = await pool.query(
+      'UPDATE scheduled_messages SET status = $1, updated_at = NOW() WHERE id = $2 AND status = $3 RETURNING *',
+      ['cancelled', id, 'pending']
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Scheduled message not found or already processed' });
+    }
+
+    res.json({
+      success: true,
+      message: 'Scheduled message cancelled',
+      scheduledMessage: result.rows[0]
+    });
+  } catch (error) {
+    console.error('Error cancelling scheduled message:', error);
+    res.status(500).json({ error: 'Failed to cancel scheduled message' });
+  }
+});
+
+// Function to process scheduled messages (runs every minute)
+async function processScheduledMessages() {
+  try {
+    // Get all pending messages that are due
+    const dueMessages = await pool.query(`
+      SELECT * FROM scheduled_messages
+      WHERE status = 'pending' AND scheduled_at <= NOW()
+      ORDER BY scheduled_at ASC
+      LIMIT 10
+    `);
+
+    if (dueMessages.rows.length === 0) return;
+
+    console.log(`📬 Processing ${dueMessages.rows.length} scheduled messages...`);
+
+    // Get Telnyx API key
+    let apiKey = process.env.TELNYX_API_KEY;
+    const fromNumber = process.env.TELNYX_PHONE_NUMBER;
+
+    if (!apiKey) {
+      const result = await pool.query('SELECT * FROM integrations WHERE provider = $1', ['telnyx']);
+      if (result.rows[0]?.api_key_encrypted) {
+        apiKey = decryptApiKey(result.rows[0].api_key_encrypted);
+      }
+    }
+
+    if (!apiKey || !fromNumber) {
+      console.error('Telnyx not configured for scheduled messages');
+      return;
+    }
+
+    for (const msg of dueMessages.rows) {
+      const recipients = msg.recipients;
+      const results = [];
+
+      // Mark as processing
+      await pool.query(
+        'UPDATE scheduled_messages SET status = $1, updated_at = NOW() WHERE id = $2',
+        ['processing', msg.id]
+      );
+
+      for (const recipient of recipients) {
+        try {
+          const telnyxResponse = await fetch('https://api.telnyx.com/v2/messages', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${apiKey}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              from: fromNumber,
+              to: recipient,
+              text: msg.message
+            })
+          });
+
+          const telnyxData = await telnyxResponse.json();
+          results.push({
+            to: recipient,
+            success: telnyxResponse.ok,
+            messageId: telnyxData.data?.id,
+            error: telnyxResponse.ok ? null : telnyxData.errors?.[0]?.detail
+          });
+        } catch (e) {
+          results.push({ to: recipient, success: false, error: e.message });
+        }
+      }
+
+      const sentCount = results.filter(r => r.success).length;
+      const failedCount = results.filter(r => !r.success).length;
+
+      // Update with results
+      await pool.query(`
+        UPDATE scheduled_messages
+        SET status = $1, sent_at = NOW(), sent_count = $2, failed_count = $3, results = $4, updated_at = NOW()
+        WHERE id = $5
+      `, ['sent', sentCount, failedCount, JSON.stringify(results), msg.id]);
+
+      console.log(`✅ Scheduled message ${msg.id} sent: ${sentCount} success, ${failedCount} failed`);
+    }
+  } catch (error) {
+    console.error('Error processing scheduled messages:', error);
+  }
+}
+
+// Start scheduled message processor (every minute)
+setInterval(processScheduledMessages, 60 * 1000);
+console.log('📅 Scheduled message processor started (checks every minute)');
+
 // GET /api/v1/telnyx/phone-numbers - List Telnyx phone numbers
 app.get('/api/v1/telnyx/phone-numbers', async (req, res) => {
   try {
@@ -10141,6 +10516,12 @@ app.post('/api/webhooks/telnyx/sms', async (req, res) => {
         }
       }
 
+      // Final fallback to environment variable
+      if (!apiKey && process.env.TELNYX_API_KEY) {
+        apiKey = process.env.TELNYX_API_KEY;
+        console.log('Using TELNYX_API_KEY from environment');
+      }
+
       // Save inbound message to sms_conversations
       await pool.query(
         `INSERT INTO sms_conversations (from_number, to_number, direction, message, user_id)
@@ -10163,6 +10544,30 @@ app.post('/api/webhooks/telnyx/sms', async (req, res) => {
             }
           }
 
+          // Berry Bly Productions AI Concierge prompt
+          const berryBlyPrompt = `You are the AI Concierge for Berry Bly Productions, Miami's premier luxury events company.
+
+ABOUT US:
+- We organize exclusive luxury events, VIP parties, fashion shows, and high-profile networking experiences
+- Locations: Miami, FL - venues include LIV Miami, E11EVEN, Faena Hotel, Setai
+- Website: berry.merktop.com | Email: concierge@berrybly.com
+
+COMMON ANSWERS:
+- Dress Code: Upscale/cocktail attire. Gentlemen: dress shoes required, no athletic wear. Ladies: elegant attire.
+- VIP Tables: Premium bottle service starting at $2,000. Message for availability.
+- Guest List: Your name should be on the list. Have valid ID ready at the door.
+- Arrival: We recommend arriving 30-60 minutes after doors open.
+
+SPONSORSHIP TIERS: Bronze ($1K-5K), Silver ($5K-15K), Gold ($15K-35K), Platinum ($35K-75K), Diamond ($75K-150K), Title ($150K+)
+
+RESPONSE RULES:
+- Be sophisticated, warm, and make every guest feel like a VIP
+- Keep SMS responses under 160 characters
+- Respond in the same language as the message (English or Spanish)
+- For complex requests, offer to have a team member follow up
+
+Current message from guest:`;
+
           // Call OpenAI for AI response
           const openaiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
             method: 'POST',
@@ -10175,7 +10580,7 @@ app.post('/api/webhooks/telnyx/sms', async (req, res) => {
               messages: [
                 {
                   role: 'system',
-                  content: `You are a helpful AI assistant for ${companyName}. Respond to customer SMS messages professionally, helpfully, and concisely. Keep responses under 160 characters when possible. Be friendly but professional.`
+                  content: berryBlyPrompt
                 },
                 {
                   role: 'user',
@@ -10237,22 +10642,18 @@ app.post('/api/webhooks/telnyx/sms', async (req, res) => {
   }
 });
 
-// GET /api/v1/sms/conversations - Get SMS conversations (Multi-tenant)
+// ============================================
+// SMS CONVERSATIONS MANAGEMENT ENDPOINTS
+// ============================================
+
+// GET /api/v1/sms/conversations - Get all conversations
 app.get('/api/v1/sms/conversations', async (req, res) => {
   try {
-    const userId = req.user?.id;
-    const { limit = 50, phone } = req.query;
+    const { limit = 100, phone } = req.query;
 
     let query = 'SELECT * FROM sms_conversations WHERE 1=1';
     const params = [];
     let paramIndex = 1;
-
-    // Multi-tenant: filter by user_id if authenticated
-    if (userId) {
-      query += ` AND (user_id = $${paramIndex}::integer OR user_id IS NULL)`;
-      params.push(userId);
-      paramIndex++;
-    }
 
     if (phone) {
       query += ` AND (from_number = $${paramIndex} OR to_number = $${paramIndex})`;
@@ -10273,6 +10674,268 @@ app.get('/api/v1/sms/conversations', async (req, res) => {
   } catch (error) {
     console.error('Error fetching SMS conversations:', error);
     res.status(500).json({ error: 'Failed to fetch conversations' });
+  }
+});
+
+// GET /api/v1/sms/conversations/threads - Get conversation threads grouped by phone number
+app.get('/api/v1/sms/conversations/threads', async (req, res) => {
+  try {
+    const telnyxNumber = process.env.TELNYX_PHONE_NUMBER || '+19858539097';
+
+    // Get unique phone numbers with their last message
+    const result = await pool.query(`
+      WITH ranked_messages AS (
+        SELECT
+          CASE
+            WHEN from_number = $1 THEN to_number
+            ELSE from_number
+          END as contact_number,
+          message,
+          direction,
+          is_read,
+          is_human_takeover,
+          created_at,
+          ROW_NUMBER() OVER (
+            PARTITION BY CASE WHEN from_number = $1 THEN to_number ELSE from_number END
+            ORDER BY created_at DESC
+          ) as rn
+        FROM sms_conversations
+        WHERE from_number = $1 OR to_number = $1
+      )
+      SELECT
+        contact_number,
+        message as last_message,
+        direction as last_direction,
+        is_read,
+        is_human_takeover,
+        created_at as last_message_at,
+        (SELECT COUNT(*) FROM sms_conversations
+         WHERE (from_number = contact_number OR to_number = contact_number)
+         AND (from_number = $1 OR to_number = $1)) as message_count,
+        (SELECT COUNT(*) FROM sms_conversations
+         WHERE from_number = contact_number AND to_number = $1 AND is_read = false) as unread_count
+      FROM ranked_messages
+      WHERE rn = 1
+      ORDER BY created_at DESC
+    `, [telnyxNumber]);
+
+    res.json({
+      success: true,
+      threads: result.rows,
+      total: result.rows.length,
+      telnyxNumber
+    });
+  } catch (error) {
+    console.error('Error fetching conversation threads:', error);
+    res.status(500).json({ error: 'Failed to fetch threads' });
+  }
+});
+
+// GET /api/v1/sms/conversations/thread/:phone - Get messages for a specific thread
+app.get('/api/v1/sms/conversations/thread/:phone', async (req, res) => {
+  try {
+    const { phone } = req.params;
+    const { limit = 100 } = req.query;
+    const telnyxNumber = process.env.TELNYX_PHONE_NUMBER || '+19858539097';
+
+    const result = await pool.query(`
+      SELECT * FROM sms_conversations
+      WHERE (from_number = $1 AND to_number = $2)
+         OR (from_number = $2 AND to_number = $1)
+      ORDER BY created_at ASC
+      LIMIT $3
+    `, [phone, telnyxNumber, parseInt(limit)]);
+
+    // Mark messages as read
+    await pool.query(`
+      UPDATE sms_conversations SET is_read = true
+      WHERE from_number = $1 AND to_number = $2 AND is_read = false
+    `, [phone, telnyxNumber]);
+
+    res.json({
+      success: true,
+      messages: result.rows,
+      total: result.rows.length,
+      contactNumber: phone,
+      telnyxNumber
+    });
+  } catch (error) {
+    console.error('Error fetching thread messages:', error);
+    res.status(500).json({ error: 'Failed to fetch messages' });
+  }
+});
+
+// POST /api/v1/sms/conversations/reply - Send manual reply (human takeover)
+app.post('/api/v1/sms/conversations/reply', async (req, res) => {
+  try {
+    const { to, message } = req.body;
+
+    if (!to || !message) {
+      return res.status(400).json({ error: 'to and message are required' });
+    }
+
+    let apiKey = process.env.TELNYX_API_KEY;
+    const fromNumber = process.env.TELNYX_PHONE_NUMBER;
+
+    if (!apiKey) {
+      const result = await pool.query('SELECT * FROM integrations WHERE provider = $1', ['telnyx']);
+      if (result.rows[0]?.api_key_encrypted) {
+        apiKey = decryptApiKey(result.rows[0].api_key_encrypted);
+      }
+    }
+
+    if (!apiKey || !fromNumber) {
+      return res.status(400).json({ error: 'Telnyx not configured' });
+    }
+
+    // Send the message
+    const telnyxResponse = await fetch('https://api.telnyx.com/v2/messages', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        from: fromNumber,
+        to: to,
+        text: message
+      })
+    });
+
+    const telnyxData = await telnyxResponse.json();
+
+    if (telnyxResponse.ok) {
+      // Save to conversations with human flag
+      await pool.query(`
+        INSERT INTO sms_conversations (from_number, to_number, direction, message, is_human_takeover)
+        VALUES ($1, $2, 'outbound', $3, true)
+      `, [fromNumber, to, message]);
+
+      // Mark conversation as human takeover
+      await pool.query(`
+        UPDATE sms_conversations SET is_human_takeover = true
+        WHERE (from_number = $1 AND to_number = $2) OR (from_number = $2 AND to_number = $1)
+      `, [to, fromNumber]);
+
+      res.json({
+        success: true,
+        message: 'Reply sent successfully',
+        messageId: telnyxData.data?.id
+      });
+    } else {
+      res.status(400).json({
+        error: telnyxData.errors?.[0]?.detail || 'Failed to send reply'
+      });
+    }
+  } catch (error) {
+    console.error('Error sending reply:', error);
+    res.status(500).json({ error: 'Failed to send reply' });
+  }
+});
+
+// PUT /api/v1/sms/conversations/takeover/:phone - Toggle human takeover for a thread
+app.put('/api/v1/sms/conversations/takeover/:phone', async (req, res) => {
+  try {
+    const { phone } = req.params;
+    const { enable } = req.body;
+    const telnyxNumber = process.env.TELNYX_PHONE_NUMBER || '+19858539097';
+
+    await pool.query(`
+      UPDATE sms_conversations SET is_human_takeover = $1
+      WHERE (from_number = $2 AND to_number = $3) OR (from_number = $3 AND to_number = $2)
+    `, [enable !== false, phone, telnyxNumber]);
+
+    res.json({
+      success: true,
+      message: enable !== false ? 'Human takeover enabled' : 'AI mode restored',
+      humanTakeover: enable !== false
+    });
+  } catch (error) {
+    console.error('Error toggling takeover:', error);
+    res.status(500).json({ error: 'Failed to toggle takeover' });
+  }
+});
+
+// PUT /api/v1/sms/conversations/:id/read - Mark message as read
+app.put('/api/v1/sms/conversations/:id/read', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    await pool.query('UPDATE sms_conversations SET is_read = true WHERE id = $1', [id]);
+
+    res.json({ success: true, message: 'Marked as read' });
+  } catch (error) {
+    console.error('Error marking as read:', error);
+    res.status(500).json({ error: 'Failed to mark as read' });
+  }
+});
+
+// DELETE /api/v1/sms/conversations/:id - Delete a single message
+app.delete('/api/v1/sms/conversations/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const result = await pool.query('DELETE FROM sms_conversations WHERE id = $1 RETURNING *', [id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Message not found' });
+    }
+
+    res.json({ success: true, message: 'Message deleted' });
+  } catch (error) {
+    console.error('Error deleting message:', error);
+    res.status(500).json({ error: 'Failed to delete message' });
+  }
+});
+
+// DELETE /api/v1/sms/conversations/thread/:phone - Delete entire thread
+app.delete('/api/v1/sms/conversations/thread/:phone', async (req, res) => {
+  try {
+    const { phone } = req.params;
+    const telnyxNumber = process.env.TELNYX_PHONE_NUMBER || '+19858539097';
+
+    const result = await pool.query(`
+      DELETE FROM sms_conversations
+      WHERE (from_number = $1 AND to_number = $2) OR (from_number = $2 AND to_number = $1)
+      RETURNING *
+    `, [phone, telnyxNumber]);
+
+    res.json({
+      success: true,
+      message: `Deleted ${result.rows.length} messages`,
+      deletedCount: result.rows.length
+    });
+  } catch (error) {
+    console.error('Error deleting thread:', error);
+    res.status(500).json({ error: 'Failed to delete thread' });
+  }
+});
+
+// GET /api/v1/sms/conversations/stats - Get conversation statistics
+app.get('/api/v1/sms/conversations/stats', async (req, res) => {
+  try {
+    const telnyxNumber = process.env.TELNYX_PHONE_NUMBER || '+19858539097';
+
+    const stats = await pool.query(`
+      SELECT
+        COUNT(*) as total_messages,
+        COUNT(DISTINCT CASE WHEN from_number = $1 THEN to_number ELSE from_number END) as total_contacts,
+        COUNT(*) FILTER (WHERE direction = 'inbound') as inbound_count,
+        COUNT(*) FILTER (WHERE direction = 'outbound') as outbound_count,
+        COUNT(*) FILTER (WHERE is_read = false AND direction = 'inbound') as unread_count,
+        COUNT(*) FILTER (WHERE is_human_takeover = true) as human_takeover_count,
+        COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '24 hours') as last_24h
+      FROM sms_conversations
+      WHERE from_number = $1 OR to_number = $1
+    `, [telnyxNumber]);
+
+    res.json({
+      success: true,
+      stats: stats.rows[0]
+    });
+  } catch (error) {
+    console.error('Error fetching stats:', error);
+    res.status(500).json({ error: 'Failed to fetch stats' });
   }
 });
 
@@ -12005,6 +12668,298 @@ app.get('/api/v1/promoters/stats/summary', async (req, res) => {
   } catch (error) {
     console.error('Error fetching promoter summary:', error);
     res.status(500).json({ error: 'Failed to fetch summary: ' + error.message });
+  }
+});
+
+// ============================================
+// TELNYX AI ASSISTANT QUERY ENDPOINT
+// ============================================
+
+// POST /api/v1/ai/query - Query data for Telnyx AI Assistant
+app.post('/api/v1/ai/query', async (req, res) => {
+  try {
+    const aiSource = req.headers['x-ai-source'];
+    const { query_type, event_id, search } = req.body;
+
+    console.log('AI Query:', { query_type, event_id, search, aiSource });
+
+    // Verify request comes from Telnyx AI Assistant
+    if (aiSource !== 'telnyx-assistant') {
+      return res.status(403).json({ error: 'Unauthorized AI source' });
+    }
+
+    if (!query_type) {
+      return res.status(400).json({ error: 'query_type is required' });
+    }
+
+    let result = {};
+
+    switch (query_type) {
+      case 'events': {
+        const events = await pool.query(`
+          SELECT id, name, event_date, event_type, venue_name, venue_city,
+                 expected_attendance, dress_code, theme, status
+          FROM events
+          WHERE status != 'cancelled'
+          ORDER BY event_date DESC
+          LIMIT 10
+        `);
+        result = {
+          type: 'events',
+          count: events.rows.length,
+          events: events.rows.map(e => ({
+            id: e.id,
+            name: e.name,
+            date: e.event_date,
+            type: e.event_type,
+            venue: e.venue_name,
+            city: e.venue_city,
+            attendance: e.expected_attendance,
+            dressCode: e.dress_code,
+            theme: e.theme,
+            status: e.status
+          }))
+        };
+        break;
+      }
+
+      case 'guests': {
+        let guestQuery = `
+          SELECT g.id, g.name, g.email, g.phone, g.status, g.party_size, g.category,
+                 e.name as event_name, e.event_date
+          FROM guests g
+          LEFT JOIN events e ON g.event_id = e.id
+          WHERE 1=1
+        `;
+        const params = [];
+
+        if (event_id) {
+          params.push(event_id);
+          guestQuery += ` AND g.event_id = $${params.length}`;
+        }
+
+        if (search) {
+          params.push(`%${search}%`);
+          guestQuery += ` AND (g.name ILIKE $${params.length} OR g.email ILIKE $${params.length} OR g.phone ILIKE $${params.length})`;
+        }
+
+        guestQuery += ` ORDER BY g.created_at DESC LIMIT 20`;
+
+        const guests = await pool.query(guestQuery, params);
+        result = {
+          type: 'guests',
+          count: guests.rows.length,
+          guests: guests.rows.map(g => ({
+            id: g.id,
+            name: g.name,
+            email: g.email,
+            phone: g.phone,
+            status: g.status,
+            partySize: g.party_size,
+            category: g.category,
+            eventName: g.event_name,
+            eventDate: g.event_date
+          }))
+        };
+        break;
+      }
+
+      case 'sponsors': {
+        const sponsors = await pool.query(`
+          SELECT id, company_name, contact_name, email, phone, tier,
+                 sponsorship_amount, status, benefits
+          FROM sponsors
+          ORDER BY sponsorship_amount DESC
+          LIMIT 20
+        `);
+        result = {
+          type: 'sponsors',
+          count: sponsors.rows.length,
+          tiers: {
+            bronze: '$1,000 - $5,000',
+            silver: '$5,000 - $15,000',
+            gold: '$15,000 - $35,000',
+            platinum: '$35,000 - $75,000',
+            diamond: '$75,000 - $150,000',
+            title: '$150,000+'
+          },
+          sponsors: sponsors.rows.map(s => ({
+            id: s.id,
+            company: s.company_name,
+            contact: s.contact_name,
+            email: s.email,
+            phone: s.phone,
+            tier: s.tier,
+            amount: s.sponsorship_amount,
+            status: s.status,
+            benefits: s.benefits
+          }))
+        };
+        break;
+      }
+
+      case 'staff': {
+        const staff = await pool.query(`
+          SELECT id, name, email, phone, role, experience_level, hourly_rate, status
+          FROM staff
+          WHERE status = 'active'
+          ORDER BY name
+          LIMIT 30
+        `);
+        result = {
+          type: 'staff',
+          count: staff.rows.length,
+          staff: staff.rows.map(s => ({
+            id: s.id,
+            name: s.name,
+            email: s.email,
+            phone: s.phone,
+            role: s.role,
+            experience: s.experience_level,
+            hourlyRate: s.hourly_rate
+          }))
+        };
+        break;
+      }
+
+      case 'tables': {
+        let tableQuery = `
+          SELECT tr.id, tr.table_name, tr.zone, tr.customer_name, tr.customer_email,
+                 tr.customer_phone, tr.party_size, tr.minimum_spend, tr.status,
+                 e.name as event_name, e.event_date
+          FROM table_reservations tr
+          LEFT JOIN events e ON tr.event_id = e.id
+          WHERE tr.status != 'cancelled'
+        `;
+        const params = [];
+
+        if (event_id) {
+          params.push(event_id);
+          tableQuery += ` AND tr.event_id = $${params.length}`;
+        }
+
+        tableQuery += ` ORDER BY e.event_date DESC, tr.created_at DESC LIMIT 20`;
+
+        const tables = await pool.query(tableQuery, params);
+        result = {
+          type: 'tables',
+          count: tables.rows.length,
+          minimumSpendInfo: 'VIP tables start at $2,000 minimum spend',
+          tables: tables.rows.map(t => ({
+            id: t.id,
+            tableName: t.table_name,
+            zone: t.zone,
+            customer: t.customer_name,
+            email: t.customer_email,
+            phone: t.customer_phone,
+            partySize: t.party_size,
+            minimumSpend: t.minimum_spend,
+            status: t.status,
+            eventName: t.event_name,
+            eventDate: t.event_date
+          }))
+        };
+        break;
+      }
+
+      case 'tickets': {
+        let ticketQuery = `
+          SELECT t.id, t.ticket_type, t.holder_name, t.holder_email, t.price,
+                 t.is_checked_in, t.qr_code,
+                 e.name as event_name, e.event_date
+          FROM tickets t
+          LEFT JOIN events e ON t.event_id = e.id
+          WHERE 1=1
+        `;
+        const params = [];
+
+        if (event_id) {
+          params.push(event_id);
+          ticketQuery += ` AND t.event_id = $${params.length}`;
+        }
+
+        if (search) {
+          params.push(`%${search}%`);
+          ticketQuery += ` AND (t.holder_name ILIKE $${params.length} OR t.holder_email ILIKE $${params.length})`;
+        }
+
+        ticketQuery += ` ORDER BY t.created_at DESC LIMIT 20`;
+
+        const tickets = await pool.query(ticketQuery, params);
+        result = {
+          type: 'tickets',
+          count: tickets.rows.length,
+          tickets: tickets.rows.map(t => ({
+            id: t.id,
+            type: t.ticket_type,
+            holder: t.holder_name,
+            email: t.holder_email,
+            price: t.price,
+            checkedIn: t.is_checked_in,
+            eventName: t.event_name,
+            eventDate: t.event_date
+          }))
+        };
+        break;
+      }
+
+      case 'overview': {
+        // Get a general overview for the AI
+        const [events, guests, sponsors, staff] = await Promise.all([
+          pool.query(`SELECT COUNT(*) as count FROM events WHERE status != 'cancelled'`),
+          pool.query(`SELECT COUNT(*) as count FROM guests`),
+          pool.query(`SELECT COUNT(*) as count, SUM(sponsorship_amount) as total FROM sponsors WHERE status = 'confirmed'`),
+          pool.query(`SELECT COUNT(*) as count FROM staff WHERE status = 'active'`)
+        ]);
+
+        // Get upcoming events
+        const upcomingEvents = await pool.query(`
+          SELECT name, event_date, venue_name, expected_attendance
+          FROM events
+          WHERE event_date >= CURRENT_DATE AND status != 'cancelled'
+          ORDER BY event_date ASC
+          LIMIT 3
+        `);
+
+        result = {
+          type: 'overview',
+          summary: {
+            totalEvents: parseInt(events.rows[0].count),
+            totalGuests: parseInt(guests.rows[0].count),
+            totalSponsors: parseInt(sponsors.rows[0].count),
+            sponsorRevenue: parseFloat(sponsors.rows[0].total) || 0,
+            activeStaff: parseInt(staff.rows[0].count)
+          },
+          upcomingEvents: upcomingEvents.rows.map(e => ({
+            name: e.name,
+            date: e.event_date,
+            venue: e.venue_name,
+            expectedAttendance: e.expected_attendance
+          })),
+          companyInfo: {
+            name: 'Berry Bly Productions',
+            specialty: 'Luxury Events & VIP Experiences',
+            location: 'Miami, FL',
+            contact: 'concierge@berrybly.com',
+            website: 'berry.merktop.com'
+          }
+        };
+        break;
+      }
+
+      default:
+        return res.status(400).json({
+          error: 'Invalid query_type',
+          validTypes: ['events', 'guests', 'sponsors', 'staff', 'tables', 'tickets', 'overview']
+        });
+    }
+
+    console.log('AI Query Result:', { type: result.type, count: result.count || 'N/A' });
+    res.json({ success: true, data: result });
+
+  } catch (error) {
+    console.error('AI Query error:', error);
+    res.status(500).json({ error: 'Failed to query data: ' + error.message });
   }
 });
 
