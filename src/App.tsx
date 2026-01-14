@@ -342,6 +342,58 @@ interface Integration {
   };
 }
 
+// Eventbrite Metrics Interface
+interface EventbriteMetrics {
+  connected: boolean;
+  organizationName?: string;
+  totalEvents: number;
+  activeEvents: number;
+  totalTicketsSold: number;
+  totalRevenue: number;
+  totalAttendees: number;
+  checkedIn: number;
+  conversionRate: number; // visitors to purchases
+  events: EventbriteEventMetrics[];
+  lastSync?: string;
+}
+
+interface EventbriteEventMetrics {
+  id: string;
+  name: string;
+  status: 'draft' | 'live' | 'started' | 'ended' | 'completed' | 'canceled';
+  startDate: string;
+  endDate?: string;
+  venue?: string;
+  url: string;
+  capacity: number;
+  ticketsSold: number;
+  ticketsRemaining: number;
+  grossRevenue: number;
+  netRevenue: number;
+  fees: number;
+  refunds: number;
+  pageViews: number;
+  uniqueVisitors: number;
+  conversionRate: number;
+  attendees: {
+    registered: number;
+    checkedIn: number;
+    noShow: number;
+  };
+  ticketTypes: {
+    name: string;
+    price: number;
+    sold: number;
+    remaining: number;
+    revenue: number;
+  }[];
+  salesByDay: {
+    date: string;
+    tickets: number;
+    revenue: number;
+  }[];
+}
+
 // Budget Interfaces
 interface BudgetCategory {
   id: number;
@@ -1265,6 +1317,20 @@ function App() {
   const [integrationLoading, setIntegrationLoading] = useState<string | null>(null);
   const [mailchimpAudiences, setMailchimpAudiences] = useState<{id: string, name: string, memberCount: number}[]>([]);
 
+  // Eventbrite Metrics state
+  const [eventbriteMetrics, setEventbriteMetrics] = useState<EventbriteMetrics>({
+    connected: false,
+    totalEvents: 0,
+    activeEvents: 0,
+    totalTicketsSold: 0,
+    totalRevenue: 0,
+    totalAttendees: 0,
+    checkedIn: 0,
+    conversionRate: 0,
+    events: [],
+  });
+  const [loadingEventbriteMetrics, setLoadingEventbriteMetrics] = useState(false);
+
   // Client Portal state
   const [clientAccesses, setClientAccesses] = useState<ClientAccess[]>([]);
   const [showClientAccessForm, setShowClientAccessForm] = useState(false);
@@ -1448,6 +1514,7 @@ function App() {
       // Refresh data
       fetchTickets();
       fetchOrders();
+      fetchEventbriteMetrics();
     } catch (error) {
       console.error('Error syncing Eventbrite:', error);
       addToast('Failed to sync with Eventbrite', 'error');
@@ -1455,6 +1522,83 @@ function App() {
       setSyncingEventbrite(false);
     }
   };
+
+  // Fetch Eventbrite metrics
+  const fetchEventbriteMetrics = useCallback(async () => {
+    // Check if Eventbrite is connected first
+    const eventbriteIntegration = integrations.find(i => i.provider === 'eventbrite');
+    if (!eventbriteIntegration || eventbriteIntegration.status !== 'connected') {
+      setEventbriteMetrics(prev => ({ ...prev, connected: false }));
+      return;
+    }
+
+    setLoadingEventbriteMetrics(true);
+    try {
+      const res = await fetch(`${API_URL}/integrations/eventbrite/metrics`);
+      if (res.ok) {
+        const data = await res.json();
+        setEventbriteMetrics({
+          connected: true,
+          organizationName: data.organizationName,
+          totalEvents: data.totalEvents || 0,
+          activeEvents: data.activeEvents || 0,
+          totalTicketsSold: data.totalTicketsSold || 0,
+          totalRevenue: data.totalRevenue || 0,
+          totalAttendees: data.totalAttendees || 0,
+          checkedIn: data.checkedIn || 0,
+          conversionRate: data.conversionRate || 0,
+          events: data.events || [],
+          lastSync: new Date().toISOString(),
+        });
+      } else {
+        // If endpoint doesn't exist yet, calculate from local tickets
+        const eventbriteTickets = tickets.filter(t => t.source === 'eventbrite');
+
+        setEventbriteMetrics({
+          connected: true,
+          organizationName: eventbriteIntegration.connectedUser?.name,
+          totalEvents: events.filter(e => e.eventbriteUrl).length,
+          activeEvents: events.filter(e => e.eventbriteUrl && e.status !== 'completed' && e.status !== 'cancelled').length,
+          totalTicketsSold: eventbriteTickets.length,
+          totalRevenue: eventbriteTickets.reduce((sum, t) => sum + (t.price || 0), 0),
+          totalAttendees: eventbriteTickets.filter(t => t.status === 'valid' || t.status === 'used').length,
+          checkedIn: eventbriteTickets.filter(t => t.status === 'used').length,
+          conversionRate: 0,
+          events: [],
+          lastSync: new Date().toISOString(),
+        });
+      }
+    } catch (error) {
+      console.error('Error fetching Eventbrite metrics:', error);
+      // Fallback to local data calculation
+      const eventbriteIntegration = integrations.find(i => i.provider === 'eventbrite');
+      const eventbriteTickets = tickets.filter(t => t.source === 'eventbrite');
+
+      setEventbriteMetrics({
+        connected: eventbriteIntegration?.status === 'connected',
+        organizationName: eventbriteIntegration?.connectedUser?.name,
+        totalEvents: events.filter(e => e.eventbriteUrl).length,
+        activeEvents: events.filter(e => e.eventbriteUrl && e.status !== 'completed' && e.status !== 'cancelled').length,
+        totalTicketsSold: eventbriteTickets.length,
+        totalRevenue: eventbriteTickets.reduce((sum, t) => sum + (t.price || 0), 0),
+        totalAttendees: eventbriteTickets.filter(t => t.status === 'valid' || t.status === 'used').length,
+        checkedIn: eventbriteTickets.filter(t => t.status === 'used').length,
+        conversionRate: 0,
+        events: [],
+        lastSync: new Date().toISOString(),
+      });
+    } finally {
+      setLoadingEventbriteMetrics(false);
+    }
+  }, [integrations, tickets, events]);
+
+  // Fetch Eventbrite metrics when integrations change
+  useEffect(() => {
+    const eventbriteIntegration = integrations.find(i => i.provider === 'eventbrite');
+    if (eventbriteIntegration?.status === 'connected') {
+      fetchEventbriteMetrics();
+    }
+  }, [integrations, fetchEventbriteMetrics]);
 
   // Create a manual ticket
   const createTicket = async () => {
@@ -3753,6 +3897,129 @@ function App() {
               <MetricCard label="Total Guests" value={stats.totalPartySize} subtitle="Expected party size" color="#a78bfa" />
               <MetricCard label="Check-in Rate" value={`${stats.checkInRate}%`} subtitle={`${stats.checkedIn} checked in`} color="#3b82f6" />
             </div>
+
+            {/* Eventbrite Metrics */}
+            <h2 style={{ fontSize: 18, fontWeight: 600, marginBottom: 16, color: '#f05537', display: 'flex', alignItems: 'center', gap: 8 }}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12.7 15.5c0 1.1-.9 2-2 2s-2-.9-2-2 .9-2 2-2 2 .9 2 2zm6.8-10l-3.5 6.5c-.1.2-.2.3-.4.4l-4.6 2.6c-.2.1-.4.1-.6 0l-2.3-1.3c-.2-.1-.3-.3-.4-.5l-1.3-4.6c0-.2 0-.4.1-.6l2.6-4.6c.1-.2.3-.3.5-.4L14 1c.2 0 .4 0 .6.1l3.5 2c.2.1.3.3.4.5.1.2.1.4 0 .6l-1.3 4.6c0 .2 0 .4.1.6l2.2 3.9c.3.5.1 1.1-.4 1.4-.5.3-1.1.1-1.4-.4l-2.2-3.9c-.3-.5-.4-1.1-.3-1.6l1.3-4.6-3.5-2L6.5 6l1.3 4.6 2.3 1.3 4.6-2.6c.5-.3 1.1-.1 1.4.4.3.5.1 1.1-.4 1.4l-4.6 2.6c-.5.3-1.1.4-1.6.3l-2.3-1.3c-.5-.3-.9-.8-1.1-1.4L4.8 6.7c-.2-.5-.1-1.1.1-1.6l2.6-4.6c.3-.5.8-.9 1.4-1.1l4.6-1.3c.5-.2 1.1-.1 1.6.1l3.5 2c.5.3.9.8 1.1 1.4z"/>
+              </svg>
+              Eventbrite Metrics
+              {eventbriteMetrics.connected && (
+                <span style={{ fontSize: 12, color: '#22c55e', marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#22c55e' }} />
+                  Connected
+                </span>
+              )}
+            </h2>
+            {loadingEventbriteMetrics ? (
+              <div style={{ background: '#0a0a0a', borderRadius: 12, border: '1px solid #1a1a1a', padding: 48, textAlign: 'center' }}>
+                <div style={{ width: 40, height: 40, borderRadius: '50%', border: '3px solid #f05537', borderTopColor: 'transparent', animation: 'spin 1s linear infinite', margin: '0 auto 16px' }} />
+                <p style={{ color: '#666' }}>Loading Eventbrite metrics...</p>
+              </div>
+            ) : !eventbriteMetrics.connected ? (
+              <div style={{ background: '#0a0a0a', borderRadius: 12, border: '1px solid #1a1a1a', padding: 48, textAlign: 'center' }}>
+                <div style={{ width: 64, height: 64, borderRadius: 12, background: 'linear-gradient(135deg, #f05537 0%, #ff7847 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}>
+                  <span style={{ fontSize: 28 }}>🎟️</span>
+                </div>
+                <h3 style={{ fontSize: 18, fontWeight: 600, color: '#fff', marginBottom: 8 }}>Connect Eventbrite</h3>
+                <p style={{ color: '#888', marginBottom: 16 }}>Link your Eventbrite account to see ticket sales, attendees, and revenue metrics.</p>
+                <button
+                  onClick={() => setActiveView('integrations')}
+                  style={{ background: 'linear-gradient(135deg, #f05537 0%, #ff7847 100%)', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: 8, fontSize: 14, fontWeight: 500, cursor: 'pointer' }}
+                >
+                  Connect Eventbrite
+                </button>
+              </div>
+            ) : (
+              <>
+                {/* Eventbrite Stats Grid */}
+                <div className="stats-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 24 }}>
+                  <MetricCard
+                    label="Total Events"
+                    value={eventbriteMetrics.totalEvents}
+                    subtitle={`${eventbriteMetrics.activeEvents} active`}
+                    color="#f05537"
+                  />
+                  <MetricCard
+                    label="Tickets Sold"
+                    value={eventbriteMetrics.totalTicketsSold.toLocaleString()}
+                    subtitle="Total sales"
+                    color="#22c55e"
+                  />
+                  <MetricCard
+                    label="Revenue"
+                    value={`$${eventbriteMetrics.totalRevenue.toLocaleString()}`}
+                    subtitle="Eventbrite sales"
+                    color="#d4af37"
+                  />
+                  <MetricCard
+                    label="Attendees"
+                    value={eventbriteMetrics.totalAttendees.toLocaleString()}
+                    subtitle={`${eventbriteMetrics.checkedIn} checked in`}
+                    color="#3b82f6"
+                  />
+                </div>
+
+                {/* Eventbrite Events Table */}
+                {eventbriteMetrics.events.length > 0 && (
+                  <div style={{ background: '#0a0a0a', borderRadius: 12, border: '1px solid #1a1a1a', padding: 24, marginBottom: 24 }}>
+                    <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 16, color: '#fff' }}>Eventbrite Events Performance</h3>
+                    <div style={{ overflowX: 'auto' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                        <thead>
+                          <tr style={{ borderBottom: '1px solid #1a1a1a' }}>
+                            <th style={{ textAlign: 'left', padding: '12px 8px', color: '#888', fontSize: 12, fontWeight: 500 }}>Event</th>
+                            <th style={{ textAlign: 'center', padding: '12px 8px', color: '#888', fontSize: 12, fontWeight: 500 }}>Status</th>
+                            <th style={{ textAlign: 'right', padding: '12px 8px', color: '#888', fontSize: 12, fontWeight: 500 }}>Tickets Sold</th>
+                            <th style={{ textAlign: 'right', padding: '12px 8px', color: '#888', fontSize: 12, fontWeight: 500 }}>Revenue</th>
+                            <th style={{ textAlign: 'right', padding: '12px 8px', color: '#888', fontSize: 12, fontWeight: 500 }}>Attendees</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {eventbriteMetrics.events.map((event) => (
+                            <tr key={event.id} style={{ borderBottom: '1px solid #0f0f0f' }}>
+                              <td style={{ padding: '12px 8px' }}>
+                                <div style={{ fontWeight: 500, color: '#fff', fontSize: 14 }}>{event.name}</div>
+                                <div style={{ fontSize: 12, color: '#666' }}>{new Date(event.startDate).toLocaleDateString()}</div>
+                              </td>
+                              <td style={{ textAlign: 'center', padding: '12px 8px' }}>
+                                <span style={{
+                                  padding: '4px 8px',
+                                  borderRadius: 6,
+                                  fontSize: 12,
+                                  fontWeight: 500,
+                                  background: event.status === 'live' ? 'rgba(34, 197, 94, 0.1)' :
+                                    event.status === 'started' ? 'rgba(59, 130, 246, 0.1)' :
+                                    event.status === 'ended' || event.status === 'completed' ? 'rgba(107, 114, 128, 0.1)' :
+                                    event.status === 'canceled' ? 'rgba(239, 68, 68, 0.1)' : 'rgba(251, 191, 36, 0.1)',
+                                  color: event.status === 'live' ? '#22c55e' :
+                                    event.status === 'started' ? '#3b82f6' :
+                                    event.status === 'ended' || event.status === 'completed' ? '#6b7280' :
+                                    event.status === 'canceled' ? '#ef4444' : '#fbbf24'
+                                }}>
+                                  {event.status.charAt(0).toUpperCase() + event.status.slice(1)}
+                                </span>
+                              </td>
+                              <td style={{ textAlign: 'right', padding: '12px 8px', color: '#fff', fontWeight: 500 }}>{event.ticketsSold.toLocaleString()}</td>
+                              <td style={{ textAlign: 'right', padding: '12px 8px', color: '#22c55e', fontWeight: 500 }}>${event.grossRevenue.toLocaleString()}</td>
+                              <td style={{ textAlign: 'right', padding: '12px 8px', color: '#fff' }}>
+                                {event.attendees.registered.toLocaleString()}
+                                <span style={{ color: '#666', fontSize: 12 }}> / {event.ticketsSold}</span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    {eventbriteMetrics.lastSync && (
+                      <div style={{ marginTop: 12, fontSize: 12, color: '#666', textAlign: 'right' }}>
+                        Last synced: {new Date(eventbriteMetrics.lastSync).toLocaleString()}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </>
+            )}
 
             {/* Pipeline Status */}
             <div style={{ background: '#0a0a0a', borderRadius: 12, border: '1px solid #1a1a1a', padding: 24 }}>
