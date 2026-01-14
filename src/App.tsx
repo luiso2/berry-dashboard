@@ -2046,6 +2046,7 @@ function App() {
       const res = await fetch(`${API_URL}/telnyx/send-sms`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({
           to: smsFormData.to,
           message: smsFormData.message

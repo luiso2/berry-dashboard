@@ -9839,7 +9839,10 @@ app.post('/api/v1/telnyx/send-sms', async (req, res) => {
     const { to, message, from } = req.body;
     const userId = req.user?.id;
 
+    console.log('SMS Request:', { to, message: message?.substring(0, 20), userId, hasBody: !!req.body });
+
     if (!to || !message) {
+      console.log('SMS Error: Missing to or message', { to: !!to, message: !!message });
       return res.status(400).json({ error: 'Phone number (to) and message are required' });
     }
 
@@ -9869,13 +9872,17 @@ app.post('/api/v1/telnyx/send-sms', async (req, res) => {
     }
 
     if (!apiKey) {
+      console.log('SMS Error: No API key found for user:', userId);
       return res.status(400).json({ error: 'Telnyx integration not configured. Please connect Telnyx in Integrations.' });
     }
 
     const fromNumber = from || extraConfig.phone_number;
     const messagingProfileId = extraConfig.messaging_profile_id;
 
+    console.log('SMS Config:', { hasApiKey: !!apiKey, fromNumber, messagingProfileId });
+
     if (!fromNumber) {
+      console.log('SMS Error: No from number configured');
       return res.status(400).json({ error: 'No sender phone number configured' });
     }
 
