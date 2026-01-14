@@ -3823,6 +3823,268 @@ function App() {
         {/* Analytics Page */}
         {activeView === 'analytics' && (
           <div className="page-content" style={{ padding: '32px', animation: 'fadeIn 0.3s ease' }}>
+
+            {/* ═══════════════════════════════════════════════════════════════════════ */}
+            {/* EXECUTIVE SUMMARY - Maxim Pitch Dashboard */}
+            {/* ═══════════════════════════════════════════════════════════════════════ */}
+            <div style={{
+              background: 'linear-gradient(135deg, #0f0d0a 0%, #1a1714 50%, #0f0d0a 100%)',
+              borderRadius: 20,
+              border: '2px solid #d4af37',
+              padding: 32,
+              marginBottom: 32,
+              boxShadow: '0 0 60px rgba(212, 175, 55, 0.1), inset 0 1px 0 rgba(255,255,255,0.05)'
+            }}>
+              {/* Header */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 28, paddingBottom: 20, borderBottom: '1px solid rgba(212,175,55,0.2)' }}>
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <div style={{
+                      width: 48, height: 48,
+                      background: 'linear-gradient(135deg, #d4af37, #f5d87a)',
+                      borderRadius: 12,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      boxShadow: '0 4px 20px rgba(212,175,55,0.3)'
+                    }}>
+                      <span style={{ fontSize: 24 }}>👑</span>
+                    </div>
+                    <div>
+                      <h2 style={{ fontSize: 26, fontWeight: 800, color: '#d4af37', margin: 0, letterSpacing: '-0.5px' }}>
+                        Executive Dashboard
+                      </h2>
+                      <p style={{ color: '#888', fontSize: 13, margin: '4px 0 0', fontWeight: 500 }}>Real-time event intelligence for {selectedEvent?.name || 'All Events'}</p>
+                    </div>
+                  </div>
+                </div>
+                <div style={{ textAlign: 'right' }}>
+                  <div style={{
+                    fontSize: 14,
+                    color: '#888',
+                    background: '#111',
+                    padding: '8px 16px',
+                    borderRadius: 8,
+                    border: '1px solid #222'
+                  }}>
+                    Last updated: {new Date().toLocaleString()}
+                  </div>
+                </div>
+              </div>
+
+              {/* Health Score & Key Metrics Row */}
+              <div style={{ display: 'grid', gridTemplateColumns: '200px 1fr', gap: 32, marginBottom: 28 }}>
+                {/* Event Health Score */}
+                <div style={{
+                  background: 'radial-gradient(circle at center, #1a1a1a 0%, #0a0a0a 100%)',
+                  borderRadius: 16,
+                  padding: 24,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  border: '1px solid #222'
+                }}>
+                  <div style={{ fontSize: 12, color: '#888', fontWeight: 600, marginBottom: 12, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Event Health</div>
+                  <div style={{ position: 'relative', width: 120, height: 120 }}>
+                    <svg width="120" height="120" viewBox="0 0 120 120">
+                      <circle cx="60" cy="60" r="52" fill="none" stroke="#1a1a1a" strokeWidth="12" />
+                      <circle
+                        cx="60"
+                        cy="60"
+                        r="52"
+                        fill="none"
+                        stroke={(() => {
+                          const healthScore = Math.round(
+                            ((stats.conversionRate || 0) * 0.3) +
+                            ((eventbriteMetrics.totalTicketsSold > 0 ? Math.min((eventbriteMetrics.totalTicketsSold / (eventbriteMetrics.events[0]?.capacity || 500)) * 100, 100) : 50) * 0.3) +
+                            ((sponsorStats.active > 0 ? 100 : 0) * 0.2) +
+                            ((stats.checkedIn / (stats.total || 1)) * 100 * 0.2)
+                          );
+                          return healthScore >= 75 ? '#22c55e' : healthScore >= 50 ? '#fbbf24' : '#ef4444';
+                        })()}
+                        strokeWidth="12"
+                        strokeLinecap="round"
+                        strokeDasharray={`${(() => {
+                          const healthScore = Math.round(
+                            ((stats.conversionRate || 0) * 0.3) +
+                            ((eventbriteMetrics.totalTicketsSold > 0 ? Math.min((eventbriteMetrics.totalTicketsSold / (eventbriteMetrics.events[0]?.capacity || 500)) * 100, 100) : 50) * 0.3) +
+                            ((sponsorStats.active > 0 ? 100 : 0) * 0.2) +
+                            ((stats.checkedIn / (stats.total || 1)) * 100 * 0.2)
+                          );
+                          return (healthScore / 100) * 327;
+                        })()} 327`}
+                        transform="rotate(-90 60 60)"
+                        style={{ transition: 'stroke-dasharray 0.5s ease' }}
+                      />
+                    </svg>
+                    <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+                      <span style={{
+                        fontSize: 36,
+                        fontWeight: 800,
+                        color: (() => {
+                          const healthScore = Math.round(
+                            ((stats.conversionRate || 0) * 0.3) +
+                            ((eventbriteMetrics.totalTicketsSold > 0 ? Math.min((eventbriteMetrics.totalTicketsSold / (eventbriteMetrics.events[0]?.capacity || 500)) * 100, 100) : 50) * 0.3) +
+                            ((sponsorStats.active > 0 ? 100 : 0) * 0.2) +
+                            ((stats.checkedIn / (stats.total || 1)) * 100 * 0.2)
+                          );
+                          return healthScore >= 75 ? '#22c55e' : healthScore >= 50 ? '#fbbf24' : '#ef4444';
+                        })()
+                      }}>
+                        {Math.round(
+                          ((stats.conversionRate || 0) * 0.3) +
+                          ((eventbriteMetrics.totalTicketsSold > 0 ? Math.min((eventbriteMetrics.totalTicketsSold / (eventbriteMetrics.events[0]?.capacity || 500)) * 100, 100) : 50) * 0.3) +
+                          ((sponsorStats.active > 0 ? 100 : 0) * 0.2) +
+                          ((stats.checkedIn / (stats.total || 1)) * 100 * 0.2)
+                        )}
+                      </span>
+                      <span style={{ fontSize: 11, color: '#666', fontWeight: 500 }}>/ 100</span>
+                    </div>
+                  </div>
+                  <div style={{ fontSize: 11, color: '#666', marginTop: 8, textAlign: 'center' }}>
+                    {(() => {
+                      const healthScore = Math.round(
+                        ((stats.conversionRate || 0) * 0.3) +
+                        ((eventbriteMetrics.totalTicketsSold > 0 ? Math.min((eventbriteMetrics.totalTicketsSold / (eventbriteMetrics.events[0]?.capacity || 500)) * 100, 100) : 50) * 0.3) +
+                        ((sponsorStats.active > 0 ? 100 : 0) * 0.2) +
+                        ((stats.checkedIn / (stats.total || 1)) * 100 * 0.2)
+                      );
+                      return healthScore >= 75 ? 'Excellent Performance' : healthScore >= 50 ? 'On Track' : 'Needs Attention';
+                    })()}
+                  </div>
+                </div>
+
+                {/* Key Performance Indicators */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16 }}>
+                  <div style={{ background: '#111', borderRadius: 12, padding: 20, border: '1px solid #1a1a1a' }}>
+                    <div style={{ fontSize: 11, color: '#22c55e', fontWeight: 600, marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Total Revenue</div>
+                    <div style={{ fontSize: 28, fontWeight: 800, color: '#fff', lineHeight: 1 }}>
+                      ${((eventbriteMetrics.totalNetRevenue || 0) + (sponsorStats.revenue || 0) + (tableStats.revenue || 0)).toLocaleString()}
+                    </div>
+                    <div style={{ fontSize: 11, color: '#666', marginTop: 6 }}>All streams combined</div>
+                  </div>
+                  <div style={{ background: '#111', borderRadius: 12, padding: 20, border: '1px solid #1a1a1a' }}>
+                    <div style={{ fontSize: 11, color: '#f05537', fontWeight: 600, marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Tickets Sold</div>
+                    <div style={{ fontSize: 28, fontWeight: 800, color: '#fff', lineHeight: 1 }}>
+                      {eventbriteMetrics.totalTicketsSold || ticketStats.total || 0}
+                    </div>
+                    <div style={{ fontSize: 11, color: '#666', marginTop: 6 }}>
+                      {eventbriteMetrics.conversionRate > 0 ? `${eventbriteMetrics.conversionRate}% conversion` : 'Connect Eventbrite for data'}
+                    </div>
+                  </div>
+                  <div style={{ background: '#111', borderRadius: 12, padding: 20, border: '1px solid #1a1a1a' }}>
+                    <div style={{ fontSize: 11, color: '#d4af37', fontWeight: 600, marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.5px' }}>VIP Guests</div>
+                    <div style={{ fontSize: 28, fontWeight: 800, color: '#fff', lineHeight: 1 }}>
+                      {stats.vip + stats.priority}
+                    </div>
+                    <div style={{ fontSize: 11, color: '#666', marginTop: 6 }}>
+                      {stats.total > 0 ? `${Math.round(((stats.vip + stats.priority) / stats.total) * 100)}% of total` : 'No guests yet'}
+                    </div>
+                  </div>
+                  <div style={{ background: '#111', borderRadius: 12, padding: 20, border: '1px solid #1a1a1a' }}>
+                    <div style={{ fontSize: 11, color: '#a78bfa', fontWeight: 600, marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Sponsors</div>
+                    <div style={{ fontSize: 28, fontWeight: 800, color: '#fff', lineHeight: 1 }}>
+                      {sponsorStats.active}
+                    </div>
+                    <div style={{ fontSize: 11, color: '#666', marginTop: 6 }}>
+                      ${sponsorStats.revenue.toLocaleString()} revenue
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Insights & Alerts Row */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }}>
+                {/* Key Insights */}
+                <div style={{ background: '#0a0a0a', borderRadius: 12, padding: 20, border: '1px solid #1a1a1a' }}>
+                  <h4 style={{ fontSize: 14, fontWeight: 600, color: '#d4af37', margin: '0 0 16px', display: 'flex', alignItems: 'center', gap: 8 }}>
+                    ✨ Key Insights
+                  </h4>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                    {eventbriteMetrics.salesTrend === 'up' && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 13 }}>
+                        <span style={{ color: '#22c55e', fontSize: 16 }}>↗</span>
+                        <span style={{ color: '#ccc' }}>Sales trending <strong style={{ color: '#22c55e' }}>up</strong> - {eventbriteMetrics.avgDailySales.toFixed(1)} tickets/day</span>
+                      </div>
+                    )}
+                    {eventbriteMetrics.salesTrend === 'down' && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 13 }}>
+                        <span style={{ color: '#ef4444', fontSize: 16 }}>↘</span>
+                        <span style={{ color: '#ccc' }}>Sales trending <strong style={{ color: '#ef4444' }}>down</strong> - consider promotion</span>
+                      </div>
+                    )}
+                    {stats.conversionRate >= 70 && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 13 }}>
+                        <span style={{ color: '#22c55e', fontSize: 16 }}>✓</span>
+                        <span style={{ color: '#ccc' }}>Strong guest list approval rate: <strong style={{ color: '#22c55e' }}>{stats.conversionRate}%</strong></span>
+                      </div>
+                    )}
+                    {stats.highScoreGuests > 10 && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 13 }}>
+                        <span style={{ color: '#fbbf24', fontSize: 16 }}>★</span>
+                        <span style={{ color: '#ccc' }}><strong style={{ color: '#fbbf24' }}>{stats.highScoreGuests}</strong> high-value guests (AI Score 70+)</span>
+                      </div>
+                    )}
+                    {sponsorStats.active > 0 && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 13 }}>
+                        <span style={{ color: '#a78bfa', fontSize: 16 }}>◆</span>
+                        <span style={{ color: '#ccc' }}><strong style={{ color: '#a78bfa' }}>{sponsorStats.active}</strong> active sponsors contributing ${sponsorStats.revenue.toLocaleString()}</span>
+                      </div>
+                    )}
+                    {tableStats.total > 0 && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 13 }}>
+                        <span style={{ color: '#60a5fa', fontSize: 16 }}>◉</span>
+                        <span style={{ color: '#ccc' }}><strong style={{ color: '#60a5fa' }}>{tableStats.confirmed}</strong> of {tableStats.total} tables confirmed</span>
+                      </div>
+                    )}
+                    {!eventbriteMetrics.connected && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 13 }}>
+                        <span style={{ color: '#888', fontSize: 16 }}>○</span>
+                        <span style={{ color: '#888' }}>Connect Eventbrite for ticket analytics</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Action Items */}
+                <div style={{ background: '#0a0a0a', borderRadius: 12, padding: 20, border: '1px solid #1a1a1a' }}>
+                  <h4 style={{ fontSize: 14, fontWeight: 600, color: '#f05537', margin: '0 0 16px', display: 'flex', alignItems: 'center', gap: 8 }}>
+                    ⚡ Action Items
+                  </h4>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                    {stats.pending > 5 && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 13 }}>
+                        <span style={{ width: 8, height: 8, borderRadius: 4, background: '#fbbf24' }} />
+                        <span style={{ color: '#ccc' }}><strong style={{ color: '#fbbf24' }}>{stats.pending}</strong> guests pending review</span>
+                      </div>
+                    )}
+                    {stats.total - stats.emailsSent > 10 && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 13 }}>
+                        <span style={{ width: 8, height: 8, borderRadius: 4, background: '#3b82f6' }} />
+                        <span style={{ color: '#ccc' }}><strong style={{ color: '#3b82f6' }}>{stats.total - stats.emailsSent}</strong> invitations pending send</span>
+                      </div>
+                    )}
+                    {eventbriteMetrics.salesTrend === 'down' && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 13 }}>
+                        <span style={{ width: 8, height: 8, borderRadius: 4, background: '#ef4444' }} />
+                        <span style={{ color: '#ccc' }}>Consider social media push or discount code</span>
+                      </div>
+                    )}
+                    {!eventbriteMetrics.connected && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 13 }}>
+                        <span style={{ width: 8, height: 8, borderRadius: 4, background: '#888' }} />
+                        <span style={{ color: '#888' }}>Go to Integrations → Connect Eventbrite</span>
+                      </div>
+                    )}
+                    {stats.pending === 0 && stats.emailsSent === stats.total && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 13 }}>
+                        <span style={{ color: '#22c55e', fontSize: 16 }}>✓</span>
+                        <span style={{ color: '#22c55e' }}>All caught up! No pending actions.</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+
             {/* Key Metrics */}
             <div className="stats-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, marginBottom: 32 }}>
               <MetricCard label="Conversion Rate" value={`${stats.conversionRate}%`} subtitle="Accepted / Total" color="#22c55e" />
