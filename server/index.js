@@ -5442,7 +5442,10 @@ app.post('/api/v1/gpt/events', async (req, res) => {
 // POST /api/v1/gpt/guests - Unified guests session
 app.post('/api/v1/gpt/guests', async (req, res) => {
   try {
-    const { action, guestId, eventId, data, filters } = req.body;
+    // Extract known fields and treat rest as potential flat data
+    const { action, guestId, eventId, data, filters, ...flatFields } = req.body;
+    // Merge data object with flat fields (flat fields take precedence for backwards compatibility)
+    const mergedData = { ...(data || {}), ...flatFields };
     const userId = req.user?.id;
 
     switch (action) {
@@ -5467,7 +5470,8 @@ app.post('/api/v1/gpt/guests', async (req, res) => {
       }
 
       case 'add': {
-        const { name, email, phone, instagram, partySize, category, notes } = data || {};
+        // Support both { data: { name, email } } and flat { name, email } formats
+        const { name, email, phone, instagram, partySize, category, notes } = mergedData;
         if (!name || !email) return res.status(400).json({ error: 'name and email required' });
         const result = await pool.query(`
           INSERT INTO guests (name, email, phone, instagram, party_size, category, notes, user_id)
@@ -5489,7 +5493,7 @@ app.post('/api/v1/gpt/guests', async (req, res) => {
         let idx = 1;
         const allowedFields = ['name', 'email', 'phone', 'instagram', 'party_size', 'status', 'notes'];
         const fieldMap = { partySize: 'party_size', category: 'status' };
-        for (const [key, value] of Object.entries(data || {})) {
+        for (const [key, value] of Object.entries(mergedData)) {
           const dbField = fieldMap[key] || key;
           if (allowedFields.includes(dbField) && value !== undefined) {
             fields.push(`${dbField} = $${idx++}`);
@@ -5500,7 +5504,7 @@ app.post('/api/v1/gpt/guests', async (req, res) => {
         values.push(guestId);
         await pool.query(`UPDATE guests SET ${fields.join(', ')} WHERE id = $${idx}`, values);
         // Emit WebSocket notification
-        emitNotification(userId, 'updated', 'guest', { id: guestId, name: checkUpd.rows[0].name, ...data });
+        emitNotification(userId, 'updated', 'guest', { id: guestId, name: checkUpd.rows[0].name, ...mergedData });
         return res.json({ success: true, message: 'Guest updated' });
       }
 
