@@ -713,8 +713,45 @@ const styles = `
   }
 
   @keyframes grow {
-    from { transform: scaleX(0); }
-    to { transform: scaleX(1); }
+    from { transform: scaleY(0); opacity: 0; }
+    to { transform: scaleY(1); opacity: 1; }
+  }
+
+  @keyframes growBar {
+    0% { transform: scaleY(0); opacity: 0; }
+    60% { transform: scaleY(1.05); opacity: 1; }
+    100% { transform: scaleY(1); opacity: 1; }
+  }
+
+  @keyframes circleGrow {
+    from { stroke-dasharray: 0 440; }
+    to { stroke-dasharray: var(--circle-progress) 440; }
+  }
+
+  @keyframes countUp {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  @keyframes numberPop {
+    0% { transform: scale(0.5); opacity: 0; }
+    70% { transform: scale(1.1); }
+    100% { transform: scale(1); opacity: 1; }
+  }
+
+  .chart-bar-animated {
+    transform-origin: bottom;
+    animation: growBar 0.6s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+    opacity: 0;
+  }
+
+  .chart-number-animated {
+    animation: numberPop 0.4s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+    opacity: 0;
+  }
+
+  .chart-circle-animated {
+    animation: circleGrow 1s cubic-bezier(0.4, 0, 0.2, 1) forwards;
   }
 
   .btn-hover:hover {
@@ -4180,10 +4217,10 @@ function App() {
               <div style={{ background: '#0a0a0a', borderRadius: 12, border: '1px solid #1a1a1a', padding: 24 }}>
                 <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 24, color: '#fff' }}>Category Distribution</h3>
                 <div style={{ display: 'flex', justifyContent: 'space-around', alignItems: 'flex-end', height: 200, paddingBottom: 40 }}>
-                  <ChartBar value={stats.pending} max={stats.total} label="Pending" color="#fbbf24" />
-                  <ChartBar value={stats.vip} max={stats.total} label="VIP" color="#a78bfa" />
-                  <ChartBar value={stats.priority} max={stats.total} label="Priority" color="#60a5fa" />
-                  <ChartBar value={stats.standard} max={stats.total} label="Standard" color="#6b7280" />
+                  <ChartBar value={stats.pending} max={stats.total} label="Pending" color="#fbbf24" delay={0} />
+                  <ChartBar value={stats.vip} max={stats.total} label="VIP" color="#a78bfa" delay={0.1} />
+                  <ChartBar value={stats.priority} max={stats.total} label="Priority" color="#60a5fa" delay={0.2} />
+                  <ChartBar value={stats.standard} max={stats.total} label="Standard" color="#6b7280" delay={0.3} />
                 </div>
               </div>
 
@@ -4201,20 +4238,24 @@ function App() {
                         fill="none"
                         stroke="#22c55e"
                         strokeWidth="20"
-                        strokeDasharray={`${(stats.emailsSent / stats.total) * 440} 440`}
+                        strokeDasharray={`${stats.total > 0 ? (stats.emailsSent / stats.total) * 440 : 0} 440`}
+                        strokeLinecap="round"
                         transform="rotate(-90 80 80)"
-                        style={{ transition: 'stroke-dasharray 0.5s ease' }}
+                        style={{
+                          transition: 'stroke-dasharray 1s cubic-bezier(0.4, 0, 0.2, 1)',
+                          filter: 'drop-shadow(0 0 8px rgba(34, 197, 94, 0.5))'
+                        }}
                       />
                     </svg>
                     <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-                      <span style={{ fontSize: 32, fontWeight: 700, color: '#22c55e' }}>{stats.emailsSent}</span>
-                      <span style={{ fontSize: 13, color: '#666' }}>of {stats.total}</span>
+                      <span className="chart-number-animated" style={{ fontSize: 32, fontWeight: 700, color: '#22c55e', animationDelay: '0.3s' }}>{stats.emailsSent}</span>
+                      <span className="chart-number-animated" style={{ fontSize: 13, color: '#666', animationDelay: '0.5s' }}>of {stats.total}</span>
                     </div>
                   </div>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'center', gap: 24, marginTop: 16 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <div style={{ width: 12, height: 12, borderRadius: 3, background: '#22c55e' }} />
+                    <div style={{ width: 12, height: 12, borderRadius: 3, background: '#22c55e', boxShadow: '0 0 8px rgba(34, 197, 94, 0.5)' }} />
                     <span style={{ fontSize: 14, color: '#888' }}>Sent ({stats.emailsSent})</span>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -4236,7 +4277,7 @@ function App() {
                   { range: '5-6', count: guests.filter(g => g.partySize >= 5 && g.partySize <= 6).length, color: '#fbbf24' },
                   { range: '7+', count: guests.filter(g => g.partySize >= 7).length, color: '#d4af37' },
                 ].map((item, idx) => (
-                  <ChartBar key={idx} value={item.count} max={stats.total || 1} label={item.range} color={item.color} />
+                  <ChartBar key={idx} value={item.count} max={stats.total || 1} label={item.range} color={item.color} delay={idx * 0.1} />
                 ))}
               </div>
             </div>
@@ -4255,10 +4296,10 @@ function App() {
               <div style={{ background: '#0a0a0a', borderRadius: 12, border: '1px solid #1a1a1a', padding: 24 }}>
                 <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 24, color: '#fff' }}>Sponsors by Tier</h3>
                 <div style={{ display: 'flex', justifyContent: 'space-around', alignItems: 'flex-end', height: 160, paddingBottom: 40 }}>
-                  <ChartBar value={sponsors.filter(s => s.tier === 'platinum').length} max={sponsorStats.total || 1} label="Platinum" color="#e5e4e2" />
-                  <ChartBar value={sponsors.filter(s => s.tier === 'gold').length} max={sponsorStats.total || 1} label="Gold" color="#d4af37" />
-                  <ChartBar value={sponsors.filter(s => s.tier === 'silver').length} max={sponsorStats.total || 1} label="Silver" color="#c0c0c0" />
-                  <ChartBar value={sponsors.filter(s => s.tier === 'bronze').length} max={sponsorStats.total || 1} label="Bronze" color="#cd7f32" />
+                  <ChartBar value={sponsors.filter(s => s.tier === 'platinum').length} max={sponsorStats.total || 1} label="Platinum" color="#e5e4e2" delay={0} />
+                  <ChartBar value={sponsors.filter(s => s.tier === 'gold').length} max={sponsorStats.total || 1} label="Gold" color="#d4af37" delay={0.1} />
+                  <ChartBar value={sponsors.filter(s => s.tier === 'silver').length} max={sponsorStats.total || 1} label="Silver" color="#c0c0c0" delay={0.2} />
+                  <ChartBar value={sponsors.filter(s => s.tier === 'bronze').length} max={sponsorStats.total || 1} label="Bronze" color="#cd7f32" delay={0.3} />
                 </div>
               </div>
 
@@ -4277,19 +4318,23 @@ function App() {
                         stroke="#22c55e"
                         strokeWidth="16"
                         strokeDasharray={`${ticketStats.total > 0 ? (ticketStats.used / ticketStats.total) * 377 : 0} 377`}
+                        strokeLinecap="round"
                         transform="rotate(-90 70 70)"
-                        style={{ transition: 'stroke-dasharray 0.5s ease' }}
+                        style={{
+                          transition: 'stroke-dasharray 1s cubic-bezier(0.4, 0, 0.2, 1)',
+                          filter: 'drop-shadow(0 0 8px rgba(34, 197, 94, 0.5))'
+                        }}
                       />
                     </svg>
                     <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-                      <span style={{ fontSize: 28, fontWeight: 700, color: '#22c55e' }}>{ticketStats.used}</span>
-                      <span style={{ fontSize: 12, color: '#666' }}>checked in</span>
+                      <span className="chart-number-animated" style={{ fontSize: 28, fontWeight: 700, color: '#22c55e', animationDelay: '0.3s' }}>{ticketStats.used}</span>
+                      <span className="chart-number-animated" style={{ fontSize: 12, color: '#666', animationDelay: '0.5s' }}>checked in</span>
                     </div>
                   </div>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'center', gap: 16, marginTop: 12 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
-                    <div style={{ width: 10, height: 10, borderRadius: 2, background: '#22c55e' }} />
+                    <div style={{ width: 10, height: 10, borderRadius: 2, background: '#22c55e', boxShadow: '0 0 8px rgba(34, 197, 94, 0.5)' }} />
                     <span style={{ color: '#888' }}>Used ({ticketStats.used})</span>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
@@ -4303,10 +4348,10 @@ function App() {
               <div style={{ background: '#0a0a0a', borderRadius: 12, border: '1px solid #1a1a1a', padding: 24 }}>
                 <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 24, color: '#fff' }}>Tables by Zone</h3>
                 <div style={{ display: 'flex', justifyContent: 'space-around', alignItems: 'flex-end', height: 160, paddingBottom: 40 }}>
-                  <ChartBar value={tables.filter(t => t.zone === 'VIP').length} max={tableStats.total || 1} label="VIP" color="#a78bfa" />
-                  <ChartBar value={tables.filter(t => t.zone === 'Premium').length} max={tableStats.total || 1} label="Premium" color="#60a5fa" />
-                  <ChartBar value={tables.filter(t => t.zone === 'Standard').length} max={tableStats.total || 1} label="Standard" color="#6b7280" />
-                  <ChartBar value={tables.filter(t => t.zone === 'Lounge').length} max={tableStats.total || 1} label="Lounge" color="#f97316" />
+                  <ChartBar value={tables.filter(t => t.zone === 'VIP').length} max={tableStats.total || 1} label="VIP" color="#a78bfa" delay={0} />
+                  <ChartBar value={tables.filter(t => t.zone === 'Premium').length} max={tableStats.total || 1} label="Premium" color="#60a5fa" delay={0.1} />
+                  <ChartBar value={tables.filter(t => t.zone === 'Standard').length} max={tableStats.total || 1} label="Standard" color="#6b7280" delay={0.2} />
+                  <ChartBar value={tables.filter(t => t.zone === 'Lounge').length} max={tableStats.total || 1} label="Lounge" color="#f97316" delay={0.3} />
                 </div>
               </div>
             </div>
@@ -4466,7 +4511,14 @@ function App() {
                     const prevVal = idx > 0 ? arr[idx - 1].value : stage.value;
                     const dropRate = prevVal > 0 ? Math.round((1 - stage.value / prevVal) * 100) : 0;
                     return (
-                      <div key={idx} style={{ position: 'relative' }}>
+                      <div
+                        key={idx}
+                        className="chart-number-animated"
+                        style={{
+                          position: 'relative',
+                          animationDelay: `${idx * 0.15}s`
+                        }}
+                      >
                         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                           <span style={{ fontSize: 18 }}>{stage.icon}</span>
                           <div style={{ flex: 1 }}>
@@ -4478,7 +4530,9 @@ function App() {
                               display: 'flex',
                               alignItems: 'center',
                               paddingLeft: 12,
-                              transition: 'width 0.5s ease'
+                              transition: 'width 0.8s cubic-bezier(0.4, 0, 0.2, 1)',
+                              transitionDelay: `${idx * 0.15}s`,
+                              boxShadow: `0 4px 12px ${stage.color}40`
                             }}>
                               <span style={{ fontSize: 14, fontWeight: 600, color: '#fff' }}>{stage.value.toLocaleString()}</span>
                             </div>
@@ -4541,7 +4595,8 @@ function App() {
                             height: '100%',
                             background: percentSold >= 90 ? 'linear-gradient(90deg, #22c55e, #10b981)' : percentSold >= 70 ? 'linear-gradient(90deg, #fbbf24, #f59e0b)' : 'linear-gradient(90deg, #3b82f6, #2563eb)',
                             borderRadius: 6,
-                            transition: 'width 0.5s ease'
+                            transition: 'width 1s cubic-bezier(0.4, 0, 0.2, 1)',
+                            boxShadow: percentSold >= 90 ? '0 0 12px rgba(34, 197, 94, 0.5)' : percentSold >= 70 ? '0 0 12px rgba(251, 191, 36, 0.5)' : '0 0 12px rgba(59, 130, 246, 0.5)'
                           }} />
                         </div>
                       </div>
@@ -9858,21 +9913,42 @@ const MetricCard = ({ label, value, subtitle, color }: { label: string; value: n
   </div>
 );
 
-const ChartBar = ({ value, max, label, color }: { value: number; max: number; label: string; color: string }) => {
+const ChartBar = ({ value, max, label, color, delay = 0 }: { value: number; max: number; label: string; color: string; delay?: number }) => {
   const height = max > 0 ? Math.max((value / max) * 140, 4) : 4;
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
-      <div style={{ fontSize: 14, fontWeight: 600, color }}>{value}</div>
       <div
-        className="chart-bar"
+        className="chart-number-animated"
+        style={{
+          fontSize: 14,
+          fontWeight: 600,
+          color,
+          animationDelay: `${delay + 0.2}s`
+        }}
+      >
+        {value}
+      </div>
+      <div
+        className="chart-bar-animated"
         style={{
           width: 40,
           height,
-          background: color,
+          background: `linear-gradient(180deg, ${color} 0%, ${color}cc 100%)`,
           borderRadius: 4,
+          boxShadow: `0 4px 12px ${color}40`,
+          animationDelay: `${delay}s`,
         }}
       />
-      <div style={{ fontSize: 12, color: '#666' }}>{label}</div>
+      <div
+        className="chart-number-animated"
+        style={{
+          fontSize: 12,
+          color: '#666',
+          animationDelay: `${delay + 0.3}s`
+        }}
+      >
+        {label}
+      </div>
     </div>
   );
 };
