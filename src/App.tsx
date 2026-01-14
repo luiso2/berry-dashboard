@@ -1968,18 +1968,38 @@ function App() {
     }
   }, [tickets.length, fetchTickets]);
 
-  // Download tickets as CSV
+  // Download tickets as CSV with summary stats
   const downloadTicketsCSV = () => {
     if (tickets.length === 0) {
       addToast('No tickets to download', 'error');
       return;
     }
 
+    // Calculate ticket stats
+    const validTickets = tickets.filter(t => t.status === 'valid').length;
+    const usedTickets = tickets.filter(t => t.status === 'used').length;
+    const cancelledTickets = tickets.filter(t => t.status === 'cancelled').length;
+    const totalRevenue = tickets.reduce((sum, t) => sum + (t.price || 0), 0);
+
     // Find matching guest phone numbers from guest list
     const guestPhoneMap = new Map<string, string>();
     guests.forEach((g: Guest) => {
       if (g.email && g.phone) guestPhoneMap.set(g.email.toLowerCase(), g.phone);
     });
+
+    // Summary section
+    const summary = [
+      ['=== TICKETS SUMMARY ===', ''],
+      ['Report Date', new Date().toLocaleString()],
+      [''],
+      ['Total Tickets', tickets.length.toString()],
+      ['Valid Tickets', validTickets.toString()],
+      ['Used (Checked In)', usedTickets.toString()],
+      ['Cancelled', cancelledTickets.toString()],
+      ['Total Revenue', `$${totalRevenue.toFixed(2)}`],
+      [''],
+      ['=== TICKET DETAILS ===', ''],
+    ];
 
     const headers = ['ID', 'Holder Name', 'Holder Email', 'Phone', 'Ticket Type', 'Event ID', 'Price', 'Status', 'Source', 'Check-In Time', 'Created At'];
     const rows = tickets.map((t: Ticket) => [
@@ -1996,22 +2016,47 @@ function App() {
       new Date(t.createdAt).toLocaleString(),
     ]);
 
-    const csvContent = [headers, ...rows].map(row => row.map((cell: string | number) => `"${String(cell).replace(/"/g, '""')}"`).join(',')).join('\n');
+    const allRows = [...summary, headers, ...rows];
+    const csvContent = allRows.map(row => row.map((cell: string | number) => `"${String(cell).replace(/"/g, '""')}"`).join(',')).join('\n');
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    link.download = `tickets_${new Date().toISOString().split('T')[0]}.csv`;
+    link.download = `tickets_report_${new Date().toISOString().split('T')[0]}.csv`;
     link.click();
     URL.revokeObjectURL(link.href);
-    addToast(`Downloaded ${tickets.length} tickets`, 'success');
+    addToast(`Downloaded ${tickets.length} tickets with summary`, 'success');
   };
 
-  // Download orders as CSV
+  // Download orders as CSV with summary stats
   const downloadOrdersCSV = () => {
     if (orders.length === 0) {
       addToast('No orders to download', 'error');
       return;
     }
+
+    // Calculate order stats
+    const activeOrders = orders.filter(o => o.order_status === 'placed' || o.order_status === 'active').length;
+    const refundedOrders = orders.filter(o => o.order_status === 'refunded').length;
+    const totalTicketsSold = orders.reduce((sum, o) => sum + (o.ticket_count || 0), 0);
+    const totalRevenue = orders.filter(o => o.order_status !== 'refunded').reduce((sum, o) => sum + (o.total_amount || 0), 0);
+    const refundedAmount = orders.filter(o => o.order_status === 'refunded').reduce((sum, o) => sum + (o.total_amount || 0), 0);
+
+    // Summary section
+    const summary = [
+      ['=== ORDERS SUMMARY ===', ''],
+      ['Report Date', new Date().toLocaleString()],
+      [''],
+      ['Total Orders', orders.length.toString()],
+      ['Active Orders', activeOrders.toString()],
+      ['Refunded Orders', refundedOrders.toString()],
+      [''],
+      ['Total Tickets Sold', totalTicketsSold.toString()],
+      ['Total Revenue', `$${totalRevenue.toFixed(2)}`],
+      ['Refunded Amount', `$${refundedAmount.toFixed(2)}`],
+      ['Net Revenue', `$${(totalRevenue - refundedAmount).toFixed(2)}`],
+      [''],
+      ['=== ORDER DETAILS ===', ''],
+    ];
 
     const headers = ['Order ID', 'Event Name', 'Buyer Name', 'Buyer Email', 'Status', 'Ticket Count', 'Total Amount', 'Currency', 'Source', 'Created At'];
     const rows = orders.map((o: Order) => [
@@ -2027,14 +2072,15 @@ function App() {
       new Date(o.created_at).toLocaleString(),
     ]);
 
-    const csvContent = [headers, ...rows].map(row => row.map((cell: string | number) => `"${String(cell).replace(/"/g, '""')}"`).join(',')).join('\n');
+    const allRows = [...summary, headers, ...rows];
+    const csvContent = allRows.map(row => row.map((cell: string | number) => `"${String(cell).replace(/"/g, '""')}"`).join(',')).join('\n');
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    link.download = `orders_${new Date().toISOString().split('T')[0]}.csv`;
+    link.download = `orders_report_${new Date().toISOString().split('T')[0]}.csv`;
     link.click();
     URL.revokeObjectURL(link.href);
-    addToast(`Downloaded ${orders.length} orders`, 'success');
+    addToast(`Downloaded ${orders.length} orders with summary`, 'success');
   };
 
   // Fetch Budget for Event
