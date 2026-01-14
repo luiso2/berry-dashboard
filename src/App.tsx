@@ -1968,6 +1968,75 @@ function App() {
     }
   }, [tickets.length, fetchTickets]);
 
+  // Download tickets as CSV
+  const downloadTicketsCSV = () => {
+    if (tickets.length === 0) {
+      addToast('No tickets to download', 'error');
+      return;
+    }
+
+    // Find matching guest phone numbers from guest list
+    const guestPhoneMap = new Map<string, string>();
+    guests.forEach((g: Guest) => {
+      if (g.email && g.phone) guestPhoneMap.set(g.email.toLowerCase(), g.phone);
+    });
+
+    const headers = ['ID', 'Holder Name', 'Holder Email', 'Phone', 'Ticket Type', 'Event ID', 'Price', 'Status', 'Source', 'Check-In Time', 'Created At'];
+    const rows = tickets.map((t: Ticket) => [
+      t.id,
+      t.holderName || '',
+      t.holderEmail || '',
+      guestPhoneMap.get((t.holderEmail || '').toLowerCase()) || '', // Phone from guest list if registered
+      t.ticketType,
+      t.eventId,
+      t.price.toFixed(2),
+      t.status,
+      t.source,
+      t.checkInTime ? new Date(t.checkInTime).toLocaleString() : '',
+      new Date(t.createdAt).toLocaleString(),
+    ]);
+
+    const csvContent = [headers, ...rows].map(row => row.map((cell: string | number) => `"${String(cell).replace(/"/g, '""')}"`).join(',')).join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `tickets_${new Date().toISOString().split('T')[0]}.csv`;
+    link.click();
+    URL.revokeObjectURL(link.href);
+    addToast(`Downloaded ${tickets.length} tickets`, 'success');
+  };
+
+  // Download orders as CSV
+  const downloadOrdersCSV = () => {
+    if (orders.length === 0) {
+      addToast('No orders to download', 'error');
+      return;
+    }
+
+    const headers = ['Order ID', 'Event Name', 'Buyer Name', 'Buyer Email', 'Status', 'Ticket Count', 'Total Amount', 'Currency', 'Source', 'Created At'];
+    const rows = orders.map((o: Order) => [
+      o.id,
+      o.event_name,
+      o.buyer_name,
+      o.buyer_email,
+      o.order_status,
+      o.ticket_count,
+      o.total_amount.toFixed(2),
+      o.currency,
+      o.source,
+      new Date(o.created_at).toLocaleString(),
+    ]);
+
+    const csvContent = [headers, ...rows].map(row => row.map((cell: string | number) => `"${String(cell).replace(/"/g, '""')}"`).join(',')).join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `orders_${new Date().toISOString().split('T')[0]}.csv`;
+    link.click();
+    URL.revokeObjectURL(link.href);
+    addToast(`Downloaded ${orders.length} orders`, 'success');
+  };
+
   // Fetch Budget for Event
   const fetchBudget = useCallback(async (eventId: number) => {
     try {
@@ -4330,6 +4399,24 @@ function App() {
                 }}
               >
                 {syncingEventbrite ? '⟳ Syncing...' : '🎪 Sync from Eventbrite'}
+              </button>
+              <button
+                onClick={ticketView === 'orders' ? downloadOrdersCSV : downloadTicketsCSV}
+                style={{
+                  background: '#22c55e',
+                  border: 'none',
+                  color: '#fff',
+                  padding: '12px 24px',
+                  borderRadius: 8,
+                  fontSize: 14,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8
+                }}
+              >
+                📥 Download CSV
               </button>
               <div style={{ display: 'flex', background: '#1a1a1a', borderRadius: 8, overflow: 'hidden' }}>
                 <button
