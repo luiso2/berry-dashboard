@@ -1198,6 +1198,9 @@ function App() {
   const [reminderData, setReminderData] = useState({ eventName: '', eventDate: '', eventTime: '', eventVenue: '', customMessage: '' });
   const [sending, setSending] = useState(false);
   const [activeView, setActiveView] = useState<ViewType>('analytics');
+  const [dashboardTab, setDashboardTab] = useState<'overview' | 'revenue' | 'eventbrite' | 'guests'>('overview');
+  const [lastSyncTime, setLastSyncTime] = useState<Date | null>(null);
+  const [isSyncing, setIsSyncing] = useState(false);
   const [guestTab, setGuestTab] = useState<'pending' | 'all'>('pending');
   const [formData, setFormData] = useState({ name: '', email: '', phone: '', instagram: '', partySize: 1, eventDate: '', notes: '' });
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -2571,10 +2574,16 @@ function App() {
     }
   }, [fetchVendors]);
 
-  // Fetch Staff
+  // Fetch Staff - gracefully handles missing endpoint
   const fetchStaff = useCallback(async () => {
     try {
       const res = await fetch(`${API_URL}/staff`);
+      if (!res.ok) {
+        // Endpoint not available - use empty state silently
+        setStaffMembers([]);
+        setStaffStats({ active: 0, inactive: 0, total: 0, avgRating: 0 });
+        return;
+      }
       const data = await res.json();
       setStaffMembers(data.staff || []);
       setStaffStats({
@@ -2584,7 +2593,9 @@ function App() {
         avgRating: parseFloat(data.stats?.avg_rating) || 0
       });
     } catch (error) {
-      console.error('Error fetching staff:', error);
+      // Network error or endpoint missing - fail silently
+      setStaffMembers([]);
+      setStaffStats({ active: 0, inactive: 0, total: 0, avgRating: 0 });
     }
   }, []);
 
@@ -2822,6 +2833,32 @@ function App() {
     if (activeView === 'monitoring') fetchHealthStatus();
     if (activeView === 'integrations') fetchIntegrations();
   }, [activeView, fetchModels, fetchTables, fetchTickets, fetchOrders, fetchSponsors, fetchPromoters, fetchPromoterLeaderboard, fetchEvents, fetchVendors, fetchStaff, fetchBudget, fetchHealthStatus, fetchIntegrations, selectedEvent]);
+
+  // Sync All Data - refreshes all data sources
+  const syncAllData = useCallback(async () => {
+    setIsSyncing(true);
+    addToast('Syncing all data...', 'info');
+    try {
+      await Promise.all([
+        fetchGuests(),
+        fetchEvents(),
+        fetchTickets(),
+        fetchOrders(),
+        fetchSponsors(),
+        fetchTables(),
+        fetchIntegrations(),
+        fetchEventbriteMetrics(),
+      ]);
+      setLastSyncTime(new Date());
+      setLastRefresh(new Date());
+      addToast('All data synced successfully!', 'success');
+    } catch (error) {
+      console.error('Sync error:', error);
+      addToast('Some data failed to sync', 'error');
+    } finally {
+      setIsSyncing(false);
+    }
+  }, [fetchGuests, fetchEvents, fetchTickets, fetchOrders, fetchSponsors, fetchTables, fetchIntegrations, fetchEventbriteMetrics, addToast]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -3783,8 +3820,88 @@ function App() {
           <div className="page-content" style={{ padding: '32px', animation: 'fadeIn 0.3s ease' }}>
 
             {/* ═══════════════════════════════════════════════════════════════════════ */}
-            {/* EXECUTIVE SUMMARY - Maxim Pitch Dashboard */}
+            {/* DASHBOARD TABS & SYNC BUTTON */}
             {/* ═══════════════════════════════════════════════════════════════════════ */}
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              marginBottom: 24,
+              padding: '16px 0',
+              borderBottom: '1px solid #1a1a1a'
+            }}>
+              {/* Tabs */}
+              <div style={{ display: 'flex', gap: 4, background: '#0a0a0a', borderRadius: 10, padding: 4 }}>
+                {[
+                  { key: 'overview', label: 'Overview', icon: '📊' },
+                  { key: 'revenue', label: 'Revenue', icon: '💰' },
+                  { key: 'eventbrite', label: 'Eventbrite', icon: '🎫' },
+                  { key: 'guests', label: 'Guests', icon: '👥' },
+                ].map((tab) => (
+                  <button
+                    key={tab.key}
+                    onClick={() => setDashboardTab(tab.key as 'overview' | 'revenue' | 'eventbrite' | 'guests')}
+                    style={{
+                      padding: '10px 20px',
+                      borderRadius: 8,
+                      border: 'none',
+                      background: dashboardTab === tab.key ? '#d4af37' : 'transparent',
+                      color: dashboardTab === tab.key ? '#000' : '#888',
+                      fontWeight: dashboardTab === tab.key ? 600 : 500,
+                      fontSize: 14,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      transition: 'all 0.2s ease'
+                    }}
+                  >
+                    <span>{tab.icon}</span>
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Sync All Button */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                {lastSyncTime && (
+                  <div style={{ fontSize: 12, color: '#666' }}>
+                    Last sync: {lastSyncTime.toLocaleTimeString()}
+                  </div>
+                )}
+                <button
+                  onClick={syncAllData}
+                  disabled={isSyncing}
+                  style={{
+                    padding: '10px 20px',
+                    borderRadius: 8,
+                    border: '1px solid #d4af37',
+                    background: isSyncing ? '#1a1a1a' : 'transparent',
+                    color: '#d4af37',
+                    fontWeight: 600,
+                    fontSize: 14,
+                    cursor: isSyncing ? 'wait' : 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    transition: 'all 0.2s ease'
+                  }}
+                >
+                  <span style={{
+                    display: 'inline-block',
+                    animation: isSyncing ? 'spin 1s linear infinite' : 'none'
+                  }}>🔄</span>
+                  {isSyncing ? 'Syncing...' : 'Sync All'}
+                </button>
+              </div>
+            </div>
+
+            {/* ═══════════════════════════════════════════════════════════════════════ */}
+            {/* OVERVIEW TAB */}
+            {/* ═══════════════════════════════════════════════════════════════════════ */}
+            {dashboardTab === 'overview' && (
+            <>
+            {/* EXECUTIVE SUMMARY - Maxim Pitch Dashboard */}
             <div style={{
               background: 'linear-gradient(135deg, #0f0d0a 0%, #1a1714 50%, #0f0d0a 100%)',
               borderRadius: 20,
@@ -4042,7 +4159,14 @@ function App() {
                 </div>
               </div>
             </div>
+            </>
+            )}
 
+            {/* ═══════════════════════════════════════════════════════════════════════ */}
+            {/* GUESTS TAB - Guest Analytics */}
+            {/* ═══════════════════════════════════════════════════════════════════════ */}
+            {dashboardTab === 'guests' && (
+            <>
             {/* Key Metrics */}
             <div className="stats-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, marginBottom: 32 }}>
               <MetricCard label="Conversion Rate" value={`${stats.conversionRate}%`} subtitle="Accepted / Total" color="#22c55e" />
@@ -4116,7 +4240,14 @@ function App() {
                 ))}
               </div>
             </div>
+            </>
+            )}
 
+            {/* ═══════════════════════════════════════════════════════════════════════ */}
+            {/* REVENUE TAB - All Revenue Analytics */}
+            {/* ═══════════════════════════════════════════════════════════════════════ */}
+            {dashboardTab === 'revenue' && (
+            <>
             {/* Business Metrics Row */}
             <h2 style={{ fontSize: 18, fontWeight: 600, marginBottom: 16, color: '#d4af37' }}>Business Metrics</h2>
             <div className="chart-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 24, marginBottom: 24 }}>
@@ -4304,8 +4435,14 @@ function App() {
                 </div>
               </div>
             </div>
+            </>
+            )}
 
             {/* ═══════════════════════════════════════════════════════════════════════ */}
+            {/* EVENTBRITE TAB - Conversion Funnel & Eventbrite Analytics */}
+            {/* ═══════════════════════════════════════════════════════════════════════ */}
+            {dashboardTab === 'eventbrite' && (
+            <>
             {/* CONVERSION FUNNEL - Marketing Intelligence */}
             {/* ═══════════════════════════════════════════════════════════════════════ */}
             <h2 style={{ fontSize: 18, fontWeight: 600, marginBottom: 16, color: '#3b82f6', display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -4790,6 +4927,9 @@ function App() {
                 ))}
               </div>
             </div>
+            </>
+            )}
+
           </div>
         )}
 
