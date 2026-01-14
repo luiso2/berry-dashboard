@@ -16,7 +16,7 @@ import * as XLSX from 'xlsx';
 import { parse as csvParse } from 'csv-parse/sync';
 
 // API Version - for tracking deployments
-const API_VERSION = '3.14.0-file-uploads';
+const API_VERSION = '3.15.0-sms';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -34,6 +34,50 @@ const pool = new Pool({
 
 // Track initialization status
 let dbInitStatus = { started: false, completed: false, error: null, modelsFix: null };
+
+// ============================================
+// TELNYX SMS CONFIGURATION
+// ============================================
+const TELNYX_API_KEY = process.env.TELNYX_API_KEY;
+const TELNYX_PHONE_NUMBER = process.env.TELNYX_PHONE_NUMBER || '+19858539097';
+
+async function sendSMS(to, message) {
+  if (!TELNYX_API_KEY) {
+    throw new Error('Telnyx API key not configured');
+  }
+
+  // Format phone number - ensure it has + prefix
+  let formattedTo = to.replace(/[^\d+]/g, '');
+  if (!formattedTo.startsWith('+')) {
+    formattedTo = '+1' + formattedTo; // Assume US if no country code
+  }
+
+  const response = await fetch('https://api.telnyx.com/v2/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${TELNYX_API_KEY}`
+    },
+    body: JSON.stringify({
+      from: TELNYX_PHONE_NUMBER,
+      to: formattedTo,
+      text: message
+    })
+  });
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(data.errors?.[0]?.detail || 'Failed to send SMS');
+  }
+
+  return {
+    success: true,
+    messageId: data.data?.id,
+    to: formattedTo,
+    status: data.data?.to?.[0]?.status || 'sent'
+  };
+}
 
 // ============================================
 // ENCRYPTION UTILITIES for API Keys
@@ -6379,7 +6423,7 @@ app.post('/api/v1/gpt/session', async (req, res) => {
   if (!endpoint) {
     return res.status(400).json({
       error: 'Missing endpoint parameter',
-      validEndpoints: ['manageEvents', 'manageGuests', 'manageBudget', 'manageStaff', 'manageVendors', 'manageModels', 'manageTables', 'manageTickets', 'manageSponsors', 'managePromoters', 'manageIntegrations', 'manageEmails', 'manageUploads', 'manageCode', 'getDashboard']
+      validEndpoints: ['manageEvents', 'manageGuests', 'manageBudget', 'manageStaff', 'manageVendors', 'manageModels', 'manageTables', 'manageTickets', 'manageSponsors', 'managePromoters', 'manageIntegrations', 'manageEmails', 'manageUploads', 'manageCode', 'manageSMS', 'getDashboard']
     });
   }
 
@@ -6399,6 +6443,7 @@ app.post('/api/v1/gpt/session', async (req, res) => {
     'manageEmails': '/api/v1/gpt/emails',
     'manageUploads': '/api/v1/gpt/uploads',
     'manageCode': '/api/v1/gpt/code',
+    'manageSMS': '/api/v1/gpt/sms',
     'getDashboard': '/api/v1/dashboard'
   };
 
@@ -6434,6 +6479,137 @@ app.post('/api/v1/gpt/session', async (req, res) => {
   Object.keys(req.body).forEach(key => req.body[key] === undefined && delete req.body[key]);
 
   return app._router.handle(req, res, () => {});
+});
+
+// ============================================
+// GPT SMS ENDPOINT - Send SMS messages via Telnyx
+// ============================================
+app.post('/api/v1/gpt/sms', async (req, res) => {
+  // Require authentication
+  if (!req.user) {
+    return res.status(401).json({ error: 'Authentication required' });
+  }
+
+  const { action, guestId, eventId, data } = req.body;
+
+  try {
+    switch (action) {
+      case 'send': {
+        // Send SMS to a specific phone number
+        const { to, message } = data || {};
+        if (!to || !message) {
+          return res.status(400).json({ error: 'Missing required fields: to, message' });
+        }
+        const result = await sendSMS(to, message);
+        return res.json({
+          success: true,
+          message: 'SMS sent successfully',
+          data: result
+        });
+      }
+
+      case 'sendToGuest': {
+        // Send SMS to a guest by ID
+        if (!guestId) {
+          return res.status(400).json({ error: 'Missing guestId' });
+        }
+        const { message } = data || {};
+        if (!message) {
+          return res.status(400).json({ error: 'Missing message' });
+        }
+
+        // Get guest phone from database
+        const guestResult = await pool.query(
+          'SELECT name, phone FROM guests WHERE id = $1 AND user_id = $2',
+          [guestId, req.user.id]
+        );
+
+        if (guestResult.rows.length === 0) {
+          return res.status(404).json({ error: 'Guest not found' });
+        }
+
+        const guest = guestResult.rows[0];
+        if (!guest.phone) {
+          return res.status(400).json({ error: `Guest ${guest.name} does not have a phone number` });
+        }
+
+        const result = await sendSMS(guest.phone, message);
+        return res.json({
+          success: true,
+          message: `SMS sent to ${guest.name}`,
+          data: result
+        });
+      }
+
+      case 'sendToEvent': {
+        // Send SMS to all guests of an event with phone numbers
+        if (!eventId) {
+          return res.status(400).json({ error: 'Missing eventId' });
+        }
+        const { message } = data || {};
+        if (!message) {
+          return res.status(400).json({ error: 'Missing message' });
+        }
+
+        // Get all guests with phone numbers for this event
+        const guestsResult = await pool.query(
+          `SELECT id, name, phone FROM guests
+           WHERE event_id = $1 AND user_id = $2 AND phone IS NOT NULL AND phone != ''`,
+          [eventId, req.user.id]
+        );
+
+        if (guestsResult.rows.length === 0) {
+          return res.status(400).json({ error: 'No guests with phone numbers found for this event' });
+        }
+
+        const results = [];
+        const errors = [];
+
+        for (const guest of guestsResult.rows) {
+          try {
+            const result = await sendSMS(guest.phone, message);
+            results.push({ guestId: guest.id, name: guest.name, ...result });
+          } catch (err) {
+            errors.push({ guestId: guest.id, name: guest.name, error: err.message });
+          }
+        }
+
+        return res.json({
+          success: true,
+          message: `SMS sent to ${results.length} guests`,
+          data: {
+            sent: results,
+            failed: errors,
+            totalSent: results.length,
+            totalFailed: errors.length
+          }
+        });
+      }
+
+      case 'status': {
+        // Check if SMS is configured
+        return res.json({
+          success: true,
+          data: {
+            configured: !!TELNYX_API_KEY,
+            phoneNumber: TELNYX_PHONE_NUMBER
+          }
+        });
+      }
+
+      default:
+        return res.status(400).json({
+          error: `Invalid action: ${action}`,
+          validActions: ['send', 'sendToGuest', 'sendToEvent', 'status']
+        });
+    }
+  } catch (error) {
+    console.error('SMS Error:', error);
+    return res.status(500).json({
+      error: 'Failed to send SMS',
+      details: error.message
+    });
+  }
 });
 
 // ============================================

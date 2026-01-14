@@ -27,8 +27,9 @@ info:
     - **manageEmails** - Actions: getStatus, getSummary (email tracking via Resend)
     - **manageUploads** - Actions: list, get, stats, getTemplate (file upload tracking)
     - **manageCode** - Actions: list, read, write, search, structure (project code management)
+    - **manageSMS** - Actions: send, sendToGuest, sendToEvent, status (SMS messaging via Telnyx)
 
-  version: 3.14.0
+  version: 3.15.0
   contact:
     name: Berry Bly Productions
     email: concierge@berrybly.com
@@ -113,6 +114,7 @@ paths:
                     - manageEmails
                     - manageUploads
                     - manageCode
+                    - manageSMS
                 action:
                   type: string
                   description: |
@@ -132,6 +134,7 @@ paths:
                     **manageEmails:** getStatus, getSummary
                     **manageUploads:** list, get, stats, getTemplate
                     **manageCode:** list, read, write, search, structure
+                    **manageSMS:** send, sendToGuest, sendToEvent, status
                 eventId:
                   type: integer
                   description: Event ID (for event-specific operations)
@@ -414,6 +417,35 @@ paths:
                   endpoint: manageCode
                   action: search
                   searchQuery: "useState"
+              sendSMS:
+                summary: Send SMS to a phone number
+                value:
+                  endpoint: manageSMS
+                  action: send
+                  data:
+                    to: "+1234567890"
+                    message: "Hello! You're confirmed for our event tonight at 8PM."
+              sendSMSToGuest:
+                summary: Send SMS to a guest by ID
+                value:
+                  endpoint: manageSMS
+                  action: sendToGuest
+                  guestId: 5
+                  data:
+                    message: "Hi! Just confirming your attendance for tonight's event."
+              sendSMSToEvent:
+                summary: Send SMS to all event guests
+                value:
+                  endpoint: manageSMS
+                  action: sendToEvent
+                  eventId: 1
+                  data:
+                    message: "Reminder: Our event starts in 2 hours! See you there."
+              checkSMSStatus:
+                summary: Check if SMS is configured
+                value:
+                  endpoint: manageSMS
+                  action: status
 
       responses:
         '200':
