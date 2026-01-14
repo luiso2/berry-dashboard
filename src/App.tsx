@@ -3002,8 +3002,6 @@ function App() {
     const standard = guests.filter((g) => g.category === 'C').length;
     const emailsSent = guests.filter((g) => g.emailSent).length;
     const accepted = vip + priority + standard;
-    const avgScore = guests.length > 0 ? Math.round(guests.reduce((sum, g) => sum + (g.aiScore || 0), 0) / guests.length) : 0;
-    const highScoreGuests = guests.filter((g) => (g.aiScore || 0) >= 70).length;
     const totalPartySize = guests.reduce((sum, g) => sum + g.partySize, 0);
     const conversionRate = total > 0 ? Math.round((accepted / total) * 100) : 0;
     const emailRate = total > 0 ? Math.round((emailsSent / total) * 100) : 0;
@@ -3016,7 +3014,7 @@ function App() {
 
     return {
       total, pending, vip, priority, standard, emailsSent, accepted,
-      avgScore, highScoreGuests, totalPartySize, conversionRate, emailRate,
+      totalPartySize, conversionRate, emailRate,
       checkedIn, checkedInPartySize, checkInRate, featured,
     };
   }, [guests]);
@@ -3056,12 +3054,6 @@ function App() {
       result = result.filter((g) => new Date(g.createdAt) <= new Date(filters.dateTo));
     }
 
-    // Score filter
-    result = result.filter((g) => {
-      const score = g.aiScore || 0;
-      return score >= filters.scoreMin && score <= filters.scoreMax;
-    });
-
     return result;
   }, [guests, filters]);
 
@@ -3085,15 +3077,14 @@ function App() {
 
   // Export to CSV
   const exportToCSV = () => {
-    const headers = ['Name', 'Email', 'Phone', 'Instagram', 'Party Size', 'Category', 'AI Score', 'Email Sent', 'Created At'];
+    const headers = ['Name', 'Email', 'Phone', 'Instagram', 'Party Size', 'Category', 'Email Sent', 'Created At'];
     const rows = filteredGuests.map((g) => [
       g.name,
       g.email,
-      g.phone,
-      g.instagram,
+      g.phone || '',
+      g.instagram || '',
       g.partySize,
       g.category === 'A' ? 'VIP' : g.category === 'B' ? 'Priority' : g.category === 'C' ? 'Standard' : 'Pending',
-      g.aiScore || calculateAIScore(g),
       g.emailSent ? 'Yes' : 'No',
       new Date(g.createdAt).toLocaleDateString(),
     ]);
@@ -3119,7 +3110,6 @@ function App() {
       'Instagram Followers (Est.)': estimateFollowers(g.instagram),
       'Party Size': g.partySize,
       'Category': g.category === 'A' ? 'VIP' : g.category === 'B' ? 'Priority' : g.category === 'C' ? 'Standard' : g.category === 'rejected' ? 'Rejected' : 'Pending',
-      'AI Score': g.aiScore || calculateAIScore(g),
       'Email Sent': g.emailSent ? 'Yes' : 'No',
       'Checked In': g.checkedInAt ? 'Yes' : 'No',
       'Checked In At': g.checkedInAt ? new Date(g.checkedInAt).toLocaleString() : '',
@@ -3480,13 +3470,6 @@ function App() {
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
   };
 
-  const getScoreColor = (score: number) => {
-    if (score >= 80) return '#22c55e';
-    if (score >= 60) return '#60a5fa';
-    if (score >= 40) return '#fbbf24';
-    return '#ef4444';
-  };
-
   if (loading) {
     return (
       <div style={{ minHeight: '100vh', background: '#000', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -3836,28 +3819,6 @@ function App() {
                     value={filters.dateTo}
                     onChange={(e) => setFilters({ ...filters, dateTo: e.target.value })}
                     style={{ width: '100%', background: '#111', border: '1px solid #222', borderRadius: 8, padding: '10px', color: '#fff', fontSize: 14 }}
-                  />
-                </div>
-                <div style={{ flex: 1, minWidth: 150 }}>
-                  <label style={{ display: 'block', fontSize: 12, color: '#666', marginBottom: 6 }}>Min Score: {filters.scoreMin}</label>
-                  <input
-                    type="range"
-                    min="0"
-                    max="100"
-                    value={filters.scoreMin}
-                    onChange={(e) => setFilters({ ...filters, scoreMin: parseInt(e.target.value) })}
-                    style={{ width: '100%' }}
-                  />
-                </div>
-                <div style={{ flex: 1, minWidth: 150 }}>
-                  <label style={{ display: 'block', fontSize: 12, color: '#666', marginBottom: 6 }}>Max Score: {filters.scoreMax}</label>
-                  <input
-                    type="range"
-                    min="0"
-                    max="100"
-                    value={filters.scoreMax}
-                    onChange={(e) => setFilters({ ...filters, scoreMax: parseInt(e.target.value) })}
-                    style={{ width: '100%' }}
                   />
                 </div>
                 <button
@@ -5105,22 +5066,6 @@ function App() {
               </button>
               <button
                 onClick={() => {
-                  const highScore = guests.filter(g => (g.aiScore || 0) >= 70 && g.category === 'pending');
-                  if (highScore.length > 0) {
-                    openModal(highScore, 'A');
-                  } else {
-                    addToast('No high-score pending guests', 'info');
-                  }
-                }}
-                className="btn-hover"
-                style={{ background: '#a78bfa15', border: '1px solid #a78bfa30', borderRadius: 12, padding: 20, cursor: 'pointer', textAlign: 'left' }}
-              >
-                <div style={{ fontSize: 24, marginBottom: 12 }}>⭐</div>
-                <div style={{ fontSize: 15, fontWeight: 600, color: '#a78bfa', marginBottom: 4 }}>Auto-VIP High Scores</div>
-                <div style={{ fontSize: 13, color: '#666' }}>Move {guests.filter(g => (g.aiScore || 0) >= 70 && g.category === 'pending').length} guests to VIP</div>
-              </button>
-              <button
-                onClick={() => {
                   const needFollowup = guests.filter(g => g.emailSent && new Date(g.emailSentAt!).getTime() < Date.now() - 3 * 24 * 60 * 60 * 1000);
                   if (needFollowup.length > 0) {
                     openModal(needFollowup, null, true);
@@ -5229,7 +5174,6 @@ function App() {
               removeGuest={removeGuest}
               showActions={guestTab === 'pending'}
               setShowForm={setShowForm}
-              getScoreColor={getScoreColor}
               openReminderModal={openReminderModal}
             />
           </>
@@ -5260,7 +5204,6 @@ function App() {
               removeGuest={removeGuest}
               openModal={openModal}
               formatDate={formatDate}
-              getScoreColor={getScoreColor}
             />
           </>
         )}
@@ -5315,36 +5258,13 @@ function App() {
                         style={{ background: '#a78bfa20', border: '1px solid #a78bfa40', color: '#a78bfa', padding: '8px 16px', borderRadius: 8, fontSize: 13, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8 }}
                       >
                         <span>{vip.name}</span>
-                        <span style={{ background: '#a78bfa', color: '#000', padding: '2px 6px', borderRadius: 4, fontSize: 11, fontWeight: 700 }}>{vip.aiScore || calculateAIScore(vip)}</span>
+                        <span style={{ background: '#a78bfa', color: '#000', padding: '2px 6px', borderRadius: 4, fontSize: 11, fontWeight: 700 }}>+{vip.partySize}</span>
                       </button>
                     ))}
                   </div>
                 </div>
               )}
 
-              {/* High Score Guests Not Checked In */}
-              {guests.filter(g => (g.aiScore || calculateAIScore(g)) >= 50 && !g.checkedInAt && g.category !== 'pending').length > 0 && (
-                <div style={{ background: '#22c55e10', border: '1px solid #22c55e30', borderRadius: 12, padding: 16 }}>
-                  <div style={{ fontSize: 14, fontWeight: 600, color: '#22c55e', marginBottom: 8 }}>🎯 High-Value Guests Waiting ({guests.filter(g => (g.aiScore || calculateAIScore(g)) >= 50 && !g.checkedInAt && g.category !== 'pending').length})</div>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                    {guests
-                      .filter(g => (g.aiScore || calculateAIScore(g)) >= 50 && !g.checkedInAt && g.category !== 'pending')
-                      .sort((a, b) => (b.aiScore || calculateAIScore(b)) - (a.aiScore || calculateAIScore(a)))
-                      .slice(0, 8)
-                      .map(guest => (
-                        <button
-                          key={guest.id}
-                          onClick={() => checkInGuest(guest)}
-                          className="btn-hover"
-                          style={{ background: '#22c55e15', border: '1px solid #22c55e30', color: '#22c55e', padding: '8px 16px', borderRadius: 8, fontSize: 13, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8 }}
-                        >
-                          <span>{guest.name}</span>
-                          <span style={{ background: '#22c55e', color: '#000', padding: '2px 6px', borderRadius: 4, fontSize: 11, fontWeight: 700 }}>{guest.aiScore || calculateAIScore(guest)}</span>
-                        </button>
-                      ))}
-                  </div>
-                </div>
-              )}
             </div>
 
             {/* Quick Check-In Search */}
@@ -5398,12 +5318,10 @@ function App() {
                   (g.phone || '').toLowerCase().includes(filters.search.toLowerCase())
                 )
                 .sort((a, b) => {
-                  // Sort: not checked in first, then by AI score (high to low)
+                  // Sort: not checked in first, then alphabetically
                   if (a.checkedInAt && !b.checkedInAt) return 1;
                   if (!a.checkedInAt && b.checkedInAt) return -1;
-                  const scoreA = a.aiScore || calculateAIScore(a);
-                  const scoreB = b.aiScore || calculateAIScore(b);
-                  return scoreB - scoreA;
+                  return a.name.localeCompare(b.name);
                 })
                 .map((guest, idx) => (
                   <div
@@ -5439,9 +5357,11 @@ function App() {
                         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                           <span style={{ fontSize: 14, color: '#888' }}>Party of {guest.partySize}</span>
                           <StatusBadge category={guest.category} />
-                          <span style={{ background: getScoreColor(guest.aiScore || calculateAIScore(guest)) + '20', color: getScoreColor(guest.aiScore || calculateAIScore(guest)), padding: '2px 8px', borderRadius: 4, fontSize: 12, fontWeight: 600 }}>
-                            Score: {guest.aiScore || calculateAIScore(guest)}
-                          </span>
+{guest.phone && (
+                            <span style={{ background: '#333', color: '#d4af37', padding: '2px 8px', borderRadius: 4, fontSize: 12, fontWeight: 600 }}>
+                              📞 {guest.phone}
+                            </span>
+                          )}
                           {guest.instagram && (
                             <a href={`https://instagram.com/${guest.instagram.replace('@', '')}`} target="_blank" rel="noopener noreferrer" style={{ color: '#d4af37', fontSize: 13, textDecoration: 'none' }}>@{guest.instagram.replace('@', '')}</a>
                           )}
@@ -5618,11 +5538,6 @@ function App() {
                           }}>
                             {model.experienceLevel}
                           </span>
-                          {model.aiScore && (
-                            <span style={{ background: getScoreColor(model.aiScore) + '20', color: getScoreColor(model.aiScore), padding: '2px 8px', borderRadius: 4, fontSize: 12, fontWeight: 600 }}>
-                              Score: {model.aiScore}
-                            </span>
-                          )}
                         </div>
                         <div style={{ fontSize: 12, color: '#444', marginTop: 4 }}>{model.email} • {model.phone}</div>
                       </div>
@@ -10329,15 +10244,6 @@ const StatusBadge = ({ category }: { category: GuestCategory }) => {
   );
 };
 
-const ScoreBadge = ({ score, getScoreColor }: { score: number; getScoreColor: (s: number) => string }) => (
-  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-    <div style={{ width: 40, height: 6, background: '#1a1a1a', borderRadius: 3, overflow: 'hidden' }}>
-      <div style={{ width: `${score}%`, height: '100%', background: getScoreColor(score), borderRadius: 3 }} />
-    </div>
-    <span style={{ fontSize: 13, fontWeight: 600, color: getScoreColor(score), minWidth: 24 }}>{score}</span>
-  </div>
-);
-
 const Input = ({ label, placeholder, value, onChange, type = 'text', prefix, required }: {
   label?: string;
   placeholder?: string;
@@ -10388,7 +10294,7 @@ const Input = ({ label, placeholder, value, onChange, type = 'text', prefix, req
 );
 
 // Guest List Component
-const GuestList = ({ guests, selectedGuests, toggleSelect, selectAll, openModal, removeGuest, showActions, setShowForm, getScoreColor, openReminderModal }: {
+const GuestList = ({ guests, selectedGuests, toggleSelect, selectAll, openModal, removeGuest, showActions, setShowForm, openReminderModal }: {
   guests: Guest[];
   selectedGuests: Set<string>;
   toggleSelect: (id: string) => void;
@@ -10397,7 +10303,6 @@ const GuestList = ({ guests, selectedGuests, toggleSelect, selectAll, openModal,
   removeGuest: (id: string) => void;
   showActions: boolean;
   setShowForm: (show: boolean) => void;
-  getScoreColor: (score: number) => string;
   openReminderModal: (guests: Guest[]) => void;
 }) => (
   <div className="page-content" style={{ padding: '0 32px 32px', animation: 'fadeIn 0.3s ease' }}>
@@ -10563,10 +10468,6 @@ const GuestList = ({ guests, selectedGuests, toggleSelect, selectAll, openModal,
                 <span>👥 {guest.partySize}</span>
               </div>
 
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-                <span style={{ fontSize: 13, color: '#666' }}>AI Score:</span>
-                <ScoreBadge score={guest.aiScore || 0} getScoreColor={getScoreColor} />
-              </div>
 
               <div className="action-buttons" style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                 {showActions && (
@@ -10611,7 +10512,7 @@ const GuestList = ({ guests, selectedGuests, toggleSelect, selectAll, openModal,
 );
 
 // Emails List Component
-const EmailsList = ({ guests, selectedGuests, toggleSelect, selectAll, removeGuest, openModal, formatDate, getScoreColor }: {
+const EmailsList = ({ guests, selectedGuests, toggleSelect, selectAll, removeGuest, openModal, formatDate }: {
   guests: Guest[];
   selectedGuests: Set<string>;
   toggleSelect: (id: string) => void;
@@ -10619,7 +10520,6 @@ const EmailsList = ({ guests, selectedGuests, toggleSelect, selectAll, removeGue
   removeGuest: (id: string) => void;
   openModal: (guests: Guest[], category: GuestCategory | null, emailOnly?: boolean) => void;
   formatDate: (date: string) => string;
-  getScoreColor: (score: number) => string;
 }) => (
   <div className="page-content" style={{ padding: '0 32px 32px', animation: 'fadeIn 0.3s ease' }}>
     {/* Desktop Table */}
@@ -10638,7 +10538,7 @@ const EmailsList = ({ guests, selectedGuests, toggleSelect, selectAll, removeGue
             <th style={thStyle}>Name</th>
             <th style={thStyle}>Email</th>
             <th style={thStyle}>Category</th>
-            <th style={{ ...thStyle, width: 80 }}>Score</th>
+            <th style={{ ...thStyle, width: 120 }}>Phone</th>
             <th style={thStyle}>Sent At</th>
             <th style={{ ...thStyle, width: 100 }}>Actions</th>
           </tr>
@@ -10684,8 +10584,8 @@ const EmailsList = ({ guests, selectedGuests, toggleSelect, selectAll, removeGue
               <td style={tdStyle}>
                 <StatusBadge category={guest.category} />
               </td>
-              <td style={tdStyle}>
-                <ScoreBadge score={guest.aiScore || 0} getScoreColor={getScoreColor} />
+              <td style={{ ...tdStyle, color: '#d4af37', fontSize: 13 }}>
+                {guest.phone || '—'}
               </td>
               <td style={{ ...tdStyle, color: '#888', fontSize: 14 }}>
                 {guest.emailSentAt ? formatDate(guest.emailSentAt) : '—'}
@@ -10759,10 +10659,12 @@ const EmailsList = ({ guests, selectedGuests, toggleSelect, selectAll, removeGue
                 <StatusBadge category={guest.category} />
               </div>
 
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-                <span style={{ fontSize: 13, color: '#666' }}>AI Score:</span>
-                <ScoreBadge score={guest.aiScore || 0} getScoreColor={getScoreColor} />
-              </div>
+{guest.phone && (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                  <span style={{ fontSize: 13, color: '#666' }}>📞 Phone:</span>
+                  <span style={{ color: '#d4af37', fontWeight: 500 }}>{guest.phone}</span>
+                </div>
+              )}
 
               {guest.emailSentAt && (
                 <div style={{ fontSize: 14, color: '#666', marginBottom: 12 }}>
