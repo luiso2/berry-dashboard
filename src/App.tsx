@@ -83,7 +83,6 @@ const categoryToStatus = (category: GuestCategory): string => {
 type GuestCategory = 'pending' | 'A' | 'B' | 'C' | 'rejected';
 type GuestStatus = 'pending' | 'approved' | 'declined' | 'rejected';
 type ViewType = 'overview' | 'guests' | 'emails' | 'analytics' | 'automation' | 'checkin' | 'models' | 'tables' | 'tickets' | 'sponsors' | 'promoters' | 'events' | 'budget' | 'vendors' | 'staff' | 'monitoring' | 'integrations' | 'chatgpt' | 'sms';
-type ThemeMode = 'dark' | 'light';
 
 interface Purchase {
   id: string;
@@ -1484,10 +1483,8 @@ function App() {
   const [showFilters, setShowFilters] = useState(false);
 
   // Pro features state
-  const [theme, setTheme] = useState<ThemeMode>('dark');
   const [qrModal, setQRModal] = useState<QRModal>({ show: false, guest: null });
   const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
-  const [autoRefresh, setAutoRefresh] = useState(true);
 
   // New modules state
   const [models, setModels] = useState<Model[]>([]);
@@ -1692,12 +1689,12 @@ function App() {
 
   useEffect(() => {
     fetchGuests();
-    const interval = autoRefresh ? setInterval(() => {
+    const interval = setInterval(() => {
       fetchGuests();
       setLastRefresh(new Date());
-    }, 10000) : null;
-    return () => { if (interval) clearInterval(interval); };
-  }, [fetchGuests, autoRefresh]);
+    }, 10000);
+    return () => clearInterval(interval);
+  }, [fetchGuests]);
 
   // Close event action menu when clicking outside
   useEffect(() => {
@@ -3317,10 +3314,6 @@ function App() {
         setLastRefresh(new Date());
         addToast('Data refreshed', 'info');
       }
-      // T: Toggle theme
-      if (e.key === 't' && !e.metaKey && !e.ctrlKey) {
-        setTheme(prev => prev === 'dark' ? 'light' : 'dark');
-      }
     };
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
@@ -4042,7 +4035,7 @@ function App() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             {/* Refresh indicator */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#444' }}>
-              <span style={{ color: autoRefresh ? '#22c55e' : '#666' }}>{autoRefresh ? '●' : '○'}</span>
+              <span style={{ color: '#22c55e' }}>●</span>
               <span>Updated {Math.round((Date.now() - lastRefresh.getTime()) / 1000)}s ago</span>
             </div>
             {/* Keyboard shortcuts hint */}
