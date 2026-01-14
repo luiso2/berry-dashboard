@@ -1894,7 +1894,7 @@ app.delete('/admin/users/:email', async (req, res) => {
     // Delete oauth tokens first
     const user = await pool.query('SELECT id FROM users WHERE email = $1', [email.toLowerCase()]);
     if (user.rows.length > 0) {
-      await pool.query('DELETE FROM oauth_tokens WHERE user_id = $1', [user.rows[0].id]);
+      await pool.query('DELETE FROM oauth_tokens WHERE user_id = $1::integer', [user.rows[0].id]);
     }
 
     // Delete user
@@ -2777,7 +2777,7 @@ app.get('/api/v1/guests', async (req, res) => {
     const userId = req.user?.id;
     // Filter by user_id if authenticated, otherwise return all (for public access)
     const query = userId
-      ? 'SELECT * FROM guests WHERE user_id = $1 OR user_id IS NULL ORDER BY created_at DESC'
+      ? 'SELECT * FROM guests WHERE user_id = $1::integer OR user_id IS NULL ORDER BY created_at DESC'
       : 'SELECT * FROM guests ORDER BY created_at DESC';
     const params = userId ? [userId] : [];
     const result = await pool.query(query, params);
@@ -2878,7 +2878,7 @@ app.delete('/api/v1/guests/:id', async (req, res) => {
   try {
     // Add user_id check for data isolation
     const query = userId
-      ? 'DELETE FROM guests WHERE id = $1 AND (user_id = $2 OR user_id IS NULL) RETURNING *'
+      ? 'DELETE FROM guests WHERE id = $1 AND (user_id = $2::integer OR user_id IS NULL) RETURNING *'
       : 'DELETE FROM guests WHERE id = $1 RETURNING *';
     const params = userId ? [id, userId] : [id];
     const result = await pool.query(query, params);
@@ -3006,8 +3006,8 @@ app.post('/api/v1/uploads/contacts', upload.single('file'), async (req, res) => 
         // Check for duplicate email if email provided
         if (normalized.email) {
           const existingQuery = eventId
-            ? 'SELECT id FROM guests WHERE email = $1 AND user_id = $2 AND event_id = $3'
-            : 'SELECT id FROM guests WHERE email = $1 AND user_id = $2';
+            ? 'SELECT id FROM guests WHERE email = $1 AND user_id = $2::integer AND event_id = $3::integer'
+            : 'SELECT id FROM guests WHERE email = $1 AND user_id = $2::integer';
           const existingParams = eventId
             ? [normalized.email, userId, eventId]
             : [normalized.email, userId];
@@ -3090,7 +3090,7 @@ app.get('/api/v1/uploads', async (req, res) => {
       SELECT id, original_filename, file_type, upload_type, records_processed,
              records_success, records_failed, status, event_id, created_at
       FROM file_uploads
-      WHERE user_id = $1
+      WHERE user_id = $1::integer
       ORDER BY created_at DESC
       LIMIT 50
     `, [userId]);
@@ -3128,7 +3128,7 @@ app.get('/api/v1/uploads/:id', async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT * FROM file_uploads
-      WHERE id = $1 AND user_id = $2
+      WHERE id = $1::integer AND user_id = $2::integer
     `, [uploadId, userId]);
 
     if (result.rows.length === 0) {
@@ -5223,7 +5223,7 @@ app.post('/api/v1/gpt/events', async (req, res) => {
     switch (action) {
       case 'list': {
         const { status, limit = 50 } = filters || {};
-        let query = 'SELECT * FROM events WHERE (user_id = $1 OR user_id IS NULL)';
+        let query = 'SELECT * FROM events WHERE (user_id = $1::integer OR user_id IS NULL)';
         const values = [userId];
         if (status) {
           query += ` AND status = $${values.length + 1}`;
@@ -5237,7 +5237,7 @@ app.post('/api/v1/gpt/events', async (req, res) => {
 
       case 'get': {
         if (!eventId) return res.status(400).json({ error: 'eventId required' });
-        const result = await pool.query('SELECT * FROM events WHERE id = $1 AND (user_id = $2 OR user_id IS NULL)', [eventId, userId]);
+        const result = await pool.query('SELECT * FROM events WHERE id = $1 AND (user_id = $2::integer OR user_id IS NULL)', [eventId, userId]);
         if (result.rows.length === 0) return res.status(404).json({ error: 'Event not found' });
         return res.json({ success: true, event: mapEventRow(result.rows[0]) });
       }
@@ -5245,14 +5245,14 @@ app.post('/api/v1/gpt/events', async (req, res) => {
       case 'getFull': {
         if (!eventId) return res.status(400).json({ error: 'eventId required' });
         // Reuse the full event logic
-        const eventResult = await pool.query('SELECT * FROM events WHERE id = $1 AND (user_id = $2 OR user_id IS NULL)', [eventId, userId]);
+        const eventResult = await pool.query('SELECT * FROM events WHERE id = $1 AND (user_id = $2::integer OR user_id IS NULL)', [eventId, userId]);
         if (eventResult.rows.length === 0) return res.status(404).json({ error: 'Event not found' });
         const event = mapEventRow(eventResult.rows[0]);
 
         let guests = { total: 0, list: [] };
         const guestsCheck = await pool.query(`SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'guests')`);
         if (guestsCheck.rows[0].exists) {
-          const guestsResult = await pool.query('SELECT * FROM guests WHERE (user_id = $1 OR user_id IS NULL)', [userId]);
+          const guestsResult = await pool.query('SELECT * FROM guests WHERE (user_id = $1::integer OR user_id IS NULL)', [userId]);
           guests = { total: guestsResult.rows.length, list: guestsResult.rows };
         }
 
@@ -5301,7 +5301,7 @@ app.post('/api/v1/gpt/events', async (req, res) => {
       case 'update': {
         if (!eventId) return res.status(400).json({ error: 'eventId required' });
         // Verify ownership
-        const checkUpdate = await pool.query('SELECT * FROM events WHERE id = $1 AND (user_id = $2 OR user_id IS NULL)', [eventId, userId]);
+        const checkUpdate = await pool.query('SELECT * FROM events WHERE id = $1 AND (user_id = $2::integer OR user_id IS NULL)', [eventId, userId]);
         if (checkUpdate.rows.length === 0) return res.status(404).json({ error: 'Event not found' });
         const fields = [];
         const values = [];
@@ -5328,7 +5328,7 @@ app.post('/api/v1/gpt/events', async (req, res) => {
       case 'delete': {
         if (!eventId) return res.status(400).json({ error: 'eventId required' });
         // Verify ownership before delete
-        const checkDel = await pool.query('SELECT * FROM events WHERE id = $1 AND (user_id = $2 OR user_id IS NULL)', [eventId, userId]);
+        const checkDel = await pool.query('SELECT * FROM events WHERE id = $1 AND (user_id = $2::integer OR user_id IS NULL)', [eventId, userId]);
         if (checkDel.rows.length === 0) return res.status(404).json({ error: 'Event not found' });
         const deletedEvent = mapEventRow(checkDel.rows[0]);
         await pool.query('DELETE FROM events WHERE id = $1', [eventId]);
@@ -5376,7 +5376,7 @@ app.post('/api/v1/gpt/guests', async (req, res) => {
     switch (action) {
       case 'list': {
         const { category, search, limit = 100 } = filters || {};
-        let query = 'SELECT * FROM guests WHERE (user_id = $1 OR user_id IS NULL)';
+        let query = 'SELECT * FROM guests WHERE (user_id = $1::integer OR user_id IS NULL)';
         const values = [userId];
         if (eventId) { query += ` AND event_id = $${values.length + 1}`; values.push(eventId); }
         if (category) { query += ` AND status = $${values.length + 1}`; values.push(category); }
@@ -5389,7 +5389,7 @@ app.post('/api/v1/gpt/guests', async (req, res) => {
 
       case 'get': {
         if (!guestId) return res.status(400).json({ error: 'guestId required' });
-        const result = await pool.query('SELECT * FROM guests WHERE id = $1 AND (user_id = $2 OR user_id IS NULL)', [guestId, userId]);
+        const result = await pool.query('SELECT * FROM guests WHERE id = $1 AND (user_id = $2::integer OR user_id IS NULL)', [guestId, userId]);
         if (result.rows.length === 0) return res.status(404).json({ error: 'Guest not found' });
         return res.json({ success: true, guest: result.rows[0] });
       }
@@ -5410,7 +5410,7 @@ app.post('/api/v1/gpt/guests', async (req, res) => {
       case 'update': {
         if (!guestId) return res.status(400).json({ error: 'guestId required' });
         // Verify ownership
-        const checkUpd = await pool.query('SELECT * FROM guests WHERE id = $1 AND (user_id = $2 OR user_id IS NULL)', [guestId, userId]);
+        const checkUpd = await pool.query('SELECT * FROM guests WHERE id = $1 AND (user_id = $2::integer OR user_id IS NULL)', [guestId, userId]);
         if (checkUpd.rows.length === 0) return res.status(404).json({ error: 'Guest not found' });
         const fields = [];
         const values = [];
@@ -5435,7 +5435,7 @@ app.post('/api/v1/gpt/guests', async (req, res) => {
       case 'delete': {
         if (!guestId) return res.status(400).json({ error: 'guestId required' });
         // Verify ownership
-        const checkDel = await pool.query('SELECT * FROM guests WHERE id = $1 AND (user_id = $2 OR user_id IS NULL)', [guestId, userId]);
+        const checkDel = await pool.query('SELECT * FROM guests WHERE id = $1 AND (user_id = $2::integer OR user_id IS NULL)', [guestId, userId]);
         if (checkDel.rows.length === 0) return res.status(404).json({ error: 'Guest not found' });
         const deletedGuest = checkDel.rows[0];
         await pool.query('DELETE FROM guests WHERE id = $1', [guestId]);
@@ -5446,7 +5446,7 @@ app.post('/api/v1/gpt/guests', async (req, res) => {
 
       case 'approve': {
         if (!guestId) return res.status(400).json({ error: 'guestId required' });
-        const checkAppr = await pool.query('SELECT * FROM guests WHERE id = $1 AND (user_id = $2 OR user_id IS NULL)', [guestId, userId]);
+        const checkAppr = await pool.query('SELECT * FROM guests WHERE id = $1 AND (user_id = $2::integer OR user_id IS NULL)', [guestId, userId]);
         if (checkAppr.rows.length === 0) return res.status(404).json({ error: 'Guest not found' });
         await pool.query('UPDATE guests SET status = $1 WHERE id = $2', ['approved', guestId]);
         // Emit WebSocket notification
@@ -5456,7 +5456,7 @@ app.post('/api/v1/gpt/guests', async (req, res) => {
 
       case 'reject': {
         if (!guestId) return res.status(400).json({ error: 'guestId required' });
-        const checkRej = await pool.query('SELECT * FROM guests WHERE id = $1 AND (user_id = $2 OR user_id IS NULL)', [guestId, userId]);
+        const checkRej = await pool.query('SELECT * FROM guests WHERE id = $1 AND (user_id = $2::integer OR user_id IS NULL)', [guestId, userId]);
         if (checkRej.rows.length === 0) return res.status(404).json({ error: 'Guest not found' });
         await pool.query('UPDATE guests SET status = $1 WHERE id = $2', ['rejected', guestId]);
         // Emit WebSocket notification
@@ -5466,7 +5466,7 @@ app.post('/api/v1/gpt/guests', async (req, res) => {
 
       case 'checkIn': {
         if (!guestId) return res.status(400).json({ error: 'guestId required' });
-        const checkIn = await pool.query('SELECT * FROM guests WHERE id = $1 AND (user_id = $2 OR user_id IS NULL)', [guestId, userId]);
+        const checkIn = await pool.query('SELECT * FROM guests WHERE id = $1 AND (user_id = $2::integer OR user_id IS NULL)', [guestId, userId]);
         if (checkIn.rows.length === 0) return res.status(404).json({ error: 'Guest not found' });
         await pool.query('UPDATE guests SET checked_in_at = CURRENT_TIMESTAMP WHERE id = $1', [guestId]);
         // Emit WebSocket notification
@@ -5480,7 +5480,7 @@ app.post('/api/v1/gpt/guests', async (req, res) => {
             COUNT(*) FILTER (WHERE status = 'pending') as pending,
             COUNT(*) FILTER (WHERE status = 'approved') as approved,
             COUNT(*) FILTER (WHERE checked_in_at IS NOT NULL) as checked_in
-          FROM guests WHERE (user_id = $1 OR user_id IS NULL)
+          FROM guests WHERE (user_id = $1::integer OR user_id IS NULL)
         `, [userId]);
         return res.json({ success: true, stats: result.rows[0] });
       }
@@ -5626,13 +5626,13 @@ app.post('/api/v1/gpt/staff', async (req, res) => {
 
     switch (action) {
       case 'list': {
-        const result = await pool.query('SELECT * FROM staff WHERE (user_id = $1 OR user_id IS NULL) ORDER BY name', [userId]);
+        const result = await pool.query('SELECT * FROM staff WHERE (user_id = $1::integer OR user_id IS NULL) ORDER BY name', [userId]);
         return res.json({ success: true, staff: result.rows });
       }
 
       case 'get': {
         if (!staffId) return res.status(400).json({ error: 'staffId required' });
-        const result = await pool.query('SELECT * FROM staff WHERE id = $1 AND (user_id = $2 OR user_id IS NULL)', [staffId, userId]);
+        const result = await pool.query('SELECT * FROM staff WHERE id = $1 AND (user_id = $2::integer OR user_id IS NULL)', [staffId, userId]);
         if (result.rows.length === 0) return res.status(404).json({ error: 'Staff not found' });
         return res.json({ success: true, staff: result.rows[0] });
       }
@@ -5650,7 +5650,7 @@ app.post('/api/v1/gpt/staff', async (req, res) => {
       case 'update': {
         if (!staffId) return res.status(400).json({ error: 'staffId required' });
         // Verify ownership
-        const check = await pool.query('SELECT id FROM staff WHERE id = $1 AND (user_id = $2 OR user_id IS NULL)', [staffId, userId]);
+        const check = await pool.query('SELECT id FROM staff WHERE id = $1 AND (user_id = $2::integer OR user_id IS NULL)', [staffId, userId]);
         if (check.rows.length === 0) return res.status(404).json({ error: 'Staff not found' });
         const fields = [];
         const values = [];
@@ -5670,7 +5670,7 @@ app.post('/api/v1/gpt/staff', async (req, res) => {
 
       case 'delete': {
         if (!staffId) return res.status(400).json({ error: 'staffId required' });
-        await pool.query('DELETE FROM staff WHERE id = $1 AND (user_id = $2 OR user_id IS NULL)', [staffId, userId]);
+        await pool.query('DELETE FROM staff WHERE id = $1 AND (user_id = $2::integer OR user_id IS NULL)', [staffId, userId]);
         return res.json({ success: true, message: 'Staff removed' });
       }
 
@@ -5726,7 +5726,7 @@ app.post('/api/v1/gpt/vendors', async (req, res) => {
     switch (action) {
       case 'list': {
         const { category, isPreferred } = filters || {};
-        let query = 'SELECT * FROM vendors WHERE (user_id = $1 OR user_id IS NULL)';
+        let query = 'SELECT * FROM vendors WHERE (user_id = $1::integer OR user_id IS NULL)';
         const values = [userId];
         if (category) { query += ` AND category = $${values.length + 1}`; values.push(category); }
         if (isPreferred !== undefined) { query += ` AND is_preferred = $${values.length + 1}`; values.push(isPreferred); }
@@ -5737,7 +5737,7 @@ app.post('/api/v1/gpt/vendors', async (req, res) => {
 
       case 'get': {
         if (!vendorId) return res.status(400).json({ error: 'vendorId required' });
-        const result = await pool.query('SELECT * FROM vendors WHERE id = $1 AND (user_id = $2 OR user_id IS NULL)', [vendorId, userId]);
+        const result = await pool.query('SELECT * FROM vendors WHERE id = $1 AND (user_id = $2::integer OR user_id IS NULL)', [vendorId, userId]);
         if (result.rows.length === 0) return res.status(404).json({ error: 'Vendor not found' });
         return res.json({ success: true, vendor: result.rows[0] });
       }
@@ -5758,7 +5758,7 @@ app.post('/api/v1/gpt/vendors', async (req, res) => {
       case 'update': {
         if (!vendorId) return res.status(400).json({ error: 'vendorId required' });
         // Verify ownership
-        const checkVUpd = await pool.query('SELECT * FROM vendors WHERE id = $1 AND (user_id = $2 OR user_id IS NULL)', [vendorId, userId]);
+        const checkVUpd = await pool.query('SELECT * FROM vendors WHERE id = $1 AND (user_id = $2::integer OR user_id IS NULL)', [vendorId, userId]);
         if (checkVUpd.rows.length === 0) return res.status(404).json({ error: 'Vendor not found' });
         const fields = [];
         const values = [];
@@ -5782,7 +5782,7 @@ app.post('/api/v1/gpt/vendors', async (req, res) => {
       case 'delete': {
         if (!vendorId) return res.status(400).json({ error: 'vendorId required' });
         // Verify ownership
-        const checkVDel = await pool.query('SELECT * FROM vendors WHERE id = $1 AND (user_id = $2 OR user_id IS NULL)', [vendorId, userId]);
+        const checkVDel = await pool.query('SELECT * FROM vendors WHERE id = $1 AND (user_id = $2::integer OR user_id IS NULL)', [vendorId, userId]);
         if (checkVDel.rows.length === 0) return res.status(404).json({ error: 'Vendor not found' });
         const deletedVendor = checkVDel.rows[0];
         await pool.query('DELETE FROM vendors WHERE id = $1', [vendorId]);
@@ -5814,7 +5814,7 @@ app.post('/api/v1/gpt/models', async (req, res) => {
     switch (action) {
       case 'list': {
         const { status } = filters || {};
-        let query = 'SELECT * FROM models WHERE (user_id = $1 OR user_id IS NULL)';
+        let query = 'SELECT * FROM models WHERE (user_id = $1::integer OR user_id IS NULL)';
         const params = [userId];
         if (status) {
           query += ` AND status = $2`;
@@ -5827,7 +5827,7 @@ app.post('/api/v1/gpt/models', async (req, res) => {
 
       case 'get': {
         if (!modelId) return res.status(400).json({ error: 'modelId required' });
-        const result = await pool.query('SELECT * FROM models WHERE id = $1 AND (user_id = $2 OR user_id IS NULL)', [modelId, userId]);
+        const result = await pool.query('SELECT * FROM models WHERE id = $1 AND (user_id = $2::integer OR user_id IS NULL)', [modelId, userId]);
         if (result.rows.length === 0) return res.status(404).json({ error: 'Model not found' });
         return res.json({ success: true, model: result.rows[0] });
       }
@@ -5838,7 +5838,7 @@ app.post('/api/v1/gpt/models', async (req, res) => {
         if (!['pending', 'approved', 'declined', 'assigned'].includes(status)) {
           return res.status(400).json({ error: 'Invalid status' });
         }
-        await pool.query('UPDATE models SET status = $1 WHERE id = $2 AND (user_id = $3 OR user_id IS NULL)', [status, modelId, userId]);
+        await pool.query('UPDATE models SET status = $1 WHERE id = $2::integer AND (user_id = $3::integer OR user_id IS NULL)', [status, modelId, userId]);
         return res.json({ success: true, message: `Model ${status}` });
       }
 
@@ -5848,7 +5848,7 @@ app.post('/api/v1/gpt/models', async (req, res) => {
             COUNT(*) FILTER (WHERE status = 'pending') as pending,
             COUNT(*) FILTER (WHERE status = 'approved') as approved,
             COUNT(*) FILTER (WHERE status = 'assigned') as assigned
-          FROM models WHERE (user_id = $1 OR user_id IS NULL)
+          FROM models WHERE (user_id = $1::integer OR user_id IS NULL)
         `, [userId]);
         return res.json({ success: true, stats: result.rows[0] });
       }
@@ -5994,13 +5994,13 @@ app.post('/api/v1/gpt/sponsors', async (req, res) => {
 
     switch (action) {
       case 'list': {
-        const result = await pool.query('SELECT * FROM sponsors WHERE (user_id = $1 OR user_id IS NULL) ORDER BY created_at DESC', [userId]);
+        const result = await pool.query('SELECT * FROM sponsors WHERE (user_id = $1::integer OR user_id IS NULL) ORDER BY created_at DESC', [userId]);
         return res.json({ success: true, sponsors: result.rows });
       }
 
       case 'get': {
         if (!sponsorId) return res.status(400).json({ error: 'sponsorId required' });
-        const result = await pool.query('SELECT * FROM sponsors WHERE id = $1 AND (user_id = $2 OR user_id IS NULL)', [sponsorId, userId]);
+        const result = await pool.query('SELECT * FROM sponsors WHERE id = $1 AND (user_id = $2::integer OR user_id IS NULL)', [sponsorId, userId]);
         if (result.rows.length === 0) return res.status(404).json({ error: 'Sponsor not found' });
         return res.json({ success: true, sponsor: result.rows[0] });
       }
@@ -6021,7 +6021,7 @@ app.post('/api/v1/gpt/sponsors', async (req, res) => {
       case 'updateStatus': {
         if (!sponsorId) return res.status(400).json({ error: 'sponsorId required' });
         // Verify ownership
-        const checkSUpd = await pool.query('SELECT * FROM sponsors WHERE id = $1 AND (user_id = $2 OR user_id IS NULL)', [sponsorId, userId]);
+        const checkSUpd = await pool.query('SELECT * FROM sponsors WHERE id = $1 AND (user_id = $2::integer OR user_id IS NULL)', [sponsorId, userId]);
         if (checkSUpd.rows.length === 0) return res.status(404).json({ error: 'Sponsor not found' });
         const { status } = data || {};
         await pool.query('UPDATE sponsors SET status = $1 WHERE id = $2', [status, sponsorId]);
@@ -6036,7 +6036,7 @@ app.post('/api/v1/gpt/sponsors', async (req, res) => {
             COUNT(*) FILTER (WHERE status = 'pending') as pending,
             COUNT(*) FILTER (WHERE status = 'active') as active,
             COALESCE(SUM(amount) FILTER (WHERE status = 'active'), 0) as revenue
-          FROM sponsors WHERE (user_id = $1 OR user_id IS NULL)
+          FROM sponsors WHERE (user_id = $1::integer OR user_id IS NULL)
         `, [userId]);
         return res.json({ success: true, stats: result.rows[0] });
       }
@@ -6062,7 +6062,7 @@ app.post('/api/v1/gpt/promoters', async (req, res) => {
           SELECT p.*,
             (SELECT COUNT(*) FROM promoter_sales ps WHERE ps.promoter_id = p.id) as sales_count
           FROM promoters p
-          WHERE (p.user_id = $1 OR p.user_id IS NULL)
+          WHERE (p.user_id = $1::integer OR p.user_id IS NULL)
           ORDER BY p.total_sales DESC
         `, [userId]);
         return res.json({ success: true, promoters: result.rows, tiers: promoterTiers });
@@ -6189,14 +6189,14 @@ app.post('/api/v1/gpt/integrations', async (req, res) => {
 
     switch (action) {
       case 'list': {
-        const result = await pool.query('SELECT provider, status, last_sync FROM user_integrations WHERE user_id = $1', [userId]);
+        const result = await pool.query('SELECT provider, status, last_sync FROM user_integrations WHERE user_id = $1::integer', [userId]);
         return res.json({ success: true, integrations: result.rows });
       }
 
       case 'sync': {
         if (!provider) return res.status(400).json({ error: 'provider required (eventbrite or mailchimp)' });
         if (provider === 'eventbrite') {
-          const intResult = await pool.query('SELECT api_key_encrypted FROM user_integrations WHERE user_id = $1 AND provider = $2', [userId, 'eventbrite']);
+          const intResult = await pool.query('SELECT api_key_encrypted FROM user_integrations WHERE user_id = $1::integer AND provider = $2', [userId, 'eventbrite']);
           if (intResult.rows.length === 0) return res.status(400).json({ error: 'Eventbrite not connected. Connect first via the dashboard.' });
           // Just return a message - actual sync requires the full endpoint
           return res.json({ success: true, message: 'Use the dashboard to sync Eventbrite events' });
@@ -6265,7 +6265,7 @@ app.post('/api/v1/gpt/uploads', async (req, res) => {
           SELECT id, original_filename, file_type, upload_type, records_processed,
                  records_success, records_failed, status, event_id, created_at
           FROM file_uploads
-          WHERE user_id = $1
+          WHERE user_id = $1::integer
           ORDER BY created_at DESC
           LIMIT 50
         `, [userId]);
@@ -6276,7 +6276,7 @@ app.post('/api/v1/gpt/uploads', async (req, res) => {
         if (!uploadId) return res.status(400).json({ error: 'uploadId required' });
         const result = await pool.query(`
           SELECT * FROM file_uploads
-          WHERE id = $1 AND user_id = $2
+          WHERE id = $1::integer AND user_id = $2::integer
         `, [uploadId, userId]);
         if (result.rows.length === 0) return res.status(404).json({ error: 'Upload not found' });
         return res.json({ success: true, upload: result.rows[0] });
@@ -6292,7 +6292,7 @@ app.post('/api/v1/gpt/uploads', async (req, res) => {
             COUNT(*) FILTER (WHERE status = 'completed') as completed_uploads,
             COUNT(*) FILTER (WHERE status = 'processing') as processing_uploads
           FROM file_uploads
-          WHERE user_id = $1
+          WHERE user_id = $1::integer
         `, [userId]);
         return res.json({ success: true, stats: result.rows[0] });
       }
@@ -7522,11 +7522,11 @@ app.get('/api/v1/staff', async (req, res) => {
            JOIN events e ON sa.event_id = e.id
            WHERE sa.staff_id = s.id AND e.date >= CURRENT_DATE) as upcoming_events
         FROM staff s
-        WHERE (s.user_id = $1 OR s.user_id IS NULL)
+        WHERE (s.user_id = $1::integer OR s.user_id IS NULL)
         ORDER BY s.created_at DESC
       `, [userId]);
     } else {
-      result = await pool.query(`SELECT * FROM staff WHERE (user_id = $1 OR user_id IS NULL) ORDER BY created_at DESC`, [userId]);
+      result = await pool.query(`SELECT * FROM staff WHERE (user_id = $1::integer OR user_id IS NULL) ORDER BY created_at DESC`, [userId]);
     }
 
     // Get stats
@@ -7536,7 +7536,7 @@ app.get('/api/v1/staff', async (req, res) => {
         COUNT(*) FILTER (WHERE status = 'inactive') as inactive,
         COUNT(*) as total,
         COALESCE(AVG(rating), 0) as avg_rating
-      FROM staff WHERE (user_id = $1 OR user_id IS NULL)
+      FROM staff WHERE (user_id = $1::integer OR user_id IS NULL)
     `, [userId]);
 
     res.json({
@@ -7557,7 +7557,7 @@ app.get('/api/v1/staff/available', async (req, res) => {
     let query = `
       SELECT s.* FROM staff s
       WHERE s.status = 'active'
-      AND (s.user_id = $1 OR s.user_id IS NULL)
+      AND (s.user_id = $1::integer OR s.user_id IS NULL)
       AND s.id NOT IN (
         SELECT DISTINCT sa.staff_id FROM staff_assignments sa
         JOIN events e ON sa.event_id = e.id
@@ -7587,7 +7587,7 @@ app.get('/api/v1/staff/:id', async (req, res) => {
     const userId = req.user?.id;
     const { id } = req.params;
 
-    const staffResult = await pool.query('SELECT * FROM staff WHERE id = $1 AND (user_id = $2 OR user_id IS NULL)', [id, userId]);
+    const staffResult = await pool.query('SELECT * FROM staff WHERE id = $1::integer AND (user_id = $2::integer OR user_id IS NULL)', [id, userId]);
     if (staffResult.rows.length === 0) {
       return res.status(404).json({ error: 'Staff not found' });
     }
@@ -7686,7 +7686,7 @@ app.put('/api/v1/staff/:id', async (req, res) => {
         emergency_phone = $16,
         rating = COALESCE($17, rating),
         updated_at = CURRENT_TIMESTAMP
-      WHERE id = $18 AND (user_id = $19 OR user_id IS NULL)
+      WHERE id = $18::integer AND (user_id = $19::integer OR user_id IS NULL)
       RETURNING *
     `, [
       name, email, phone, role, secondaryRole, photoUrl, instagram,
@@ -7709,7 +7709,7 @@ app.delete('/api/v1/staff/:id', async (req, res) => {
   try {
     const userId = req.user?.id;
     const { id } = req.params;
-    await pool.query('DELETE FROM staff WHERE id = $1 AND (user_id = $2 OR user_id IS NULL)', [id, userId]);
+    await pool.query('DELETE FROM staff WHERE id = $1 AND (user_id = $2::integer OR user_id IS NULL)', [id, userId]);
     res.status(204).send();
   } catch (error) {
     console.error('Error deleting staff:', error);
@@ -8220,7 +8220,7 @@ app.get('/api/v1/models', async (req, res) => {
   try {
     const userId = req.user?.id;
     const { status, event_id } = req.query;
-    let query = 'SELECT * FROM models WHERE (user_id = $1 OR user_id IS NULL)';
+    let query = 'SELECT * FROM models WHERE (user_id = $1::integer OR user_id IS NULL)';
     const params = [userId];
     let paramIndex = 2;
 
@@ -8272,7 +8272,7 @@ app.get('/api/v1/models/stats', async (req, res) => {
         COUNT(*) FILTER (WHERE status = 'approved') as approved,
         COUNT(*) FILTER (WHERE status = 'assigned') as assigned,
         COUNT(*) FILTER (WHERE status = 'declined') as declined
-      FROM models WHERE (user_id = $1 OR user_id IS NULL)
+      FROM models WHERE (user_id = $1::integer OR user_id IS NULL)
     `, [userId]);
     res.json(result.rows[0]);
   } catch (error) {
@@ -8285,7 +8285,7 @@ app.get('/api/v1/models/stats', async (req, res) => {
 app.get('/api/v1/models/:id', async (req, res) => {
   try {
     const userId = req.user?.id;
-    const result = await pool.query('SELECT * FROM models WHERE id = $1 AND (user_id = $2 OR user_id IS NULL)', [req.params.id, userId]);
+    const result = await pool.query('SELECT * FROM models WHERE id = $1 AND (user_id = $2::integer OR user_id IS NULL)', [req.params.id, userId]);
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Model not found' });
     }
@@ -8376,7 +8376,7 @@ app.patch('/api/v1/models/:id', async (req, res) => {
 app.delete('/api/v1/models/:id', async (req, res) => {
   try {
     const userId = req.user?.id;
-    await pool.query('DELETE FROM models WHERE id = $1 AND (user_id = $2 OR user_id IS NULL)', [req.params.id, userId]);
+    await pool.query('DELETE FROM models WHERE id = $1 AND (user_id = $2::integer OR user_id IS NULL)', [req.params.id, userId]);
     res.json({ success: true });
   } catch (error) {
     console.error('Error deleting model:', error);
@@ -9789,7 +9789,7 @@ app.get('/api/v1/auth/eventbrite/status', async (req, res) => {
     // Check user_integrations first (per-user)
     if (userId) {
       const userResult = await pool.query(
-        'SELECT * FROM user_integrations WHERE user_id = $1 AND provider = $2',
+        'SELECT * FROM user_integrations WHERE user_id = $1::integer AND provider = $2',
         [userId, 'eventbrite']
       );
 
@@ -9808,7 +9808,7 @@ app.get('/api/v1/auth/eventbrite/status', async (req, res) => {
 
         if (!userResponse.ok) {
           await pool.query(
-            'UPDATE user_integrations SET status = $1 WHERE user_id = $2 AND provider = $3',
+            'UPDATE user_integrations SET status = $1 WHERE user_id = $2::integer AND provider = $3',
             ['expired', userId, 'eventbrite']
           );
           return res.json({ connected: false, error: 'Token expired' });
@@ -9927,7 +9927,7 @@ app.post('/api/v1/auth/eventbrite/disconnect', async (req, res) => {
     if (userId) {
       // Get the access token before deleting
       const tokenResult = await pool.query(
-        'SELECT api_key_encrypted FROM user_integrations WHERE user_id = $1 AND provider = $2',
+        'SELECT api_key_encrypted FROM user_integrations WHERE user_id = $1::integer AND provider = $2',
         [userId, 'eventbrite']
       );
 
@@ -9937,7 +9937,7 @@ app.post('/api/v1/auth/eventbrite/disconnect', async (req, res) => {
 
       // Delete the integration from database
       await pool.query(
-        'DELETE FROM user_integrations WHERE user_id = $1 AND provider = $2',
+        'DELETE FROM user_integrations WHERE user_id = $1::integer AND provider = $2',
         [userId, 'eventbrite']
       );
       console.log(`Eventbrite disconnected for user ${userId}`);
@@ -10001,7 +10001,7 @@ app.post('/api/v1/integrations/eventbrite/sync', async (req, res) => {
     // Check user_integrations first (per-user)
     if (userId) {
       const userResult = await pool.query(
-        'SELECT * FROM user_integrations WHERE user_id = $1 AND provider = $2 AND status = $3',
+        'SELECT * FROM user_integrations WHERE user_id = $1::integer AND provider = $2 AND status = $3',
         [userId, 'eventbrite', 'connected']
       );
       if (userResult.rows.length > 0) {
