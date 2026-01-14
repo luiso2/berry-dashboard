@@ -16,7 +16,7 @@ import * as XLSX from 'xlsx';
 import { parse as csvParse } from 'csv-parse/sync';
 
 // API Version - for tracking deployments
-const API_VERSION = '3.15.1-sms';
+const API_VERSION = '3.15.2-guest-status';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -220,6 +220,7 @@ const initDatabase = async () => {
         event_date TIMESTAMP,
         notes TEXT,
         category VARCHAR(50) DEFAULT 'pending',
+        status VARCHAR(50) DEFAULT 'pending',
         email_sent BOOLEAN DEFAULT false,
         email_sent_at TIMESTAMP,
         checked_in_at TIMESTAMP,
@@ -238,6 +239,9 @@ const initDatabase = async () => {
         END IF;
         IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='guests' AND column_name='rating') THEN
           ALTER TABLE guests ADD COLUMN rating INTEGER DEFAULT 0;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='guests' AND column_name='status') THEN
+          ALTER TABLE guests ADD COLUMN status VARCHAR(50) DEFAULT 'pending';
         END IF;
       END $$;
     `);
