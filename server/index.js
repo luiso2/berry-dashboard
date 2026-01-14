@@ -413,7 +413,7 @@ const initDatabase = async () => {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
-      CREATE INDEX IF NOT EXISTS idx_events_date ON events(date);
+      CREATE INDEX IF NOT EXISTS idx_events_date ON events(event_date);
       CREATE INDEX IF NOT EXISTS idx_events_status ON events(status);
     `);
 
@@ -7952,7 +7952,7 @@ app.delete('/api/v1/vendors/:id', async (req, res) => {
 // GET /api/v1/staff - Get all staff with stats
 app.get('/api/v1/staff', async (req, res) => {
   try {
-    const userId = req.user?.id;
+    const userId = req.user?.id || null;
 
     // Check if staff table exists
     const tableCheck = await pool.query(`
@@ -7984,7 +7984,7 @@ app.get('/api/v1/staff', async (req, res) => {
           (SELECT COUNT(*) FROM staff_assignments sa WHERE sa.staff_id = s.id) as assignments_count,
           (SELECT COUNT(*) FROM staff_assignments sa
            JOIN events e ON sa.event_id = e.id
-           WHERE sa.staff_id = s.id AND e.date >= CURRENT_DATE) as upcoming_events
+           WHERE sa.staff_id = s.id AND e.event_date >= CURRENT_DATE) as upcoming_events
         FROM staff s
         WHERE (s.user_id = $1::integer OR s.user_id IS NULL)
         ORDER BY s.created_at DESC
