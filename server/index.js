@@ -3870,20 +3870,33 @@ const generateTicketId = () => `tkt_${Date.now()}_${Math.random().toString(36).s
 app.get('/api/v1/tickets', async (req, res) => {
   try {
     const { eventId, status } = req.query;
-    let queryText = 'SELECT * FROM tickets WHERE 1=1';
+    const userId = req.user?.id;
+    let queryText = 'SELECT t.* FROM tickets t';
     const params = [];
     let paramIndex = 1;
+    const conditions = ['1=1'];
+
+    // Multi-tenant: filter by user_id through event ownership or direct user_id
+    if (userId) {
+      queryText += ' LEFT JOIN events e ON t.event_ref_id = CAST(e.id AS INTEGER) OR t.event_id = e.external_id';
+      conditions.push(`(t.user_id = $${paramIndex}::integer OR e.user_id = $${paramIndex}::integer OR (t.user_id IS NULL AND e.user_id IS NULL))`);
+      params.push(userId);
+      paramIndex++;
+    }
 
     if (eventId) {
-      queryText += ` AND event_id = $${paramIndex++}`;
+      conditions.push(`t.event_id = $${paramIndex}`);
       params.push(eventId);
+      paramIndex++;
     }
     if (status) {
-      queryText += ` AND status = $${paramIndex++}`;
+      conditions.push(`t.status = $${paramIndex}`);
       params.push(status);
+      paramIndex++;
     }
 
-    queryText += ' ORDER BY created_at DESC';
+    queryText += ' WHERE ' + conditions.join(' AND ');
+    queryText += ' ORDER BY t.created_at DESC';
     const result = await pool.query(queryText, params);
 
     const tickets = result.rows.map(t => ({
@@ -6419,10 +6432,18 @@ app.post('/api/v1/gpt/session', async (req, res) => {
 app.get('/api/v1/events', async (req, res) => {
   try {
     const { status, upcoming, featured, limit = 50 } = req.query;
+    const userId = req.user?.id;
     let query = 'SELECT * FROM events';
     const conditions = [];
     const values = [];
     let paramCount = 1;
+
+    // Multi-tenant: filter by user_id if authenticated
+    if (userId) {
+      conditions.push(`(user_id = $${paramCount}::integer OR user_id IS NULL)`);
+      values.push(userId);
+      paramCount++;
+    }
 
     if (status) {
       conditions.push(`status = $${paramCount}`);
@@ -9369,25 +9390,45 @@ app.delete('/api/v1/integrations/:provider', async (req, res) => {
 // TELNYX MESSAGING ENDPOINTS
 // ============================================
 
-// POST /api/v1/telnyx/send-sms - Send SMS via Telnyx
+// POST /api/v1/telnyx/send-sms - Send SMS via Telnyx (Multi-tenant)
 app.post('/api/v1/telnyx/send-sms', async (req, res) => {
   try {
     const { to, message, from } = req.body;
+    const userId = req.user?.id;
 
     if (!to || !message) {
       return res.status(400).json({ error: 'Phone number (to) and message are required' });
     }
 
-    // Get Telnyx credentials
-    const result = await pool.query('SELECT * FROM integrations WHERE provider = $1', ['telnyx']);
-    const integration = result.rows[0];
+    let apiKey = null;
+    let extraConfig = {};
 
-    if (!integration?.api_key_encrypted) {
-      return res.status(400).json({ error: 'Telnyx integration not configured' });
+    // Try user-specific integration first (multi-tenant)
+    if (userId) {
+      const userResult = await pool.query(
+        'SELECT * FROM user_integrations WHERE user_id = $1::integer AND provider = $2 AND status = $3',
+        [userId, 'telnyx', 'connected']
+      );
+      if (userResult.rows.length > 0) {
+        apiKey = decryptApiKey(userResult.rows[0].api_key_encrypted);
+        extraConfig = userResult.rows[0].extra_config || {};
+      }
     }
 
-    const apiKey = decryptApiKey(integration.api_key_encrypted);
-    const extraConfig = integration.extra_config || {};
+    // Fallback to global integration
+    if (!apiKey) {
+      const result = await pool.query('SELECT * FROM integrations WHERE provider = $1', ['telnyx']);
+      const integration = result.rows[0];
+      if (integration?.api_key_encrypted) {
+        apiKey = decryptApiKey(integration.api_key_encrypted);
+        extraConfig = integration.extra_config || {};
+      }
+    }
+
+    if (!apiKey) {
+      return res.status(400).json({ error: 'Telnyx integration not configured. Please connect Telnyx in Integrations.' });
+    }
+
     const fromNumber = from || extraConfig.phone_number;
     const messagingProfileId = extraConfig.messaging_profile_id;
 
@@ -9417,6 +9458,17 @@ app.post('/api/v1/telnyx/send-sms', async (req, res) => {
     const telnyxData = await telnyxResponse.json();
 
     if (telnyxResponse.ok) {
+      // Save conversation for multi-tenant tracking
+      try {
+        await pool.query(
+          `INSERT INTO sms_conversations (from_number, to_number, direction, message, user_id)
+           VALUES ($1, $2, $3, $4, $5)`,
+          [fromNumber, to, 'outbound', message, userId || null]
+        );
+      } catch (convErr) {
+        console.log('Note: Could not save SMS conversation:', convErr.message);
+      }
+
       res.json({
         success: true,
         messageId: telnyxData.data?.id,
@@ -9593,6 +9645,184 @@ app.get('/api/v1/telnyx/messaging-profiles', async (req, res) => {
   } catch (error) {
     console.error('Error fetching Telnyx messaging profiles:', error);
     res.status(500).json({ error: 'Failed to fetch messaging profiles' });
+  }
+});
+
+// ============================================
+// TELNYX INBOUND SMS WEBHOOK (Multi-tenant + AI Response)
+// ============================================
+
+// POST /api/webhooks/telnyx/sms - Handle inbound SMS from Telnyx
+app.post('/api/webhooks/telnyx/sms', async (req, res) => {
+  try {
+    const event = req.body;
+    console.log('📱 Telnyx webhook received:', event.data?.event_type);
+
+    // Handle message.received event
+    if (event.data?.event_type === 'message.received') {
+      const payload = event.data.payload;
+      const fromNumber = payload.from?.phone_number;
+      const toNumber = payload.to?.[0]?.phone_number;
+      const messageText = payload.text;
+      const messagingProfileId = payload.messaging_profile_id;
+
+      console.log(`📨 Inbound SMS from ${fromNumber} to ${toNumber}: ${messageText}`);
+
+      // Find which user owns this phone number (multi-tenant lookup)
+      let userId = null;
+      let apiKey = null;
+
+      // Check user_integrations for the phone number
+      const userIntResult = await pool.query(
+        `SELECT user_id, api_key_encrypted, extra_config FROM user_integrations
+         WHERE provider = 'telnyx' AND status = 'connected'
+         AND (extra_config->>'phone_number' = $1 OR extra_config->>'messaging_profile_id' = $2)`,
+        [toNumber, messagingProfileId]
+      );
+
+      if (userIntResult.rows.length > 0) {
+        userId = userIntResult.rows[0].user_id;
+        apiKey = decryptApiKey(userIntResult.rows[0].api_key_encrypted);
+      } else {
+        // Fallback to global integration
+        const globalResult = await pool.query('SELECT * FROM integrations WHERE provider = $1', ['telnyx']);
+        if (globalResult.rows[0]?.api_key_encrypted) {
+          apiKey = decryptApiKey(globalResult.rows[0].api_key_encrypted);
+        }
+      }
+
+      // Save inbound message to sms_conversations
+      await pool.query(
+        `INSERT INTO sms_conversations (from_number, to_number, direction, message, user_id)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [fromNumber, toNumber, 'inbound', messageText, userId]
+      );
+
+      // Generate AI response if OpenAI key is available
+      let aiResponse = null;
+      const openaiKey = process.env.OPENAI_API_KEY;
+
+      if (openaiKey && apiKey) {
+        try {
+          // Get user/company context for personalized response
+          let companyName = 'our company';
+          if (userId) {
+            const userResult = await pool.query('SELECT name, company FROM users WHERE id = $1', [userId]);
+            if (userResult.rows[0]?.company) {
+              companyName = userResult.rows[0].company;
+            }
+          }
+
+          // Call OpenAI for AI response
+          const openaiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${openaiKey}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              model: 'gpt-4o-mini',
+              messages: [
+                {
+                  role: 'system',
+                  content: `You are a helpful AI assistant for ${companyName}. Respond to customer SMS messages professionally, helpfully, and concisely. Keep responses under 160 characters when possible. Be friendly but professional.`
+                },
+                {
+                  role: 'user',
+                  content: messageText
+                }
+              ],
+              max_tokens: 150,
+              temperature: 0.7
+            })
+          });
+
+          const openaiData = await openaiResponse.json();
+          aiResponse = openaiData.choices?.[0]?.message?.content;
+
+          if (aiResponse) {
+            // Send AI response via Telnyx
+            const replyPayload = {
+              from: toNumber,
+              to: fromNumber,
+              text: aiResponse
+            };
+
+            if (messagingProfileId) {
+              replyPayload.messaging_profile_id = messagingProfileId;
+            }
+
+            const telnyxReply = await fetch('https://api.telnyx.com/v2/messages', {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${apiKey}`,
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify(replyPayload)
+            });
+
+            const replyData = await telnyxReply.json();
+            console.log(`🤖 AI Response sent: ${aiResponse}`);
+
+            // Save AI response to conversation
+            await pool.query(
+              `INSERT INTO sms_conversations (from_number, to_number, direction, message, ai_response, user_id)
+               VALUES ($1, $2, $3, $4, $5, $6)`,
+              [toNumber, fromNumber, 'outbound', aiResponse, aiResponse, userId]
+            );
+          }
+        } catch (aiError) {
+          console.error('AI response error:', aiError.message);
+        }
+      }
+
+      res.json({ success: true, processed: true, aiResponse: !!aiResponse });
+    } else {
+      // Acknowledge other event types
+      res.json({ success: true, eventType: event.data?.event_type });
+    }
+  } catch (error) {
+    console.error('Telnyx webhook error:', error);
+    res.status(500).json({ error: 'Webhook processing failed' });
+  }
+});
+
+// GET /api/v1/sms/conversations - Get SMS conversations (Multi-tenant)
+app.get('/api/v1/sms/conversations', async (req, res) => {
+  try {
+    const userId = req.user?.id;
+    const { limit = 50, phone } = req.query;
+
+    let query = 'SELECT * FROM sms_conversations WHERE 1=1';
+    const params = [];
+    let paramIndex = 1;
+
+    // Multi-tenant: filter by user_id if authenticated
+    if (userId) {
+      query += ` AND (user_id = $${paramIndex}::integer OR user_id IS NULL)`;
+      params.push(userId);
+      paramIndex++;
+    }
+
+    if (phone) {
+      query += ` AND (from_number = $${paramIndex} OR to_number = $${paramIndex})`;
+      params.push(phone);
+      paramIndex++;
+    }
+
+    query += ` ORDER BY created_at DESC LIMIT $${paramIndex}`;
+    params.push(parseInt(limit));
+
+    const result = await pool.query(query, params);
+
+    res.json({
+      success: true,
+      conversations: result.rows,
+      total: result.rows.length
+    });
+  } catch (error) {
+    console.error('Error fetching SMS conversations:', error);
+    res.status(500).json({ error: 'Failed to fetch conversations' });
   }
 });
 
@@ -9995,7 +10225,8 @@ app.post('/api/v1/auth/eventbrite/disconnect', async (req, res) => {
 // POST /api/v1/integrations/eventbrite/sync - Sync events from Eventbrite
 app.post('/api/v1/integrations/eventbrite/sync', async (req, res) => {
   try {
-    const { userId } = req.body;
+    // Use authenticated user from token, fallback to body for backwards compatibility
+    const userId = req.user?.id || req.body.userId;
     let apiKey = null;
 
     // Check user_integrations first (per-user)
@@ -10116,9 +10347,10 @@ app.post('/api/v1/integrations/eventbrite/sync', async (req, res) => {
 
           try {
             // Use 'nightlife' as default category (only 'corporate' and 'nightlife' are valid)
+            // Include user_id for multi-tenant support
             await pool.query(`
-              INSERT INTO events (id, title, description, date, time, status, category, external_id, external_source, eventbrite_url)
-              VALUES ($1, $2, $3, $4, $5, $6, 'nightlife', $7, 'eventbrite', $8)
+              INSERT INTO events (id, title, description, date, time, status, category, external_id, external_source, eventbrite_url, user_id)
+              VALUES ($1, $2, $3, $4, $5, $6, 'nightlife', $7, 'eventbrite', $8, $9)
             `, [
               nextId.toString(),
               event.name?.text || 'Untitled Event',
@@ -10127,24 +10359,26 @@ app.post('/api/v1/integrations/eventbrite/sync', async (req, res) => {
               startTime,
               eventStatus,
               event.id,
-              event.url || ''
+              event.url || '',
+              userId || null
             ]);
-            console.log(`✅ Inserted Eventbrite event: ${event.name?.text} (id: ${nextId})`);
+            console.log(`✅ Inserted Eventbrite event: ${event.name?.text} (id: ${nextId}) for user ${userId}`);
           } catch (insertErr) {
             console.error(`❌ Failed to insert event ${event.name?.text}:`, insertErr.message);
             insertErrors.push({ event: event.name?.text, error: insertErr.message });
             // Try fallback insert with minimal columns (title and date are required)
             try {
               await pool.query(`
-                INSERT INTO events (id, title, date, status, category)
-                VALUES ($1, $2, $3, $4, 'nightlife')
+                INSERT INTO events (id, title, date, status, category, user_id)
+                VALUES ($1, $2, $3, $4, 'nightlife', $5)
               `, [
                 nextId.toString(),
                 event.name?.text || 'Untitled Event',
                 eventDate,
-                eventStatus
+                eventStatus,
+                userId || null
               ]);
-              console.log(`✅ Inserted Eventbrite event with minimal columns: ${event.name?.text}`);
+              console.log(`✅ Inserted Eventbrite event with minimal columns: ${event.name?.text} for user ${userId}`);
               insertErrors.pop(); // Remove the error since fallback worked
             } catch (fallbackErr) {
               console.error(`❌ Fallback insert also failed:`, fallbackErr.message);

@@ -1218,7 +1218,7 @@ function App() {
 
   // Auth hooks
   const navigate = useNavigate();
-  const { user, logout } = useAuth();
+  const { user, token, logout } = useAuth();
 
   const handleLogout = () => {
     logout();
@@ -1552,8 +1552,17 @@ function App() {
   const syncEventbrite = async () => {
     setSyncingEventbrite(true);
     try {
+      // Create headers with auth token for multi-tenant support
+      const headers: HeadersInit = {
+        'Content-Type': 'application/json',
+        ...(token && { 'Authorization': `Bearer ${token}` })
+      };
+
       // First sync events and tickets
-      const syncRes = await fetch(`${API_URL}/integrations/eventbrite/sync`, { method: 'POST' });
+      const syncRes = await fetch(`${API_URL}/integrations/eventbrite/sync`, {
+        method: 'POST',
+        headers
+      });
       const syncData = await syncRes.json();
 
       if (!syncRes.ok) {
@@ -1562,7 +1571,10 @@ function App() {
       }
 
       // Setup webhook for real-time updates
-      const webhookRes = await fetch(`${API_URL}/integrations/eventbrite/setup-webhook`, { method: 'POST' });
+      const webhookRes = await fetch(`${API_URL}/integrations/eventbrite/setup-webhook`, {
+        method: 'POST',
+        headers
+      });
       const webhookData = await webhookRes.json();
 
       if (webhookRes.ok) {
@@ -1594,7 +1606,9 @@ function App() {
 
     setLoadingEventbriteMetrics(true);
     try {
-      const res = await fetch(`${API_URL}/integrations/eventbrite/metrics`);
+      // Include auth header for multi-tenant support
+      const headers: HeadersInit = token ? { 'Authorization': `Bearer ${token}` } : {};
+      const res = await fetch(`${API_URL}/integrations/eventbrite/metrics`, { headers });
       if (res.ok) {
         const data = await res.json();
         // Calculate aggregated funnel metrics from events
@@ -1701,7 +1715,7 @@ function App() {
     } finally {
       setLoadingEventbriteMetrics(false);
     }
-  }, [integrations, tickets, events]);
+  }, [integrations, tickets, events, token]);
 
   // Fetch Eventbrite metrics when integrations change
   useEffect(() => {
