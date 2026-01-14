@@ -1182,6 +1182,102 @@ const styles = `
       padding-top: env(safe-area-inset-top) !important;
     }
   }
+
+  /* SMS AI View Responsive */
+  .sms-stats-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+  }
+
+  .sms-main-grid {
+    display: grid;
+    grid-template-columns: 320px 1fr;
+    gap: 24px;
+    min-height: 500px;
+  }
+
+  .sms-thread-list {
+    max-height: 450px;
+    overflow-y: auto;
+  }
+
+  .sms-messages-container {
+    max-height: 350px;
+    overflow-y: auto;
+  }
+
+  @media (max-width: 1024px) {
+    .sms-stats-grid {
+      grid-template-columns: repeat(2, 1fr) !important;
+    }
+
+    .sms-main-grid {
+      grid-template-columns: 280px 1fr !important;
+    }
+  }
+
+  @media (max-width: 768px) {
+    .sms-stats-grid {
+      grid-template-columns: repeat(2, 1fr) !important;
+      gap: 12px !important;
+    }
+
+    .sms-main-grid {
+      grid-template-columns: 1fr !important;
+    }
+
+    .sms-thread-list {
+      max-height: 300px !important;
+    }
+
+    .sms-messages-container {
+      max-height: 300px !important;
+    }
+
+    .sms-chat-header {
+      flex-direction: column !important;
+      gap: 12px !important;
+      align-items: flex-start !important;
+    }
+
+    .sms-chat-header > div:last-child {
+      width: 100% !important;
+      display: flex !important;
+      gap: 8px !important;
+    }
+
+    .sms-chat-header button {
+      flex: 1 !important;
+    }
+
+    .sms-reply-input {
+      flex-direction: column !important;
+    }
+
+    .sms-reply-input button {
+      width: 100% !important;
+    }
+  }
+
+  @media (max-width: 480px) {
+    .sms-stats-grid {
+      grid-template-columns: 1fr 1fr !important;
+      gap: 8px !important;
+    }
+
+    .sms-stat-card {
+      padding: 12px !important;
+    }
+
+    .sms-stat-card > div:first-child {
+      font-size: 20px !important;
+    }
+
+    .sms-message-bubble {
+      max-width: 85% !important;
+    }
+  }
 `;
 
 // Client Portal View Component - Public view for clients
@@ -9567,27 +9663,27 @@ function App() {
             </div>
 
             {/* Stats Cards */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 16, marginBottom: 24 }}>
-              <div style={{ background: 'rgba(59,130,246,0.1)', border: '1px solid rgba(59,130,246,0.3)', borderRadius: 12, padding: 16 }}>
+            <div className="sms-stats-grid" style={{ marginBottom: 24 }}>
+              <div className="sms-stat-card" style={{ background: 'rgba(59,130,246,0.1)', border: '1px solid rgba(59,130,246,0.3)', borderRadius: 12, padding: 16 }}>
                 <div style={{ fontSize: 24, fontWeight: 700, color: '#3b82f6' }}>{smsStats.total_conversations}</div>
                 <div style={{ fontSize: 12, color: '#888' }}>Total Threads</div>
               </div>
-              <div style={{ background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.3)', borderRadius: 12, padding: 16 }}>
+              <div className="sms-stat-card" style={{ background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.3)', borderRadius: 12, padding: 16 }}>
                 <div style={{ fontSize: 24, fontWeight: 700, color: '#10b981' }}>{smsStats.total_messages}</div>
                 <div style={{ fontSize: 12, color: '#888' }}>Total Messages</div>
               </div>
-              <div style={{ background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.3)', borderRadius: 12, padding: 16 }}>
+              <div className="sms-stat-card" style={{ background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.3)', borderRadius: 12, padding: 16 }}>
                 <div style={{ fontSize: 24, fontWeight: 700, color: '#f59e0b' }}>{smsStats.unread_messages}</div>
                 <div style={{ fontSize: 12, color: '#888' }}>Unread</div>
               </div>
-              <div style={{ background: 'rgba(139,92,246,0.1)', border: '1px solid rgba(139,92,246,0.3)', borderRadius: 12, padding: 16 }}>
+              <div className="sms-stat-card" style={{ background: 'rgba(139,92,246,0.1)', border: '1px solid rgba(139,92,246,0.3)', borderRadius: 12, padding: 16 }}>
                 <div style={{ fontSize: 24, fontWeight: 700, color: '#8b5cf6' }}>{smsStats.human_takeover_count}</div>
                 <div style={{ fontSize: 12, color: '#888' }}>Human Mode</div>
               </div>
             </div>
 
             {/* Main Content - Thread List + Chat */}
-            <div style={{ display: 'grid', gridTemplateColumns: selectedSmsThread ? '320px 1fr' : '1fr', gap: 24, minHeight: 500 }}>
+            <div className="sms-main-grid" style={{ gridTemplateColumns: selectedSmsThread ? undefined : '1fr' }}>
               {/* Thread List */}
               <div style={{ background: '#111', borderRadius: 12, border: '1px solid #222', overflow: 'hidden' }}>
                 <div style={{ padding: 16, borderBottom: '1px solid #222', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -9599,7 +9695,7 @@ function App() {
                     Refresh
                   </button>
                 </div>
-                <div style={{ maxHeight: 450, overflowY: 'auto' }}>
+                <div className="sms-thread-list">
                   {loadingSmsThreads ? (
                     <div style={{ padding: 24, textAlign: 'center', color: '#666' }}>Loading...</div>
                   ) : smsThreads.length === 0 ? (
@@ -9644,12 +9740,12 @@ function App() {
               {selectedSmsThread && (
                 <div style={{ background: '#111', borderRadius: 12, border: '1px solid #222', display: 'flex', flexDirection: 'column' }}>
                   {/* Chat Header */}
-                  <div style={{ padding: 16, borderBottom: '1px solid #222', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div className="sms-chat-header" style={{ padding: 16, borderBottom: '1px solid #222', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <div>
                       <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>{selectedSmsThread}</h3>
                       <span style={{ fontSize: 12, color: '#888' }}>{smsMessages.length} messages</span>
                     </div>
-                    <div style={{ display: 'flex', gap: 8 }}>
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                       <button
                         onClick={() => {
                           const thread = smsThreads.find(t => t.phone === selectedSmsThread);
@@ -9683,10 +9779,11 @@ function App() {
                   </div>
 
                   {/* Messages */}
-                  <div style={{ flex: 1, overflowY: 'auto', padding: 16, display: 'flex', flexDirection: 'column', gap: 12, maxHeight: 350 }}>
+                  <div className="sms-messages-container" style={{ flex: 1, overflowY: 'auto', padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
                     {smsMessages.map((msg) => (
                       <div
                         key={msg.id}
+                        className="sms-message-bubble"
                         style={{
                           alignSelf: msg.direction === 'inbound' ? 'flex-start' : 'flex-end',
                           maxWidth: '70%'
@@ -9725,7 +9822,7 @@ function App() {
 
                   {/* Reply Input */}
                   <div style={{ padding: 16, borderTop: '1px solid #222' }}>
-                    <div style={{ display: 'flex', gap: 8 }}>
+                    <div className="sms-reply-input" style={{ display: 'flex', gap: 8 }}>
                       <input
                         type="text"
                         value={smsReplyText}
@@ -9738,9 +9835,9 @@ function App() {
                           borderRadius: 8,
                           padding: '12px 16px',
                           color: '#fff',
-                          fontSize: 14
+                          fontSize: 16
                         }}
-                        onKeyPress={(e) => {
+                        onKeyDown={(e) => {
                           if (e.key === 'Enter' && smsReplyText.trim()) {
                             sendSmsReply(selectedSmsThread, smsReplyText.trim());
                           }
