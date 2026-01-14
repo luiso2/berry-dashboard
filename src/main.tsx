@@ -9,6 +9,7 @@ import Login from './pages/Login'
 import Register from './pages/Register'
 import ForgotPassword from './pages/ForgotPassword'
 import SponsorPortal from './pages/SponsorPortal'
+import PublicEvent from './pages/PublicEvent'
 
 // Protected Route component with auto-login support
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -89,6 +90,7 @@ function AppRoutes() {
       <Route path="/register" element={<PublicRoute><Register /></PublicRoute>} />
       <Route path="/forgot-password" element={<PublicRoute><ForgotPassword /></PublicRoute>} />
       <Route path="/sponsor-portal/:token" element={<SponsorPortal />} />
+      <Route path="/e/:slug" element={<PublicEvent />} />
 
       {/* Protected Routes */}
       <Route
