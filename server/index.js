@@ -3237,44 +3237,37 @@ app.get('/api/health', async (req, res) => {
 // No longer depends on monorepo - uses local guests table
 // ============================================
 
-// Helper to transform guest to guest-list format (for frontend compatibility)
+// Helper to transform guest_lists table row to frontend format
 const transformToGuestList = (row) => ({
   id: String(row.id),
-  eventId: (row.notes && row.notes.match(/Event: (\S+)/)?.[1]) || 'default',
+  eventId: row.event_id || 'default',
   name: row.name,
   email: row.email,
   phone: row.phone || '',
   instagram: row.instagram || '',
-  numberOfGuests: row.party_size,
-  vipPreferences: row.notes?.includes('VIP:') ? row.notes.split('VIP:')[1]?.split('\n')[0]?.trim() : '',
-  status: row.category === 'pending' ? 'pending' : row.category === 'A' || row.category === 'B' ? 'approved' : 'declined',
+  numberOfGuests: row.number_of_guests || 1,
+  vipPreferences: row.vip_preferences || '',
+  status: row.status || 'pending',
   notes: row.notes || '',
-  emailSent: row.email_sent,
+  emailSent: row.email_sent || false,
   emailSentAt: row.email_sent_at ? row.email_sent_at.toISOString() : null,
-  createdAt: row.created_at.toISOString(),
-  updatedAt: row.created_at.toISOString(),
+  createdAt: row.created_at ? row.created_at.toISOString() : new Date().toISOString(),
+  updatedAt: row.updated_at ? row.updated_at.toISOString() : row.created_at ? row.created_at.toISOString() : new Date().toISOString(),
 });
 
-// GET /api/v1/guest-lists - List all guests (LOCAL)
+// GET /api/v1/guest-lists - List all guests (LOCAL - reads from guest_lists table)
 app.get('/api/v1/guest-lists', async (req, res) => {
   try {
     const { status, limit = '50', offset = '0' } = req.query;
 
-    let queryText = 'SELECT * FROM guests WHERE 1=1';
+    let queryText = 'SELECT * FROM guest_lists WHERE 1=1';
     const params = [];
     let paramIndex = 1;
 
-    // Map status to category
+    // Filter by status
     if (status) {
-      if (status === 'pending') {
-        queryText += ` AND category = $${paramIndex++}`;
-        params.push('pending');
-      } else if (status === 'approved') {
-        queryText += ` AND category IN ('A', 'B')`;
-      } else if (status === 'declined') {
-        queryText += ` AND category = $${paramIndex++}`;
-        params.push('C');
-      }
+      queryText += ` AND status = $${paramIndex++}`;
+      params.push(status);
     }
 
     queryText += ' ORDER BY created_at DESC';
@@ -3285,7 +3278,7 @@ app.get('/api/v1/guest-lists', async (req, res) => {
     const entries = result.rows.map(transformToGuestList);
 
     // Get total count
-    const countResult = await pool.query('SELECT COUNT(*) as total FROM guests');
+    const countResult = await pool.query('SELECT COUNT(*) as total FROM guest_lists');
     const total = parseInt(countResult.rows[0].total);
 
     res.json({
@@ -3300,17 +3293,17 @@ app.get('/api/v1/guest-lists', async (req, res) => {
   }
 });
 
-// GET /api/v1/guest-lists/stats - Get statistics (LOCAL)
+// GET /api/v1/guest-lists/stats - Get statistics (LOCAL - reads from guest_lists table)
 app.get('/api/v1/guest-lists/stats', async (req, res) => {
   try {
     const stats = await pool.query(`
       SELECT
         COUNT(*) as total,
-        COUNT(*) FILTER (WHERE category = 'pending') as pending,
-        COUNT(*) FILTER (WHERE category IN ('A', 'B')) as approved,
-        COUNT(*) FILTER (WHERE category = 'C') as declined,
-        COALESCE(SUM(party_size), 0) as total_guests
-      FROM guests
+        COUNT(*) FILTER (WHERE status = 'pending') as pending,
+        COUNT(*) FILTER (WHERE status = 'approved') as approved,
+        COUNT(*) FILTER (WHERE status = 'declined') as declined,
+        COALESCE(SUM(number_of_guests), 0) as total_guests
+      FROM guest_lists
     `);
 
     const row = stats.rows[0];
@@ -3327,11 +3320,11 @@ app.get('/api/v1/guest-lists/stats', async (req, res) => {
   }
 });
 
-// GET /api/v1/guest-lists/:id - Get single guest (LOCAL)
+// GET /api/v1/guest-lists/:id - Get single guest (LOCAL - reads from guest_lists table)
 app.get('/api/v1/guest-lists/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const result = await pool.query('SELECT * FROM guests WHERE id = $1', [id]);
+    const result = await pool.query('SELECT * FROM guest_lists WHERE id = $1', [id]);
 
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Not Found', message: 'Guest not found' });
@@ -3344,7 +3337,7 @@ app.get('/api/v1/guest-lists/:id', async (req, res) => {
   }
 });
 
-// POST /api/v1/guest-lists - Create guest (LOCAL)
+// POST /api/v1/guest-lists - Create guest (LOCAL - writes to guest_lists table)
 app.post('/api/v1/guest-lists', async (req, res) => {
   const { name, email, phone, instagram, numberOfGuests, vipPreferences, eventId } = req.body;
 
@@ -3353,16 +3346,13 @@ app.post('/api/v1/guest-lists', async (req, res) => {
   }
 
   try {
-    const notes = [
-      eventId ? `Event: ${eventId}` : '',
-      vipPreferences ? `VIP: ${vipPreferences}` : ''
-    ].filter(Boolean).join('\n');
+    const id = `gst_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
     const result = await pool.query(
-      `INSERT INTO guests (name, email, phone, instagram, party_size, notes, category, email_sent, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, 'pending', false, CURRENT_TIMESTAMP)
+      `INSERT INTO guest_lists (id, event_id, name, email, phone, instagram, number_of_guests, vip_preferences, status, email_sent, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending', false, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
        RETURNING *`,
-      [name, email, phone || '', instagram || '', numberOfGuests || 1, notes]
+      [id, eventId || 'default', name, email, phone || '', instagram || '', numberOfGuests || 1, vipPreferences || '']
     );
 
     const newGuest = transformToGuestList(result.rows[0]);
@@ -3388,38 +3378,35 @@ app.post('/api/v1/guest-lists', async (req, res) => {
   }
 });
 
-// PATCH /api/v1/guest-lists/:id - Update guest (LOCAL)
+// PATCH /api/v1/guest-lists/:id - Update guest (LOCAL - updates guest_lists table)
 app.patch('/api/v1/guest-lists/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const { status, notes } = req.body;
 
-    // Map status to category
-    let category = null;
-    if (status === 'approved') category = 'A';
-    else if (status === 'pending') category = 'pending';
-    else if (status === 'declined' || status === 'rejected') category = 'C';
-
     const updates = [];
     const params = [];
     let paramIndex = 1;
 
-    if (category) {
-      updates.push(`category = $${paramIndex++}`);
-      params.push(category);
+    if (status) {
+      updates.push(`status = $${paramIndex++}`);
+      params.push(status);
     }
     if (notes !== undefined) {
       updates.push(`notes = COALESCE(notes, '') || $${paramIndex++}`);
       params.push('\n' + notes);
     }
 
-    if (updates.length === 0) {
+    // Always update updated_at
+    updates.push(`updated_at = CURRENT_TIMESTAMP`);
+
+    if (updates.length === 1) { // Only updated_at
       return res.status(400).json({ error: 'No valid updates provided' });
     }
 
     params.push(id);
     const result = await pool.query(
-      `UPDATE guests SET ${updates.join(', ')} WHERE id = $${paramIndex} RETURNING *`,
+      `UPDATE guest_lists SET ${updates.join(', ')} WHERE id = $${paramIndex} RETURNING *`,
       params
     );
 
@@ -3434,11 +3421,11 @@ app.patch('/api/v1/guest-lists/:id', async (req, res) => {
   }
 });
 
-// DELETE /api/v1/guest-lists/:id - Delete guest (LOCAL)
+// DELETE /api/v1/guest-lists/:id - Delete guest (LOCAL - deletes from guest_lists table)
 app.delete('/api/v1/guest-lists/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const result = await pool.query('DELETE FROM guests WHERE id = $1 RETURNING *', [id]);
+    const result = await pool.query('DELETE FROM guest_lists WHERE id = $1 RETURNING *', [id]);
 
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Not Found', message: 'Guest not found' });
@@ -3451,21 +3438,30 @@ app.delete('/api/v1/guest-lists/:id', async (req, res) => {
   }
 });
 
-// POST /api/v1/guest-lists/:id/send-invitation - Send invitation email (LOCAL)
+// POST /api/v1/guest-lists/:id/send-invitation - Send invitation email (LOCAL - reads from guest_lists table)
 app.post('/api/v1/guest-lists/:id/send-invitation', async (req, res) => {
   const { id } = req.params;
   const { category, customMessage, emailOnly } = req.body;
 
   try {
-    // 1. Fetch guest from LOCAL database
-    const result = await pool.query('SELECT * FROM guests WHERE id = $1', [id]);
+    // 1. Fetch guest from LOCAL database (guest_lists table)
+    const result = await pool.query('SELECT * FROM guest_lists WHERE id = $1', [id]);
 
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Not Found', message: 'Guest not found' });
     }
 
     const guestRow = result.rows[0];
-    const guest = transformGuest(guestRow);
+    // Transform guest_lists row to guest format for email template
+    const guest = {
+      id: guestRow.id,
+      name: guestRow.name,
+      email: guestRow.email,
+      phone: guestRow.phone || '',
+      instagram: guestRow.instagram || '',
+      partySize: guestRow.number_of_guests || 1,
+      category: guestRow.status === 'approved' ? 'A' : guestRow.status === 'declined' ? 'C' : 'pending',
+    };
     console.log(`📧 Sending invitation to: ${guest.name} (${guest.email})`);
 
     // 2. Generate email content
@@ -3537,12 +3533,12 @@ app.post('/api/v1/guest-lists/:id/send-invitation', async (req, res) => {
 
     console.log(`✅ Email sent to ${guest.email} - Email ID: ${emailData?.id}`);
 
-    // 4. Update guest status in LOCAL database
-    const newCategory = category === 'C' || category === 'rejected' ? 'C' : guestCategory;
+    // 4. Update guest status in LOCAL database (guest_lists table)
+    const newStatus = category === 'C' || category === 'rejected' ? 'declined' : 'approved';
     await pool.query(
-      `UPDATE guests SET category = $1, email_sent = true, email_sent_at = CURRENT_TIMESTAMP,
-       notes = COALESCE(notes, '') || $2 WHERE id = $3`,
-      [emailOnly ? guestRow.category : newCategory, `\n📧 Email sent: ${new Date().toISOString()}`, id]
+      `UPDATE guest_lists SET status = $1, email_sent = true, email_sent_at = CURRENT_TIMESTAMP,
+       notes = COALESCE(notes, '') || $2, updated_at = CURRENT_TIMESTAMP WHERE id = $3`,
+      [emailOnly ? guestRow.status : newStatus, `\n📧 Email sent: ${new Date().toISOString()}`, id]
     );
 
     // 5. Send admin confirmation
@@ -3567,7 +3563,7 @@ app.post('/api/v1/guest-lists/:id/send-invitation', async (req, res) => {
   }
 });
 
-// POST /api/v1/guest-lists/bulk-send - Send invitations to multiple guests (LOCAL)
+// POST /api/v1/guest-lists/bulk-send - Send invitations to multiple guests (LOCAL - uses guest_lists table)
 app.post('/api/v1/guest-lists/bulk-send', async (req, res) => {
   const { guestIds, category, customMessages } = req.body;
 
@@ -3582,14 +3578,20 @@ app.post('/api/v1/guest-lists/bulk-send', async (req, res) => {
 
   for (const id of guestIds) {
     try {
-      // Fetch guest from LOCAL database
-      const result = await pool.query('SELECT * FROM guests WHERE id = $1', [id]);
+      // Fetch guest from LOCAL database (guest_lists table)
+      const result = await pool.query('SELECT * FROM guest_lists WHERE id = $1', [id]);
       if (result.rows.length === 0) {
         errors.push({ id, error: 'Guest not found' });
         continue;
       }
 
-      const guest = transformGuest(result.rows[0]);
+      const guestRow = result.rows[0];
+      const guest = {
+        id: guestRow.id,
+        name: guestRow.name,
+        email: guestRow.email,
+        partySize: guestRow.number_of_guests || 1,
+      };
       const customMessage = customMessages?.[id] || '';
 
       // Generate and send email
@@ -3626,10 +3628,11 @@ app.post('/api/v1/guest-lists/bulk-send', async (req, res) => {
         continue;
       }
 
-      // Update guest status in LOCAL database
+      // Update guest status in LOCAL database (guest_lists table)
+      const newStatus = guestCategory === 'C' ? 'declined' : 'approved';
       await pool.query(
-        `UPDATE guests SET category = $1, email_sent = true, email_sent_at = CURRENT_TIMESTAMP WHERE id = $2`,
-        [guestCategory, id]
+        `UPDATE guest_lists SET status = $1, email_sent = true, email_sent_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
+        [newStatus, id]
       );
 
       results.push({ id, email: guest.email, emailId: data?.id, name: guest.name });
