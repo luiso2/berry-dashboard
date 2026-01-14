@@ -82,7 +82,7 @@ const categoryToStatus = (category: GuestCategory): string => {
 
 type GuestCategory = 'pending' | 'A' | 'B' | 'C' | 'rejected';
 type GuestStatus = 'pending' | 'approved' | 'declined' | 'rejected';
-type ViewType = 'overview' | 'guests' | 'emails' | 'analytics' | 'automation' | 'checkin' | 'models' | 'tables' | 'tickets' | 'sponsors' | 'promoters' | 'events' | 'budget' | 'vendors' | 'staff' | 'monitoring' | 'integrations';
+type ViewType = 'overview' | 'guests' | 'emails' | 'analytics' | 'automation' | 'checkin' | 'models' | 'tables' | 'tickets' | 'sponsors' | 'promoters' | 'events' | 'budget' | 'vendors' | 'staff' | 'monitoring' | 'integrations' | 'chatgpt';
 type ThemeMode = 'dark' | 'light';
 
 interface Purchase {
@@ -3658,6 +3658,7 @@ function App() {
       case 'checkin': return 'Check-In';
       case 'models': return 'Models';
       case 'integrations': return 'Integrations';
+      case 'chatgpt': return 'ChatGPT';
       default: return 'Guests';
     }
   };
@@ -3671,6 +3672,7 @@ function App() {
       case 'checkin': return `${stats.checkedIn}/${stats.accepted} checked in (${stats.checkedInPartySize} people)`;
       case 'models': return 'Featured talent';
       case 'integrations': return 'Connect your services';
+      case 'chatgpt': return 'AI-powered dashboard control';
       default: return `${stats.pending} pending review`;
     }
   };
@@ -3818,6 +3820,12 @@ function App() {
               Settings
             </div>
             <NavItem label="Integrations" active={activeView === 'integrations'} icon="🔌" count={integrations.filter(i => i.status === 'connected').length} onClick={() => navigateTo('integrations')} />
+
+            {/* AI Section Label */}
+            <div style={{ fontSize: 10, fontWeight: 600, color: '#555', textTransform: 'uppercase', letterSpacing: '0.5px', padding: '16px 8px 8px', marginTop: 8 }}>
+              AI
+            </div>
+            <NavItem label="ChatGPT" active={activeView === 'chatgpt'} icon="🤖" onClick={() => navigateTo('chatgpt')} />
           </div>
         </nav>
 
@@ -9277,6 +9285,149 @@ function App() {
                   )}
                 </div>
               ))}
+            </div>
+
+          </div>
+        )}
+
+        {/* ChatGPT Session View */}
+        {activeView === 'chatgpt' && (
+          <div className="page-content" style={{ padding: 32, animation: 'fadeIn 0.3s ease' }}>
+            <div style={{ marginBottom: 24 }}>
+              <h2 style={{ fontSize: 20, fontWeight: 600, margin: 0 }}>ChatGPT Integration</h2>
+              <p style={{ color: '#666', margin: '8px 0 0', fontSize: 14 }}>Connect your dashboard to ChatGPT for AI-powered management</p>
+            </div>
+
+            {/* Connection Status Card */}
+            <div style={{
+              background: 'linear-gradient(135deg, rgba(16,163,127,0.1) 0%, rgba(16,163,127,0.05) 100%)',
+              border: '1px solid rgba(16,163,127,0.3)',
+              borderRadius: 16,
+              padding: 24,
+              marginBottom: 24
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                  <div style={{
+                    width: 56,
+                    height: 56,
+                    background: '#10a37f',
+                    borderRadius: 12,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: 28
+                  }}>
+                    🤖
+                  </div>
+                  <div>
+                    <h3 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>ChatGPT</h3>
+                    <p style={{ margin: '4px 0 0', color: '#10a37f', fontSize: 14 }}>Ready to connect</p>
+                  </div>
+                </div>
+                <a
+                  href="https://chat.openai.com/g/g-faca3a52350bea551c80533e84c5eff01cc9dbcd"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{
+                    background: '#10a37f',
+                    color: '#fff',
+                    padding: '12px 24px',
+                    borderRadius: 8,
+                    fontSize: 14,
+                    fontWeight: 600,
+                    textDecoration: 'none',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 8
+                  }}
+                >
+                  Open in ChatGPT →
+                </a>
+              </div>
+            </div>
+
+            {/* What ChatGPT Can Do */}
+            <div style={{ marginBottom: 32 }}>
+              <h3 style={{ fontSize: 16, fontWeight: 600, margin: '0 0 16px' }}>What ChatGPT Can Do</h3>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16 }}>
+                {[
+                  { icon: '📅', title: 'Manage Events', desc: 'Create, update, and track all your events' },
+                  { icon: '👥', title: 'Guest Lists', desc: 'Add guests, send invitations, track RSVPs' },
+                  { icon: '🎫', title: 'Tickets & Sales', desc: 'Monitor ticket sales and check-ins' },
+                  { icon: '💎', title: 'Sponsors', desc: 'Track sponsorships and send portal emails' },
+                  { icon: '👔', title: 'Staff Management', desc: 'Assign staff and manage schedules' },
+                  { icon: '💰', title: 'Budget Tracking', desc: 'Monitor expenses and financial health' },
+                  { icon: '🔌', title: 'Integrations', desc: 'Sync with Eventbrite, Mailchimp, Telnyx' },
+                  { icon: '💻', title: 'Code Access', desc: 'Read and write project code files' }
+                ].map((item, i) => (
+                  <div key={i} style={{
+                    background: 'rgba(255,255,255,0.03)',
+                    border: '1px solid rgba(255,255,255,0.1)',
+                    borderRadius: 12,
+                    padding: 16
+                  }}>
+                    <div style={{ fontSize: 24, marginBottom: 8 }}>{item.icon}</div>
+                    <h4 style={{ margin: '0 0 4px', fontSize: 14, fontWeight: 600 }}>{item.title}</h4>
+                    <p style={{ margin: 0, fontSize: 13, color: '#888' }}>{item.desc}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* How to Use */}
+            <div style={{ marginBottom: 32 }}>
+              <h3 style={{ fontSize: 16, fontWeight: 600, margin: '0 0 16px' }}>How to Use</h3>
+              <div style={{ background: '#111', borderRadius: 12, padding: 20 }}>
+                <ol style={{ margin: 0, paddingLeft: 20, color: '#ccc', lineHeight: 2 }}>
+                  <li>Click "Open in ChatGPT" to access your assistant</li>
+                  <li>Authenticate with your Berry Dashboard account when prompted</li>
+                  <li>Start managing your events with natural language commands</li>
+                </ol>
+              </div>
+            </div>
+
+            {/* Example Commands */}
+            <div style={{ marginBottom: 32 }}>
+              <h3 style={{ fontSize: 16, fontWeight: 600, margin: '0 0 16px' }}>Example Commands</h3>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                {[
+                  '"Show me the dashboard overview"',
+                  '"Create a new event called NYE Gala 2025 on December 31st"',
+                  '"Add John Smith to the guest list for the next event"',
+                  '"How many tickets have been sold this month?"',
+                  '"Send invitation emails to all pending guests"',
+                  '"Show me the project code structure"',
+                  '"Search for useState in the codebase"'
+                ].map((cmd, i) => (
+                  <div key={i} style={{
+                    background: '#0a0a0a',
+                    border: '1px solid #222',
+                    borderRadius: 8,
+                    padding: '12px 16px',
+                    fontFamily: 'monospace',
+                    fontSize: 13,
+                    color: '#10a37f'
+                  }}>
+                    {cmd}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* API Endpoint Info */}
+            <div style={{
+              background: 'rgba(59,130,246,0.1)',
+              border: '1px solid rgba(59,130,246,0.3)',
+              borderRadius: 12,
+              padding: 20
+            }}>
+              <h4 style={{ margin: '0 0 12px', fontSize: 14, fontWeight: 600, color: '#3b82f6' }}>Developer Info</h4>
+              <div style={{ fontSize: 13, color: '#888' }}>
+                <p style={{ margin: '0 0 8px' }}><strong>API Endpoint:</strong> <code style={{ background: '#1a1a1a', padding: '2px 6px', borderRadius: 4 }}>POST /api/v1/gpt/session</code></p>
+                <p style={{ margin: '0 0 8px' }}><strong>Code Access:</strong> <code style={{ background: '#1a1a1a', padding: '2px 6px', borderRadius: 4 }}>POST /api/v1/gpt/code</code></p>
+                <p style={{ margin: 0 }}><strong>OpenAPI Spec:</strong> <code style={{ background: '#1a1a1a', padding: '2px 6px', borderRadius: 4 }}>/server/openapi-gpt.yaml</code></p>
+              </div>
             </div>
 
           </div>
