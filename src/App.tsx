@@ -3470,6 +3470,33 @@ function App() {
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
   };
 
+  // Format phone number with +1 prefix
+  const formatPhone = (phone: string | undefined | null): string => {
+    if (!phone) return '';
+    // Remove all non-digit characters
+    const digits = phone.replace(/\D/g, '');
+    // If it already starts with 1 and has 11 digits, format as +1
+    if (digits.length === 11 && digits.startsWith('1')) {
+      return `+1 ${digits.slice(1, 4)}-${digits.slice(4, 7)}-${digits.slice(7)}`;
+    }
+    // If it has 10 digits, add +1
+    if (digits.length === 10) {
+      return `+1 ${digits.slice(0, 3)}-${digits.slice(3, 6)}-${digits.slice(6)}`;
+    }
+    // Otherwise return with +1 prefix if not already there
+    return phone.startsWith('+') ? phone : `+1 ${phone}`;
+  };
+
+  // Open SMS modal with pre-filled guest phone
+  const openSmsToGuest = (guest: Guest, defaultMessage?: string) => {
+    const phone = guest.phone ? (guest.phone.startsWith('+') ? guest.phone : `+1${guest.phone.replace(/\D/g, '')}`) : '';
+    setSmsFormData({
+      to: phone,
+      message: defaultMessage || `Hi ${guest.name}! This is Berry Bly Productions. `
+    });
+    setShowSmsModal(true);
+  };
+
   if (loading) {
     return (
       <div style={{ minHeight: '100vh', background: '#000', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -3878,8 +3905,20 @@ function App() {
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                     <StatusBadge category={guest.category} />
-                    <div style={{ minWidth: 100, textAlign: 'right' }}>
-                      <span style={{ fontSize: 13, fontWeight: 500, color: guest.phone ? '#22c55e' : '#666' }}>{guest.phone || 'No phone'}</span>
+                    <div style={{ minWidth: 140, textAlign: 'right' }}>
+                      {guest.phone ? (
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                          <span style={{ fontSize: 13, fontWeight: 500, color: '#22c55e' }}>{formatPhone(guest.phone)}</span>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); openSmsToGuest(guest); }}
+                            style={{ background: '#00C08B', border: 'none', color: '#000', padding: '2px 6px', borderRadius: 4, fontSize: 10, fontWeight: 700, cursor: 'pointer' }}
+                          >
+                            SMS
+                          </button>
+                        </span>
+                      ) : (
+                        <span style={{ fontSize: 13, fontWeight: 500, color: '#666' }}>No phone</span>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -5175,6 +5214,8 @@ function App() {
               showActions={guestTab === 'pending'}
               setShowForm={setShowForm}
               openReminderModal={openReminderModal}
+              formatPhone={formatPhone}
+              openSmsToGuest={openSmsToGuest}
             />
           </>
         )}
@@ -5204,6 +5245,8 @@ function App() {
               removeGuest={removeGuest}
               openModal={openModal}
               formatDate={formatDate}
+              formatPhone={formatPhone}
+              openSmsToGuest={openSmsToGuest}
             />
           </>
         )}
@@ -5358,8 +5401,15 @@ function App() {
                           <span style={{ fontSize: 14, color: '#888' }}>Party of {guest.partySize}</span>
                           <StatusBadge category={guest.category} />
 {guest.phone && (
-                            <span style={{ background: '#333', color: '#d4af37', padding: '2px 8px', borderRadius: 4, fontSize: 12, fontWeight: 600 }}>
-                              📞 {guest.phone}
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: '#333', padding: '2px 8px', borderRadius: 4 }}>
+                              <span style={{ color: '#d4af37', fontSize: 12, fontWeight: 600 }}>📞 {formatPhone(guest.phone)}</span>
+                              <button
+                                onClick={(e) => { e.stopPropagation(); openSmsToGuest(guest); }}
+                                style={{ background: '#00C08B', border: 'none', color: '#000', padding: '2px 6px', borderRadius: 4, fontSize: 10, fontWeight: 700, cursor: 'pointer' }}
+                                title="Send SMS"
+                              >
+                                SMS
+                              </button>
                             </span>
                           )}
                           {guest.instagram && (
@@ -10294,7 +10344,7 @@ const Input = ({ label, placeholder, value, onChange, type = 'text', prefix, req
 );
 
 // Guest List Component
-const GuestList = ({ guests, selectedGuests, toggleSelect, selectAll, openModal, removeGuest, showActions, setShowForm, openReminderModal }: {
+const GuestList = ({ guests, selectedGuests, toggleSelect, selectAll, openModal, removeGuest, showActions, setShowForm, openReminderModal, formatPhone, openSmsToGuest }: {
   guests: Guest[];
   selectedGuests: Set<string>;
   toggleSelect: (id: string) => void;
@@ -10304,6 +10354,8 @@ const GuestList = ({ guests, selectedGuests, toggleSelect, selectAll, openModal,
   showActions: boolean;
   setShowForm: (show: boolean) => void;
   openReminderModal: (guests: Guest[]) => void;
+  formatPhone: (phone: string | undefined | null) => string;
+  openSmsToGuest: (guest: Guest) => void;
 }) => (
   <div className="page-content" style={{ padding: '0 32px 32px', animation: 'fadeIn 0.3s ease' }}>
     {/* Desktop Table */}
@@ -10378,8 +10430,22 @@ const GuestList = ({ guests, selectedGuests, toggleSelect, selectAll, openModal,
                   <span style={{ color: '#333' }}>—</span>
                 )}
               </td>
-              <td style={{ ...tdStyle, fontSize: 13, color: guest.phone ? '#22c55e' : '#666' }}>
-                {guest.phone || '—'}
+              <td style={{ ...tdStyle, fontSize: 13 }}>
+                {guest.phone ? (
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ color: '#22c55e' }}>{formatPhone(guest.phone)}</span>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); openSmsToGuest(guest); }}
+                      className="btn-hover"
+                      style={{ background: '#00C08B', border: 'none', color: '#000', padding: '3px 8px', borderRadius: 4, fontSize: 11, fontWeight: 700, cursor: 'pointer' }}
+                      title="Send SMS"
+                    >
+                      📱
+                    </button>
+                  </span>
+                ) : (
+                  <span style={{ color: '#666' }}>—</span>
+                )}
               </td>
               <td style={tdStyle}>
                 <StatusBadge category={guest.category} />
@@ -10463,7 +10529,17 @@ const GuestList = ({ guests, selectedGuests, toggleSelect, selectAll, openModal,
               </div>
 
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, fontSize: 14, color: '#666', marginBottom: 8, flexWrap: 'wrap' }}>
-                {guest.phone && <span style={{ color: '#22c55e' }}>📱 {guest.phone}</span>}
+                {guest.phone && (
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ color: '#22c55e' }}>📱 {formatPhone(guest.phone)}</span>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); openSmsToGuest(guest); }}
+                      style={{ background: '#00C08B', border: 'none', color: '#000', padding: '2px 6px', borderRadius: 4, fontSize: 10, fontWeight: 700, cursor: 'pointer' }}
+                    >
+                      SMS
+                    </button>
+                  </span>
+                )}
                 {guest.instagram && <a href={`https://instagram.com/${guest.instagram.replace('@', '')}`} target="_blank" rel="noopener noreferrer" style={{ color: '#d4af37', textDecoration: 'none' }}>📸 @{guest.instagram.replace('@', '')}</a>}
                 <span>👥 {guest.partySize}</span>
               </div>
@@ -10512,7 +10588,7 @@ const GuestList = ({ guests, selectedGuests, toggleSelect, selectAll, openModal,
 );
 
 // Emails List Component
-const EmailsList = ({ guests, selectedGuests, toggleSelect, selectAll, removeGuest, openModal, formatDate }: {
+const EmailsList = ({ guests, selectedGuests, toggleSelect, selectAll, removeGuest, openModal, formatDate, formatPhone, openSmsToGuest }: {
   guests: Guest[];
   selectedGuests: Set<string>;
   toggleSelect: (id: string) => void;
@@ -10520,6 +10596,8 @@ const EmailsList = ({ guests, selectedGuests, toggleSelect, selectAll, removeGue
   removeGuest: (id: string) => void;
   openModal: (guests: Guest[], category: GuestCategory | null, emailOnly?: boolean) => void;
   formatDate: (date: string) => string;
+  formatPhone: (phone: string | undefined | null) => string;
+  openSmsToGuest: (guest: Guest) => void;
 }) => (
   <div className="page-content" style={{ padding: '0 32px 32px', animation: 'fadeIn 0.3s ease' }}>
     {/* Desktop Table */}
@@ -10584,8 +10662,22 @@ const EmailsList = ({ guests, selectedGuests, toggleSelect, selectAll, removeGue
               <td style={tdStyle}>
                 <StatusBadge category={guest.category} />
               </td>
-              <td style={{ ...tdStyle, color: '#d4af37', fontSize: 13 }}>
-                {guest.phone || '—'}
+              <td style={{ ...tdStyle, fontSize: 13 }}>
+                {guest.phone ? (
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ color: '#22c55e' }}>{formatPhone(guest.phone)}</span>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); openSmsToGuest(guest); }}
+                      className="btn-hover"
+                      style={{ background: '#00C08B', border: 'none', color: '#000', padding: '3px 8px', borderRadius: 4, fontSize: 11, fontWeight: 700, cursor: 'pointer' }}
+                      title="Send SMS"
+                    >
+                      📱
+                    </button>
+                  </span>
+                ) : (
+                  <span style={{ color: '#666' }}>—</span>
+                )}
               </td>
               <td style={{ ...tdStyle, color: '#888', fontSize: 14 }}>
                 {guest.emailSentAt ? formatDate(guest.emailSentAt) : '—'}
@@ -10662,7 +10754,15 @@ const EmailsList = ({ guests, selectedGuests, toggleSelect, selectAll, removeGue
 {guest.phone && (
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
                   <span style={{ fontSize: 13, color: '#666' }}>📞 Phone:</span>
-                  <span style={{ color: '#d4af37', fontWeight: 500 }}>{guest.phone}</span>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ color: '#22c55e', fontWeight: 500 }}>{formatPhone(guest.phone)}</span>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); openSmsToGuest(guest); }}
+                      style={{ background: '#00C08B', border: 'none', color: '#000', padding: '3px 8px', borderRadius: 4, fontSize: 10, fontWeight: 700, cursor: 'pointer' }}
+                    >
+                      SMS
+                    </button>
+                  </span>
                 </div>
               )}
 
