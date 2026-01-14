@@ -26,6 +26,7 @@ info:
     - **manageIntegrations** - Actions: list, connect, disconnect, sync (Eventbrite, Mailchimp)
     - **manageEmails** - Actions: getStatus, getSummary (email tracking via Resend)
     - **manageUploads** - Actions: list, get, stats, getTemplate (file upload tracking)
+    - **manageCode** - Actions: list, read, write, search, structure (project code management)
 
   version: 3.14.0
   contact:
@@ -111,6 +112,7 @@ paths:
                     - manageIntegrations
                     - manageEmails
                     - manageUploads
+                    - manageCode
                 action:
                   type: string
                   description: |
@@ -129,6 +131,7 @@ paths:
                     **manageIntegrations:** list, connect, disconnect, sync
                     **manageEmails:** getStatus, getSummary
                     **manageUploads:** list, get, stats, getTemplate
+                    **manageCode:** list, read, write, search, structure
                 eventId:
                   type: integer
                   description: Event ID (for event-specific operations)
@@ -177,6 +180,15 @@ paths:
                 uploadId:
                   type: integer
                   description: Upload ID (for upload operations)
+                path:
+                  type: string
+                  description: File or directory path (for manageCode). Relative to project root (e.g., "src/App.tsx", "server/index.js")
+                content:
+                  type: string
+                  description: File content to write (for manageCode write action)
+                searchQuery:
+                  type: string
+                  description: Text to search for in files (for manageCode search action)
                 filters:
                   type: object
                   description: Optional filters for list operations
@@ -372,6 +384,36 @@ paths:
                   endpoint: manageUploads
                   action: get
                   uploadId: 1
+              getProjectStructure:
+                summary: Get project file structure
+                value:
+                  endpoint: manageCode
+                  action: structure
+              listSourceFiles:
+                summary: List files in src directory
+                value:
+                  endpoint: manageCode
+                  action: list
+                  path: "src"
+              readFile:
+                summary: Read a specific file
+                value:
+                  endpoint: manageCode
+                  action: read
+                  path: "src/App.tsx"
+              writeFile:
+                summary: Write/update a file
+                value:
+                  endpoint: manageCode
+                  action: write
+                  path: "src/components/NewComponent.tsx"
+                  content: "export default function NewComponent() { return <div>Hello</div>; }"
+              searchInCode:
+                summary: Search for text in code files
+                value:
+                  endpoint: manageCode
+                  action: search
+                  searchQuery: "useState"
 
       responses:
         '200':

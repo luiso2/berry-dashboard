@@ -878,6 +878,12 @@ const styles = `
     .stats-grid {
       grid-template-columns: repeat(3, 1fr) !important;
     }
+
+    .modal-content {
+      width: 90% !important;
+      max-width: 600px !important;
+      margin: 20px auto !important;
+    }
   }
 
   /* Tablets */
@@ -889,6 +895,10 @@ const styles = `
     .chart-grid {
       grid-template-columns: 1fr !important;
     }
+
+    .two-column-form {
+      grid-template-columns: 1fr !important;
+    }
   }
 
   /* Mobile landscape / small tablets */
@@ -898,21 +908,28 @@ const styles = `
     }
 
     .sidebar {
+      position: fixed !important;
       transform: translateX(-100%);
       z-index: 150;
+      width: 280px !important;
+      transition: transform 0.3s ease;
     }
 
     .sidebar.open {
       transform: translateX(0);
-      animation: slideIn 0.3s ease;
     }
 
     .main-content {
       margin-left: 0 !important;
+      width: 100% !important;
     }
 
     .hide-mobile {
       display: none !important;
+    }
+
+    .show-mobile {
+      display: block !important;
     }
 
     .mobile-card {
@@ -929,12 +946,114 @@ const styles = `
 
     .filter-row {
       flex-direction: column !important;
+      gap: 12px !important;
     }
 
-    /* Header buttons responsive */
+    /* Header responsive */
+    .header-content {
+      padding: 12px 16px !important;
+      flex-wrap: wrap !important;
+    }
+
     .header-content > div:last-child {
       flex-wrap: wrap;
       gap: 8px !important;
+    }
+
+    /* Modal full screen on mobile */
+    .modal-content {
+      width: 100% !important;
+      max-width: 100% !important;
+      min-height: 100vh !important;
+      margin: 0 !important;
+      border-radius: 0 !important;
+      max-height: 100vh !important;
+      overflow-y: auto !important;
+    }
+
+    .modal-overlay {
+      padding: 0 !important;
+    }
+
+    /* Mobile cards layout */
+    .mobile-card-grid {
+      display: flex !important;
+      flex-direction: column !important;
+      gap: 12px !important;
+    }
+
+    .mobile-card-item {
+      background: rgba(255,255,255,0.03) !important;
+      border: 1px solid rgba(255,255,255,0.1) !important;
+      border-radius: 12px !important;
+      padding: 16px !important;
+    }
+
+    /* Action buttons stack */
+    .action-buttons {
+      flex-direction: column !important;
+      width: 100% !important;
+    }
+
+    .action-buttons button {
+      width: 100% !important;
+    }
+
+    /* Form inputs full width */
+    .form-input, .form-select {
+      width: 100% !important;
+      min-width: unset !important;
+    }
+
+    /* Tabs scrollable */
+    .tabs-container {
+      overflow-x: auto !important;
+      -webkit-overflow-scrolling: touch !important;
+      scrollbar-width: none !important;
+    }
+
+    .tabs-container::-webkit-scrollbar {
+      display: none !important;
+    }
+
+    /* Bottom navigation */
+    .bottom-nav {
+      display: flex !important;
+      position: fixed !important;
+      bottom: 0 !important;
+      left: 0 !important;
+      right: 0 !important;
+      background: rgba(0,0,0,0.95) !important;
+      backdrop-filter: blur(20px) !important;
+      border-top: 1px solid rgba(255,255,255,0.1) !important;
+      z-index: 140 !important;
+      padding: 8px 0 !important;
+      padding-bottom: env(safe-area-inset-bottom, 8px) !important;
+    }
+
+    .bottom-nav-item {
+      flex: 1 !important;
+      display: flex !important;
+      flex-direction: column !important;
+      align-items: center !important;
+      gap: 4px !important;
+      padding: 8px 4px !important;
+      color: #666 !important;
+      font-size: 10px !important;
+      text-decoration: none !important;
+    }
+
+    .bottom-nav-item.active {
+      color: #d4af37 !important;
+    }
+
+    .bottom-nav-item span:first-child {
+      font-size: 20px !important;
+    }
+
+    /* Add padding for bottom nav */
+    .main-content {
+      padding-bottom: 80px !important;
     }
   }
 
@@ -947,6 +1066,48 @@ const styles = `
     .category-grid {
       gap: 12px !important;
     }
+
+    /* Smaller text on mobile */
+    h1 {
+      font-size: 20px !important;
+    }
+
+    h2 {
+      font-size: 18px !important;
+    }
+
+    /* Compact stats cards */
+    .stat-card {
+      padding: 12px !important;
+    }
+
+    .stat-card h3 {
+      font-size: 24px !important;
+    }
+
+    /* Search input full width */
+    .search-container {
+      width: 100% !important;
+    }
+
+    .search-input {
+      width: 100% !important;
+    }
+
+    /* Buttons compact */
+    .btn-compact {
+      padding: 8px 12px !important;
+      font-size: 13px !important;
+    }
+
+    /* Table horizontal scroll hint */
+    .table-scroll-hint {
+      display: block !important;
+      text-align: center !important;
+      color: #666 !important;
+      font-size: 12px !important;
+      padding: 8px !important;
+    }
   }
 
   /* Very small screens */
@@ -954,6 +1115,41 @@ const styles = `
     :root {
       --page-padding: 12px;
       --header-padding: 12px;
+    }
+
+    .stat-card h3 {
+      font-size: 20px !important;
+    }
+
+    .header-content h1 {
+      font-size: 16px !important;
+    }
+  }
+
+  /* Touch-friendly targets */
+  @media (hover: none) and (pointer: coarse) {
+    button, a, .clickable {
+      min-height: 44px !important;
+      min-width: 44px !important;
+    }
+
+    .nav-item {
+      padding: 12px 16px !important;
+    }
+
+    input, select, textarea {
+      font-size: 16px !important; /* Prevents zoom on iOS */
+    }
+  }
+
+  /* Safe area insets for notched devices */
+  @supports (padding: env(safe-area-inset-bottom)) {
+    .main-content {
+      padding-bottom: calc(80px + env(safe-area-inset-bottom)) !important;
+    }
+
+    .sidebar {
+      padding-top: env(safe-area-inset-top) !important;
     }
   }
 `;
@@ -9086,6 +9282,50 @@ function App() {
           </div>
         )}
       </main>
+
+      {/* Mobile Bottom Navigation */}
+      <nav className="bottom-nav" style={{ display: 'none' }}>
+        <button
+          className={`bottom-nav-item ${activeView === 'analytics' ? 'active' : ''}`}
+          onClick={() => { navigateTo('analytics'); closeSidebar(); }}
+          style={{ background: 'none', border: 'none', cursor: 'pointer' }}
+        >
+          <span>📊</span>
+          <span>Dashboard</span>
+        </button>
+        <button
+          className={`bottom-nav-item ${activeView === 'events' ? 'active' : ''}`}
+          onClick={() => { navigateTo('events'); closeSidebar(); }}
+          style={{ background: 'none', border: 'none', cursor: 'pointer' }}
+        >
+          <span>📅</span>
+          <span>Events</span>
+        </button>
+        <button
+          className={`bottom-nav-item ${activeView === 'guests' ? 'active' : ''}`}
+          onClick={() => { navigateTo('guests'); closeSidebar(); }}
+          style={{ background: 'none', border: 'none', cursor: 'pointer' }}
+        >
+          <span>👥</span>
+          <span>Guests</span>
+        </button>
+        <button
+          className={`bottom-nav-item ${activeView === 'tickets' ? 'active' : ''}`}
+          onClick={() => { navigateTo('tickets'); closeSidebar(); }}
+          style={{ background: 'none', border: 'none', cursor: 'pointer' }}
+        >
+          <span>🎫</span>
+          <span>Tickets</span>
+        </button>
+        <button
+          className="bottom-nav-item"
+          onClick={() => setSidebarOpen(true)}
+          style={{ background: 'none', border: 'none', cursor: 'pointer' }}
+        >
+          <span>☰</span>
+          <span>More</span>
+        </button>
+      </nav>
 
       {/* QR Code Modal */}
       {qrModal.show && qrModal.guest && (
