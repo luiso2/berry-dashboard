@@ -108,7 +108,7 @@ export function ReportsExport({ events }: ReportsExportProps) {
       </div>
 
       {/* Summary Cards */}
-      {summary && (
+      {summary?.overview && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <div className="bg-white/5 rounded-xl p-4 border border-white/10">
             <p className="text-white/60 text-sm">Total Events</p>
@@ -122,7 +122,7 @@ export function ReportsExport({ events }: ReportsExportProps) {
           <div className="bg-white/5 rounded-xl p-4 border border-white/10">
             <p className="text-white/60 text-sm">Net Revenue</p>
             <p className="text-2xl font-bold text-green-400">
-              {formatCurrency(summary.financials.net_revenue)}
+              {formatCurrency(summary.financials?.net_revenue ?? 0)}
             </p>
           </div>
           <div className="bg-white/5 rounded-xl p-4 border border-white/10">

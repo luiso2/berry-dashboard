@@ -32,7 +32,8 @@ export function CheckInScanner({ events }: CheckInScannerProps) {
       const res = await fetch(`${API_URL}/integrations/eventbrite/attendees?${params}`, { headers });
       if (res.ok) {
         const data = await res.json();
-        setAttendees(data);
+        // Handle both array and object response formats
+        setAttendees(Array.isArray(data) ? data : (data.attendees || []));
       }
     } catch (err) {
       console.error('Error fetching attendees:', err);
