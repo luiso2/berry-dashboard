@@ -1487,12 +1487,18 @@ const initDatabase = async () => {
       );
     `);
 
-    // Migration: Add user_id to existing eventbrite_alerts table
+    // Migration: Add missing columns to existing eventbrite_alerts table
     await client.query(`
       DO $$
       BEGIN
         IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'eventbrite_alerts' AND column_name = 'user_id') THEN
           ALTER TABLE eventbrite_alerts ADD COLUMN user_id INTEGER;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'eventbrite_alerts' AND column_name = 'event_id') THEN
+          ALTER TABLE eventbrite_alerts ADD COLUMN event_id VARCHAR(100);
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'eventbrite_alerts' AND column_name = 'alert_type') THEN
+          ALTER TABLE eventbrite_alerts ADD COLUMN alert_type VARCHAR(50);
         END IF;
       END $$;
     `);
@@ -1521,12 +1527,15 @@ const initDatabase = async () => {
       );
     `);
 
-    // Migration: Add user_id to existing eventbrite_alert_notifications table
+    // Migration: Add missing columns to existing eventbrite_alert_notifications table
     await client.query(`
       DO $$
       BEGIN
         IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'eventbrite_alert_notifications' AND column_name = 'user_id') THEN
           ALTER TABLE eventbrite_alert_notifications ADD COLUMN user_id INTEGER;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'eventbrite_alert_notifications' AND column_name = 'is_read') THEN
+          ALTER TABLE eventbrite_alert_notifications ADD COLUMN is_read BOOLEAN DEFAULT false;
         END IF;
       END $$;
     `);
@@ -1571,6 +1580,9 @@ const initDatabase = async () => {
       BEGIN
         IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'eventbrite_orders' AND column_name = 'user_id') THEN
           ALTER TABLE eventbrite_orders ADD COLUMN user_id INTEGER;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'eventbrite_orders' AND column_name = 'event_id') THEN
+          ALTER TABLE eventbrite_orders ADD COLUMN event_id VARCHAR(100);
         END IF;
         IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'eventbrite_orders' AND column_name = 'order_date') THEN
           ALTER TABLE eventbrite_orders ADD COLUMN order_date TIMESTAMP;
@@ -1625,12 +1637,18 @@ const initDatabase = async () => {
       );
     `);
 
-    // Migration: Add user_id to existing eventbrite_promo_codes table
+    // Migration: Add missing columns to existing eventbrite_promo_codes table
     await client.query(`
       DO $$
       BEGIN
         IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'eventbrite_promo_codes' AND column_name = 'user_id') THEN
           ALTER TABLE eventbrite_promo_codes ADD COLUMN user_id INTEGER;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'eventbrite_promo_codes' AND column_name = 'event_id') THEN
+          ALTER TABLE eventbrite_promo_codes ADD COLUMN event_id VARCHAR(100);
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'eventbrite_promo_codes' AND column_name = 'code') THEN
+          ALTER TABLE eventbrite_promo_codes ADD COLUMN code VARCHAR(100);
         END IF;
       END $$;
     `);
@@ -1670,12 +1688,24 @@ const initDatabase = async () => {
       );
     `);
 
-    // Migration: Add user_id to existing eventbrite_attendees table
+    // Migration: Add missing columns to existing eventbrite_attendees table
     await client.query(`
       DO $$
       BEGIN
         IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'eventbrite_attendees' AND column_name = 'user_id') THEN
           ALTER TABLE eventbrite_attendees ADD COLUMN user_id INTEGER;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'eventbrite_attendees' AND column_name = 'event_id') THEN
+          ALTER TABLE eventbrite_attendees ADD COLUMN event_id VARCHAR(100);
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'eventbrite_attendees' AND column_name = 'order_id') THEN
+          ALTER TABLE eventbrite_attendees ADD COLUMN order_id VARCHAR(100);
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'eventbrite_attendees' AND column_name = 'barcode') THEN
+          ALTER TABLE eventbrite_attendees ADD COLUMN barcode VARCHAR(255);
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'eventbrite_attendees' AND column_name = 'checked_in') THEN
+          ALTER TABLE eventbrite_attendees ADD COLUMN checked_in BOOLEAN DEFAULT false;
         END IF;
       END $$;
     `);
@@ -1711,12 +1741,18 @@ const initDatabase = async () => {
       );
     `);
 
-    // Migration: Add user_id to existing eventbrite_refunds table
+    // Migration: Add missing columns to existing eventbrite_refunds table
     await client.query(`
       DO $$
       BEGIN
         IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'eventbrite_refunds' AND column_name = 'user_id') THEN
           ALTER TABLE eventbrite_refunds ADD COLUMN user_id INTEGER;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'eventbrite_refunds' AND column_name = 'event_id') THEN
+          ALTER TABLE eventbrite_refunds ADD COLUMN event_id VARCHAR(100);
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'eventbrite_refunds' AND column_name = 'order_id') THEN
+          ALTER TABLE eventbrite_refunds ADD COLUMN order_id VARCHAR(100);
         END IF;
       END $$;
     `);
