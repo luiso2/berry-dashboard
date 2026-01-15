@@ -613,7 +613,8 @@ function App() {
     try {
       const res = await fetch(`${API_URL}/table-reservations`);
       const data = await res.json();
-      const reservations = (data.reservations || data || []).map((r: any) => ({
+      const rawReservations = data.reservations || data;
+      const reservations = (Array.isArray(rawReservations) ? rawReservations : []).map((r: any) => ({
         ...r,
         zone: r.zone || 'Standard',
         tableName: r.tableName || `Table ${r.tableId}`,
@@ -635,7 +636,8 @@ function App() {
     try {
       const res = await fetch(`${API_URL}/tickets`);
       const data = await res.json();
-      const ticketList = data.tickets || data || [];
+      const rawTickets = data.tickets || data;
+      const ticketList = Array.isArray(rawTickets) ? rawTickets : [];
       setTickets(ticketList);
       setTicketStats({
         total: ticketList.length,
@@ -954,7 +956,8 @@ function App() {
     try {
       const res = await fetch(`${API_URL}/sponsors`);
       const data = await res.json();
-      const sponsorList = data.submissions || data || [];
+      const rawSponsors = data.submissions || data;
+      const sponsorList = Array.isArray(rawSponsors) ? rawSponsors : [];
       setSponsors(sponsorList);
       setSponsorStats({
         total: sponsorList.length,
@@ -1034,7 +1037,8 @@ function App() {
     try {
       const res = await fetch(`${API_URL}/promoters`);
       const data = await res.json();
-      const promoterList = data.promoters || data || [];
+      const rawPromoters = data.promoters || data;
+      const promoterList = Array.isArray(rawPromoters) ? rawPromoters : [];
       setPromoters(promoterList);
       setPromoterStats({
         total: promoterList.length,

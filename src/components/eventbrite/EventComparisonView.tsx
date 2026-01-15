@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { motion } from 'framer-motion';
 import type { EventbriteEventMetrics, EventComparison } from '../../types';
 import { API_URL } from '../../constants';
 
@@ -226,14 +227,16 @@ export function EventComparisonView({ events }: EventComparisonViewProps) {
                         <span className="text-white font-medium ml-2">{formatCurrency(event.gross_revenue)}</span>
                       </div>
                       <div className="w-full h-4 bg-white/10 rounded-full overflow-hidden">
-                        <div
-                          className={`h-full rounded-full transition-all ${
+                        <motion.div
+                          initial={{ width: 0 }}
+                          whileInView={{ width: `${percentage}%` }}
+                          transition={{ duration: 1, delay: index * 0.1, type: "spring", stiffness: 50 }}
+                          className={`h-full rounded-full ${
                             index === 0 ? 'bg-gradient-to-r from-amber-500 to-yellow-500' :
                             index === 1 ? 'bg-gradient-to-r from-blue-500 to-cyan-500' :
                             index === 2 ? 'bg-gradient-to-r from-purple-500 to-pink-500' :
                             'bg-gradient-to-r from-green-500 to-emerald-500'
                           }`}
-                          style={{ width: `${percentage}%` }}
                         />
                       </div>
                     </div>
@@ -257,14 +260,16 @@ export function EventComparisonView({ events }: EventComparisonViewProps) {
                         <span className="text-white font-medium ml-2">{event.tickets_sold.toLocaleString()}</span>
                       </div>
                       <div className="w-full h-4 bg-white/10 rounded-full overflow-hidden">
-                        <div
-                          className={`h-full rounded-full transition-all ${
+                        <motion.div
+                          initial={{ width: 0 }}
+                          whileInView={{ width: `${percentage}%` }}
+                          transition={{ duration: 1, delay: index * 0.1, type: "spring", stiffness: 50 }}
+                          className={`h-full rounded-full ${
                             index === 0 ? 'bg-gradient-to-r from-amber-500 to-yellow-500' :
                             index === 1 ? 'bg-gradient-to-r from-blue-500 to-cyan-500' :
                             index === 2 ? 'bg-gradient-to-r from-purple-500 to-pink-500' :
                             'bg-gradient-to-r from-green-500 to-emerald-500'
                           }`}
-                          style={{ width: `${percentage}%` }}
                         />
                       </div>
                     </div>
@@ -279,14 +284,16 @@ export function EventComparisonView({ events }: EventComparisonViewProps) {
               <div className="flex items-end justify-around h-48">
                 {comparison.events.map((event, index) => (
                   <div key={event.id} className="flex flex-col items-center">
-                    <div
-                      className={`w-16 rounded-t transition-all ${
+                    <motion.div
+                      initial={{ height: 0 }}
+                      whileInView={{ height: `${Math.max(event.check_in_rate, 5)}%` }}
+                      transition={{ duration: 0.8, delay: index * 0.1 }}
+                      className={`w-16 rounded-t ${
                         index === 0 ? 'bg-gradient-to-t from-amber-500 to-yellow-500' :
                         index === 1 ? 'bg-gradient-to-t from-blue-500 to-cyan-500' :
                         index === 2 ? 'bg-gradient-to-t from-purple-500 to-pink-500' :
                         'bg-gradient-to-t from-green-500 to-emerald-500'
                       }`}
-                      style={{ height: `${Math.max(event.check_in_rate, 5)}%` }}
                     />
                     <p className="text-white font-medium mt-2">{event.check_in_rate.toFixed(0)}%</p>
                     <p className="text-white/40 text-xs text-center mt-1 max-w-[80px] truncate">
@@ -303,14 +310,16 @@ export function EventComparisonView({ events }: EventComparisonViewProps) {
               <div className="flex items-end justify-around h-48">
                 {comparison.events.map((event, index) => (
                   <div key={event.id} className="flex flex-col items-center">
-                    <div
-                      className={`w-16 rounded-t transition-all ${
+                    <motion.div
+                      initial={{ height: 0 }}
+                      whileInView={{ height: `${Math.max(event.conversion_rate * 5, 5)}%` }}
+                      transition={{ duration: 0.8, delay: index * 0.1 }}
+                      className={`w-16 rounded-t ${
                         index === 0 ? 'bg-gradient-to-t from-amber-500 to-yellow-500' :
                         index === 1 ? 'bg-gradient-to-t from-blue-500 to-cyan-500' :
                         index === 2 ? 'bg-gradient-to-t from-purple-500 to-pink-500' :
                         'bg-gradient-to-t from-green-500 to-emerald-500'
                       }`}
-                      style={{ height: `${Math.max(event.conversion_rate * 5, 5)}%` }}
                     />
                     <p className="text-white font-medium mt-2">{event.conversion_rate.toFixed(1)}%</p>
                     <p className="text-white/40 text-xs text-center mt-1 max-w-[80px] truncate">

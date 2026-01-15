@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
+import { motion } from 'framer-motion';
 
 // API Configuration
 const LOCAL_API = 'http://localhost:3001/api/v1';
@@ -257,13 +258,18 @@ export default function PublicEvent() {
       )}
 
       {/* Main Content */}
-      <div style={{
-        maxWidth: 600,
-        margin: '0 auto',
-        padding: event.coverImage ? '0 24px 60px' : '60px 24px',
-        marginTop: event.coverImage ? -100 : 0,
-        position: 'relative',
-      }}>
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.6 }}
+        style={{
+          maxWidth: 600,
+          margin: '0 auto',
+          padding: event.coverImage ? '0 24px 60px' : '60px 24px',
+          marginTop: event.coverImage ? -100 : 0,
+          position: 'relative',
+        }}
+      >
         {/* Event Type Badge */}
         {event.eventType && (
           <div style={{
@@ -458,7 +464,9 @@ export default function PublicEvent() {
         {event.rsvpEnabled && !rsvpSuccess && (
           <div style={{ marginTop: 32 }}>
             {!showRsvpForm ? (
-              <button
+              <motion.button
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
                 onClick={() => setShowRsvpForm(true)}
                 style={{
                   width: '100%',
@@ -470,11 +478,11 @@ export default function PublicEvent() {
                   fontWeight: 700,
                   fontSize: 18,
                   cursor: 'pointer',
-                  transition: 'transform 0.2s, box-shadow 0.2s',
+                  boxShadow: '0 4px 20px rgba(0,0,0,0.2)',
                 }}
               >
                 RSVP Now
-              </button>
+              </motion.button>
             ) : (
               <form onSubmit={handleRsvp} style={{
                 padding: 24,
@@ -670,7 +678,7 @@ export default function PublicEvent() {
             Powered by <a href="https://berry.merktop.com" style={{ color: accentColor, textDecoration: 'none' }}>Berry Bly Productions</a>
           </div>
         </div>
-      </div>
+      </motion.div>
 
       <style>{`
         @keyframes pulse {
