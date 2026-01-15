@@ -12984,9 +12984,23 @@ app.get('/api/v1/integrations/eventbrite/auto-sync/status', (req, res) => {
 // GET /api/v1/integrations/eventbrite/metrics - Get aggregated Eventbrite metrics
 app.get('/api/v1/integrations/eventbrite/metrics', async (req, res) => {
   try {
-    const userId = req.headers['x-user-id'] || 1;
+    const userId = req.user?.id;
 
-    // Get integration info - with fallback for missing user_id column
+    // Multi-tenant: require authenticated user
+    if (!userId) {
+      return res.status(200).json({
+        connected: false,
+        totalEvents: 0,
+        activeEvents: 0,
+        totalTicketsSold: 0,
+        totalRevenue: 0,
+        totalAttendees: 0,
+        checkedIn: 0,
+        events: []
+      });
+    }
+
+    // Get integration info for this specific user
     let integrationResult;
     try {
       integrationResult = await pool.query(
@@ -12994,15 +13008,8 @@ app.get('/api/v1/integrations/eventbrite/metrics', async (req, res) => {
         [userId, 'eventbrite']
       );
     } catch (e) {
-      // Fallback: try without user_id filter
-      try {
-        integrationResult = await pool.query(
-          "SELECT * FROM integrations WHERE type = 'eventbrite' LIMIT 1"
-        );
-      } catch (e2) {
-        // No integrations table - return mock connected state
-        integrationResult = { rows: [{ status: 'connected', config: {} }] };
-      }
+      // No integrations table - return not connected
+      integrationResult = { rows: [] };
     }
 
     if (integrationResult.rows.length === 0 || integrationResult.rows[0].status !== 'connected') {
@@ -13174,7 +13181,7 @@ app.get('/api/v1/integrations/eventbrite/metrics', async (req, res) => {
 // GET /api/v1/integrations/eventbrite/alerts - Get all alerts for user
 app.get('/api/v1/integrations/eventbrite/alerts', async (req, res) => {
   try {
-    const userId = req.headers['x-user-id'] || 1;
+    const userId = req.user?.id;
     const { event_id, is_active } = req.query;
 
     let query = 'SELECT * FROM eventbrite_alerts WHERE user_id = $1';
@@ -13204,7 +13211,7 @@ app.get('/api/v1/integrations/eventbrite/alerts', async (req, res) => {
 // POST /api/v1/integrations/eventbrite/alerts - Create a new alert
 app.post('/api/v1/integrations/eventbrite/alerts', async (req, res) => {
   try {
-    const userId = req.headers['x-user-id'] || 1;
+    const userId = req.user?.id;
     const {
       event_id,
       alert_type,
@@ -13252,7 +13259,7 @@ app.post('/api/v1/integrations/eventbrite/alerts', async (req, res) => {
 // PUT /api/v1/integrations/eventbrite/alerts/:id - Update an alert
 app.put('/api/v1/integrations/eventbrite/alerts/:id', async (req, res) => {
   try {
-    const userId = req.headers['x-user-id'] || 1;
+    const userId = req.user?.id;
     const { id } = req.params;
     const { is_active, threshold_value, threshold_operator, notification_channels } = req.body;
 
@@ -13304,7 +13311,7 @@ app.put('/api/v1/integrations/eventbrite/alerts/:id', async (req, res) => {
 // DELETE /api/v1/integrations/eventbrite/alerts/:id - Delete an alert
 app.delete('/api/v1/integrations/eventbrite/alerts/:id', async (req, res) => {
   try {
-    const userId = req.headers['x-user-id'] || 1;
+    const userId = req.user?.id;
     const { id } = req.params;
 
     const result = await pool.query(
@@ -13326,7 +13333,7 @@ app.delete('/api/v1/integrations/eventbrite/alerts/:id', async (req, res) => {
 // GET /api/v1/integrations/eventbrite/notifications - Get alert notifications
 app.get('/api/v1/integrations/eventbrite/notifications', async (req, res) => {
   try {
-    const userId = req.headers['x-user-id'] || 1;
+    const userId = req.user?.id;
     const { is_read, limit = 50, offset = 0 } = req.query;
 
     let query = 'SELECT * FROM eventbrite_alert_notifications WHERE user_id = $1';
@@ -13362,7 +13369,7 @@ app.get('/api/v1/integrations/eventbrite/notifications', async (req, res) => {
 // PUT /api/v1/integrations/eventbrite/notifications/read - Mark notifications as read
 app.put('/api/v1/integrations/eventbrite/notifications/read', async (req, res) => {
   try {
-    const userId = req.headers['x-user-id'] || 1;
+    const userId = req.user?.id;
     const { notification_ids, mark_all = false } = req.body;
 
     if (mark_all) {
@@ -13387,7 +13394,7 @@ app.put('/api/v1/integrations/eventbrite/notifications/read', async (req, res) =
 // POST /api/v1/integrations/eventbrite/alerts/trigger - Manually trigger alert check
 app.post('/api/v1/integrations/eventbrite/alerts/trigger', async (req, res) => {
   try {
-    const userId = req.headers['x-user-id'] || 1;
+    const userId = req.user?.id;
     const triggeredAlerts = [];
 
     // Get user's active alerts
@@ -13540,7 +13547,7 @@ function getAlertMessage(alertType, data) {
 // GET /api/v1/integrations/eventbrite/orders - Get Eventbrite orders with filtering
 app.get('/api/v1/integrations/eventbrite/orders', async (req, res) => {
   try {
-    const userId = req.headers['x-user-id'] || 1;
+    const userId = req.user?.id;
     const { event_id, status, limit = 50, offset = 0, sort = 'order_date', order = 'DESC' } = req.query;
 
     let query = 'SELECT * FROM eventbrite_orders WHERE user_id = $1';
@@ -13609,7 +13616,7 @@ app.get('/api/v1/integrations/eventbrite/orders', async (req, res) => {
 // GET /api/v1/integrations/eventbrite/orders/recent - Get most recent orders (for live feed)
 app.get('/api/v1/integrations/eventbrite/orders/recent', async (req, res) => {
   try {
-    const userId = req.headers['x-user-id'] || 1;
+    const userId = req.user?.id;
     const { limit = 10, since } = req.query;
 
     let query = 'SELECT * FROM eventbrite_orders WHERE user_id = $1';
@@ -13640,7 +13647,7 @@ app.get('/api/v1/integrations/eventbrite/orders/recent', async (req, res) => {
 // GET /api/v1/integrations/eventbrite/orders/:id - Get single order details
 app.get('/api/v1/integrations/eventbrite/orders/:id', async (req, res) => {
   try {
-    const userId = req.headers['x-user-id'] || 1;
+    const userId = req.user?.id;
     const { id } = req.params;
 
     const result = await pool.query(
@@ -13671,7 +13678,7 @@ app.get('/api/v1/integrations/eventbrite/orders/:id', async (req, res) => {
 // POST /api/v1/integrations/eventbrite/orders/sync - Sync orders from Eventbrite API
 app.post('/api/v1/integrations/eventbrite/orders/sync', async (req, res) => {
   try {
-    const userId = req.headers['x-user-id'] || 1;
+    const userId = req.user?.id;
     const { event_id, since_date } = req.body;
 
     // Get API key
@@ -13809,7 +13816,7 @@ async function triggerOrderAlert(userId, order, eventName, amount) {
 // GET /api/v1/integrations/eventbrite/orders/stats/daily - Get daily order stats
 app.get('/api/v1/integrations/eventbrite/orders/stats/daily', async (req, res) => {
   try {
-    const userId = req.headers['x-user-id'] || 1;
+    const userId = req.user?.id;
     const { days = 30, event_id } = req.query;
 
     let query = `
@@ -13850,7 +13857,7 @@ app.get('/api/v1/integrations/eventbrite/orders/stats/daily', async (req, res) =
 // GET /api/v1/integrations/eventbrite/promo-codes - Get all promo codes
 app.get('/api/v1/integrations/eventbrite/promo-codes', async (req, res) => {
   try {
-    const userId = req.headers['x-user-id'] || 1;
+    const userId = req.user?.id;
     const { event_id, is_active } = req.query;
 
     let query = 'SELECT * FROM eventbrite_promo_codes WHERE user_id = $1';
@@ -13880,7 +13887,7 @@ app.get('/api/v1/integrations/eventbrite/promo-codes', async (req, res) => {
 // POST /api/v1/integrations/eventbrite/promo-codes - Create promo code via Eventbrite API
 app.post('/api/v1/integrations/eventbrite/promo-codes', async (req, res) => {
   try {
-    const userId = req.headers['x-user-id'] || 1;
+    const userId = req.user?.id;
     const {
       event_id,
       code,
@@ -13958,7 +13965,7 @@ app.post('/api/v1/integrations/eventbrite/promo-codes', async (req, res) => {
 // DELETE /api/v1/integrations/eventbrite/promo-codes/:id - Delete promo code
 app.delete('/api/v1/integrations/eventbrite/promo-codes/:id', async (req, res) => {
   try {
-    const userId = req.headers['x-user-id'] || 1;
+    const userId = req.user?.id;
     const { id } = req.params;
 
     // Get API key
@@ -13989,7 +13996,7 @@ app.delete('/api/v1/integrations/eventbrite/promo-codes/:id', async (req, res) =
 // POST /api/v1/integrations/eventbrite/promo-codes/sync - Sync promo codes from Eventbrite
 app.post('/api/v1/integrations/eventbrite/promo-codes/sync', async (req, res) => {
   try {
-    const userId = req.headers['x-user-id'] || 1;
+    const userId = req.user?.id;
 
     const apiKey = await getEventbriteApiKey(userId);
     if (!apiKey) {
@@ -14052,7 +14059,7 @@ app.post('/api/v1/integrations/eventbrite/promo-codes/sync', async (req, res) =>
 // GET /api/v1/integrations/eventbrite/attendees - Get attendees with filtering
 app.get('/api/v1/integrations/eventbrite/attendees', async (req, res) => {
   try {
-    const userId = req.headers['x-user-id'] || 1;
+    const userId = req.user?.id;
     const { event_id, checked_in, search, limit = 100, offset = 0 } = req.query;
 
     let query = 'SELECT * FROM eventbrite_attendees WHERE user_id = $1';
@@ -14102,7 +14109,7 @@ app.get('/api/v1/integrations/eventbrite/attendees', async (req, res) => {
 // POST /api/v1/integrations/eventbrite/attendees/:id/check-in - Check in an attendee
 app.post('/api/v1/integrations/eventbrite/attendees/:id/check-in', async (req, res) => {
   try {
-    const userId = req.headers['x-user-id'] || 1;
+    const userId = req.user?.id;
     const { id } = req.params;
     const { checked_in_by } = req.body;
 
@@ -14145,7 +14152,7 @@ app.post('/api/v1/integrations/eventbrite/attendees/:id/check-in', async (req, r
 // POST /api/v1/integrations/eventbrite/attendees/:id/undo-check-in - Undo check-in
 app.post('/api/v1/integrations/eventbrite/attendees/:id/undo-check-in', async (req, res) => {
   try {
-    const userId = req.headers['x-user-id'] || 1;
+    const userId = req.user?.id;
     const { id } = req.params;
 
     const result = await pool.query(`
@@ -14169,7 +14176,7 @@ app.post('/api/v1/integrations/eventbrite/attendees/:id/undo-check-in', async (r
 // POST /api/v1/integrations/eventbrite/attendees/check-in-by-barcode - Check in by barcode scan
 app.post('/api/v1/integrations/eventbrite/attendees/check-in-by-barcode', async (req, res) => {
   try {
-    const userId = req.headers['x-user-id'] || 1;
+    const userId = req.user?.id;
     const { barcode, event_id, checked_in_by } = req.body;
 
     if (!barcode) {
@@ -14222,7 +14229,7 @@ app.post('/api/v1/integrations/eventbrite/attendees/check-in-by-barcode', async 
 // POST /api/v1/integrations/eventbrite/attendees/sync - Sync attendees from Eventbrite
 app.post('/api/v1/integrations/eventbrite/attendees/sync', async (req, res) => {
   try {
-    const userId = req.headers['x-user-id'] || 1;
+    const userId = req.user?.id;
     const { event_id } = req.body;
 
     const apiKey = await getEventbriteApiKey(userId);
@@ -14287,7 +14294,7 @@ app.post('/api/v1/integrations/eventbrite/attendees/sync', async (req, res) => {
 // GET /api/v1/integrations/eventbrite/refunds - Get all refunds
 app.get('/api/v1/integrations/eventbrite/refunds', async (req, res) => {
   try {
-    const userId = req.headers['x-user-id'] || 1;
+    const userId = req.user?.id;
     const { event_id, status, limit = 50, offset = 0 } = req.query;
 
     let query = 'SELECT * FROM eventbrite_refunds WHERE user_id = $1';
@@ -14332,7 +14339,7 @@ app.get('/api/v1/integrations/eventbrite/refunds', async (req, res) => {
 // POST /api/v1/integrations/eventbrite/refunds - Request a refund
 app.post('/api/v1/integrations/eventbrite/refunds', async (req, res) => {
   try {
-    const userId = req.headers['x-user-id'] || 1;
+    const userId = req.user?.id;
     const { order_id, attendee_ids, reason, amount } = req.body;
 
     if (!order_id) {
@@ -14445,7 +14452,7 @@ async function triggerRefundAlert(userId, orderId, amount, eventId) {
 // GET /api/v1/integrations/eventbrite/reports/orders - Export orders report
 app.get('/api/v1/integrations/eventbrite/reports/orders', async (req, res) => {
   try {
-    const userId = req.headers['x-user-id'] || 1;
+    const userId = req.user?.id;
     const { event_id, start_date, end_date, format = 'json' } = req.query;
 
     let query = `
@@ -14507,7 +14514,7 @@ app.get('/api/v1/integrations/eventbrite/reports/orders', async (req, res) => {
 // GET /api/v1/integrations/eventbrite/reports/attendees - Export attendees report
 app.get('/api/v1/integrations/eventbrite/reports/attendees', async (req, res) => {
   try {
-    const userId = req.headers['x-user-id'] || 1;
+    const userId = req.user?.id;
     const { event_id, checked_in, format = 'json' } = req.query;
 
     let query = `
@@ -14563,7 +14570,7 @@ app.get('/api/v1/integrations/eventbrite/reports/attendees', async (req, res) =>
 // GET /api/v1/integrations/eventbrite/reports/summary - Generate summary report
 app.get('/api/v1/integrations/eventbrite/reports/summary', async (req, res) => {
   try {
-    const userId = req.headers['x-user-id'] || 1;
+    const userId = req.user?.id;
     const { event_id } = req.query;
 
     // Orders stats
@@ -14672,7 +14679,7 @@ app.get('/api/v1/integrations/eventbrite/reports/summary', async (req, res) => {
 // POST /api/v1/integrations/eventbrite/events - Create event on Eventbrite
 app.post('/api/v1/integrations/eventbrite/events', async (req, res) => {
   try {
-    const userId = req.headers['x-user-id'] || 1;
+    const userId = req.user?.id;
     const {
       name,
       description,
@@ -14821,7 +14828,7 @@ app.post('/api/v1/integrations/eventbrite/events', async (req, res) => {
 // PUT /api/v1/integrations/eventbrite/events/:id - Update event on Eventbrite
 app.put('/api/v1/integrations/eventbrite/events/:id', async (req, res) => {
   try {
-    const userId = req.headers['x-user-id'] || 1;
+    const userId = req.user?.id;
     const { id } = req.params;
     const updates = req.body;
 
@@ -14885,7 +14892,7 @@ app.put('/api/v1/integrations/eventbrite/events/:id', async (req, res) => {
 // POST /api/v1/integrations/eventbrite/events/:id/publish - Publish event
 app.post('/api/v1/integrations/eventbrite/events/:id/publish', async (req, res) => {
   try {
-    const userId = req.headers['x-user-id'] || 1;
+    const userId = req.user?.id;
     const { id } = req.params;
 
     const apiKey = await getEventbriteApiKey(userId);
@@ -14913,7 +14920,7 @@ app.post('/api/v1/integrations/eventbrite/events/:id/publish', async (req, res) 
 // POST /api/v1/integrations/eventbrite/events/:id/ticket-classes - Create ticket type
 app.post('/api/v1/integrations/eventbrite/events/:id/ticket-classes', async (req, res) => {
   try {
-    const userId = req.headers['x-user-id'] || 1;
+    const userId = req.user?.id;
     const { id } = req.params;
     const {
       name,
@@ -14981,7 +14988,7 @@ app.post('/api/v1/integrations/eventbrite/events/:id/ticket-classes', async (req
 // POST /api/v1/integrations/eventbrite/email/send - Send email to order buyers
 app.post('/api/v1/integrations/eventbrite/email/send', async (req, res) => {
   try {
-    const userId = req.headers['x-user-id'] || 1;
+    const userId = req.user?.id;
     const { order_ids, event_id, subject, body, send_to_all = false } = req.body;
 
     if (!subject || !body) {
@@ -15056,7 +15063,7 @@ app.post('/api/v1/integrations/eventbrite/email/send', async (req, res) => {
 // POST /api/v1/integrations/eventbrite/email/attendees - Send email to attendees
 app.post('/api/v1/integrations/eventbrite/email/attendees', async (req, res) => {
   try {
-    const userId = req.headers['x-user-id'] || 1;
+    const userId = req.user?.id;
     const { event_id, subject, body, filter_checked_in } = req.body;
 
     if (!event_id || !subject || !body) {
@@ -15126,7 +15133,7 @@ app.post('/api/v1/integrations/eventbrite/email/attendees', async (req, res) => 
 // GET /api/v1/integrations/eventbrite/compare - Compare multiple events
 app.get('/api/v1/integrations/eventbrite/compare', async (req, res) => {
   try {
-    const userId = req.headers['x-user-id'] || 1;
+    const userId = req.user?.id;
     const { event_ids } = req.query;
 
     if (!event_ids) {
