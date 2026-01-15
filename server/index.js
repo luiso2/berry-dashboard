@@ -3361,14 +3361,16 @@ app.post('/api/v1/uploads/contacts', upload.single('file'), async (req, res) => 
       return res.status(400).json({ error: 'Failed to parse file: ' + parseError.message });
     }
 
-    // Create upload record
-    const uploadResult = await pool.query(`
-      INSERT INTO file_uploads (user_id, filename, original_filename, file_type, file_size, upload_type, records_processed, status, event_id)
-      VALUES ($1, $2, $3, $4, $5, 'contacts', $6, 'processing', $7)
-      RETURNING id
-    `, [userId, req.file.filename, req.file.originalname, isCSV ? 'csv' : 'xlsx', req.file.size, records.length, eventId]);
-
-    const uploadId = uploadResult.rows[0].id;
+    // Create upload record (only if user is authenticated)
+    let uploadId = null;
+    if (userId) {
+      const uploadResult = await pool.query(`
+        INSERT INTO file_uploads (user_id, filename, original_filename, file_type, file_size, upload_type, records_processed, status, event_id)
+        VALUES ($1, $2, $3, $4, $5, 'contacts', $6, 'processing', $7)
+        RETURNING id
+      `, [userId, req.file.filename, req.file.originalname, isCSV ? 'csv' : 'xlsx', req.file.size, records.length, eventId]);
+      uploadId = uploadResult.rows[0].id;
+    }
 
     // Process records
     let successCount = 0;
@@ -3437,12 +3439,14 @@ app.post('/api/v1/uploads/contacts', upload.single('file'), async (req, res) => 
       }
     }
 
-    // Update upload record with results
-    await pool.query(`
-      UPDATE file_uploads
-      SET records_success = $1, records_failed = $2, status = 'completed', error_details = $3
-      WHERE id = $4
-    `, [successCount, failedCount, JSON.stringify(errors.slice(0, 100)), uploadId]);
+    // Update upload record with results (only if we created one)
+    if (uploadId) {
+      await pool.query(`
+        UPDATE file_uploads
+        SET records_success = $1, records_failed = $2, status = 'completed', error_details = $3
+        WHERE id = $4
+      `, [successCount, failedCount, JSON.stringify(errors.slice(0, 100)), uploadId]);
+    }
 
     // Clean up uploaded file
     fs.unlinkSync(req.file.path);
