@@ -7496,15 +7496,31 @@ app.get('/api/v1/events/stats', async (req, res) => {
   }
 });
 
-// GET /api/v1/events/:id - Get single event with details
+// GET /api/v1/events/:id - Get single event with details (supports both numeric ID and slug)
 app.get('/api/v1/events/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const result = await pool.query('SELECT * FROM events WHERE id = $1', [id]);
+
+    // Support both numeric ID and slug lookup
+    let result;
+    const isNumericId = /^\d+$/.test(id);
+
+    if (isNumericId) {
+      result = await pool.query('SELECT * FROM events WHERE id = $1', [id]);
+    } else {
+      // Try to find by slug first, then by eventbrite_id
+      result = await pool.query(
+        'SELECT * FROM events WHERE slug = $1 OR eventbrite_id = $1',
+        [id]
+      );
+    }
 
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Event not found' });
     }
+
+    // Use the found event's id for subsequent queries
+    const eventId = result.rows[0].id;
 
     // Get related data counts with graceful handling for missing tables
     let guestsCount = 0, ticketsCount = 0, sponsorsCount = 0, budgetSum = 0;

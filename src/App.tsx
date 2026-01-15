@@ -8430,7 +8430,7 @@ function App() {
             setShowImportModal(false);
             fetchGuests();
           }}
-          eventId={selectedEvent}
+          eventId={selectedEvent?.id?.toString()}
         />
       )}
 
