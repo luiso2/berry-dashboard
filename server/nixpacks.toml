@@ -1,8 +1,8 @@
-[start]
-cmd = "node index.js"
-
 [phases.setup]
 nixPkgs = ["nodejs_20"]
 
 [phases.install]
-cmds = ["npm install"]
+cmds = ["cd .. && npm ci && npm run build", "npm install"]
+
+[start]
+cmd = "node index.js"

@@ -16574,6 +16574,26 @@ app.post('/api/v1/ai/query', async (req, res) => {
   }
 });
 
+// ============================================
+// SERVE FRONTEND STATIC FILES
+// ============================================
+const distPath = path.join(__dirname, '..', 'dist');
+if (fs.existsSync(distPath)) {
+  console.log('Serving frontend from:', distPath);
+  app.use(express.static(distPath));
+
+  // SPA fallback - serve index.html for all non-API routes
+  app.get('*', (req, res, next) => {
+    // Skip API routes
+    if (req.path.startsWith('/api') || req.path.startsWith('/oauth') || req.path.startsWith('/uploads') || req.path.startsWith('/ws')) {
+      return next();
+    }
+    res.sendFile(path.join(distPath, 'index.html'));
+  });
+} else {
+  console.log('Frontend dist not found at:', distPath);
+}
+
 // Start server
 const startServer = async () => {
   await initDatabase();
