@@ -198,7 +198,7 @@ export function SMSView({ onToast }: SMSViewProps) {
                       {thread.is_human_takeover && (
                         <span style={{ background: '#8b5cf6', color: '#fff', fontSize: 10, padding: '2px 6px', borderRadius: 4 }}>Human</span>
                       )}
-                      {Number(thread.unread_count) > 0 && (
+                      {(parseInt(String(thread.unread_count), 10) || 0) > 0 && (
                         <span style={{ background: '#3b82f6', color: '#fff', fontSize: 10, padding: '2px 6px', borderRadius: 10, minWidth: 18, textAlign: 'center' }}>{thread.unread_count}</span>
                       )}
                     </div>
