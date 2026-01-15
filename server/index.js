@@ -3338,11 +3338,7 @@ app.post('/api/v1/gallery/upload', upload.single('image'), async (req, res) => {
 
 // POST /api/v1/uploads/contacts - Upload CSV/Excel file with contacts
 app.post('/api/v1/uploads/contacts', upload.single('file'), async (req, res) => {
-  const userId = req.user?.id;
-
-  if (!userId) {
-    return res.status(401).json({ error: 'Authentication required' });
-  }
+  const userId = req.user?.id || null;
 
   if (!req.file) {
     return res.status(400).json({ error: 'No file uploaded' });
@@ -3394,12 +3390,20 @@ app.post('/api/v1/uploads/contacts', upload.single('file'), async (req, res) => 
       try {
         // Check for duplicate email if email provided
         if (normalized.email) {
-          const existingQuery = eventId
-            ? 'SELECT id FROM guests WHERE email = $1 AND user_id = $2::integer AND event_id = $3::integer'
-            : 'SELECT id FROM guests WHERE email = $1 AND user_id = $2::integer';
-          const existingParams = eventId
-            ? [normalized.email, userId, eventId]
-            : [normalized.email, userId];
+          let existingQuery, existingParams;
+          if (userId && eventId) {
+            existingQuery = 'SELECT id FROM guests WHERE email = $1 AND user_id = $2::integer AND event_id = $3::integer';
+            existingParams = [normalized.email, userId, eventId];
+          } else if (userId) {
+            existingQuery = 'SELECT id FROM guests WHERE email = $1 AND user_id = $2::integer';
+            existingParams = [normalized.email, userId];
+          } else if (eventId) {
+            existingQuery = 'SELECT id FROM guests WHERE email = $1 AND user_id IS NULL AND event_id = $2::integer';
+            existingParams = [normalized.email, eventId];
+          } else {
+            existingQuery = 'SELECT id FROM guests WHERE email = $1 AND user_id IS NULL';
+            existingParams = [normalized.email];
+          }
           const existing = await pool.query(existingQuery, existingParams);
 
           if (existing.rows.length > 0) {
@@ -7425,17 +7429,24 @@ app.get('/api/v1/events', async (req, res) => {
 app.get('/api/v1/events/calendar', async (req, res) => {
   try {
     const { month, year } = req.query;
+    const userId = req.user?.id;
     const currentYear = year || new Date().getFullYear();
     const currentMonth = month || new Date().getMonth() + 1;
 
-    const result = await pool.query(
-      `SELECT id, title, date, status, venue
+    // Multi-tenant: filter by user_id
+    let query = `SELECT id, title, date, status, venue
        FROM events
        WHERE EXTRACT(YEAR FROM date) = $1
-       AND EXTRACT(MONTH FROM date) = $2
-       ORDER BY date`,
-      [currentYear, currentMonth]
-    );
+       AND EXTRACT(MONTH FROM date) = $2`;
+    const values = [currentYear, currentMonth];
+
+    if (userId) {
+      query += ` AND (user_id = $3::integer OR user_id IS NULL)`;
+      values.push(userId);
+    }
+    query += ` ORDER BY date`;
+
+    const result = await pool.query(query, values);
 
     res.json({
       events: result.rows.map(row => ({
@@ -7457,6 +7468,10 @@ app.get('/api/v1/events/calendar', async (req, res) => {
 // GET /api/v1/events/stats - Get event statistics
 app.get('/api/v1/events/stats', async (req, res) => {
   try {
+    const userId = req.user?.id;
+    const userFilter = userId ? `WHERE (user_id = ${parseInt(userId)} OR user_id IS NULL)` : '';
+    const userFilterAnd = userId ? `AND (user_id = ${parseInt(userId)} OR user_id IS NULL)` : '';
+
     const stats = await pool.query(`
       SELECT
         COUNT(*) as total,
@@ -7465,20 +7480,21 @@ app.get('/api/v1/events/stats', async (req, res) => {
         COUNT(*) FILTER (WHERE status = 'past') as past,
         COUNT(*) FILTER (WHERE date >= CURRENT_DATE) as upcoming_by_date,
         COUNT(*) FILTER (WHERE date < CURRENT_DATE) as past_by_date
-      FROM events
+      FROM events ${userFilter}
     `);
 
     const thisMonth = await pool.query(`
       SELECT COUNT(*) as count FROM events
       WHERE EXTRACT(YEAR FROM date) = EXTRACT(YEAR FROM CURRENT_DATE)
       AND EXTRACT(MONTH FROM date) = EXTRACT(MONTH FROM CURRENT_DATE)
+      ${userFilterAnd}
     `);
 
     // Try to get category stats if column exists
     let categoryStats = {};
     try {
       const byCategory = await pool.query(`
-        SELECT category, COUNT(*) as count FROM events WHERE category IS NOT NULL GROUP BY category
+        SELECT category, COUNT(*) as count FROM events WHERE category IS NOT NULL ${userFilterAnd} GROUP BY category
       `);
       byCategory.rows.forEach(r => { categoryStats[r.category] = parseInt(r.count); });
     } catch {
