@@ -13348,12 +13348,22 @@ app.get('/api/v1/integrations/eventbrite/metrics', async (req, res) => {
     // Get integration info for this specific user
     let integrationResult;
     try {
+      // Try user_integrations first (multi-tenant)
       integrationResult = await pool.query(
-        'SELECT * FROM integrations WHERE user_id = $1 AND type = $2',
+        'SELECT * FROM user_integrations WHERE user_id = $1 AND provider = $2',
         [userId, 'eventbrite']
       );
+
+      // Fallback to global integrations if no user-specific one found
+      if (integrationResult.rows.length === 0) {
+        integrationResult = await pool.query(
+          'SELECT * FROM integrations WHERE provider = $1',
+          ['eventbrite']
+        );
+      }
     } catch (e) {
       // No integrations table - return not connected
+      console.log('Integration query error:', e.message);
       integrationResult = { rows: [] };
     }
 
@@ -13376,39 +13386,37 @@ app.get('/api/v1/integrations/eventbrite/metrics', async (req, res) => {
     // Get events - with multiple fallbacks for schema compatibility
     let eventsResult;
     try {
-      // Try with user_id and event_date columns
+      // Use the correct column names (title, date, venue) that match the berry-bly schema
       eventsResult = await pool.query(`
         SELECT
           e.id,
-          e.name,
-          e.event_date as "startDate",
-          e.venue_name as venue,
+          COALESCE(e.title, e.name) as name,
+          COALESCE(e.date, e.event_date)::text as "startDate",
+          COALESCE(e.venue, e.venue_name, 'TBD') as venue,
           e.status,
-          e.expected_attendance as capacity
+          e.expected_attendance as capacity,
+          e.eventbrite_url
         FROM events e
-        WHERE e.user_id = $1
-        ORDER BY e.event_date DESC
+        WHERE e.user_id = $1::integer
+        ORDER BY COALESCE(e.date, e.event_date, e.created_at) DESC
       `, [userId]);
     } catch (e) {
+      console.log('Events query failed, trying fallback:', e.message);
       try {
-        // Fallback: minimal query with only id and name - MUST filter by user_id for multi-tenant
+        // Fallback: minimal query - MUST filter by user_id for multi-tenant
         eventsResult = await pool.query(`
           SELECT
             id,
-            COALESCE(name, title) as name
+            COALESCE(title, name, 'Untitled Event') as name,
+            COALESCE(date::text, created_at::text) as "startDate",
+            COALESCE(venue, 'TBD') as venue,
+            COALESCE(status, 'draft') as status,
+            eventbrite_url
           FROM events
-          WHERE (user_id = $1::integer OR user_id IS NULL)
+          WHERE user_id = $1::integer
           ORDER BY id DESC
           LIMIT 50
         `, [userId]);
-        // Add default values for other fields
-        eventsResult.rows = eventsResult.rows.map(row => ({
-          ...row,
-          startDate: new Date().toISOString(),
-          venue: 'TBD',
-          status: 'draft',
-          capacity: 100
-        }));
       } catch (e2) {
         // No events table - return empty
         console.log('Note: events table not accessible:', e2.message);
