@@ -1871,7 +1871,8 @@ function App() {
     if (activeView === 'monitoring') fetchHealthStatus();
     if (activeView === 'integrations') fetchIntegrations();
     if (activeView === 'sms') { fetchSmsStats(); }
-  }, [activeView, fetchModels, fetchTables, fetchTickets, fetchOrders, fetchSponsors, fetchPromoters, fetchPromoterLeaderboard, fetchEvents, fetchVendors, fetchStaff, fetchBudget, fetchHealthStatus, fetchIntegrations, fetchSmsStats, selectedEvent]);
+    if (activeView === 'eventbrite') fetchEventbriteMetrics();
+  }, [activeView, fetchModels, fetchTables, fetchTickets, fetchOrders, fetchSponsors, fetchPromoters, fetchPromoterLeaderboard, fetchEvents, fetchVendors, fetchStaff, fetchBudget, fetchHealthStatus, fetchIntegrations, fetchSmsStats, fetchEventbriteMetrics, selectedEvent]);
 
   // Sync All Data - refreshes all data sources
   const syncAllData = useCallback(async () => {
@@ -2436,6 +2437,7 @@ function App() {
       case 'models': return 'Models';
       case 'integrations': return 'Integrations';
       case 'chatgpt': return 'ChatGPT';
+      case 'eventbrite': return 'Eventbrite';
       default: return 'Guests';
     }
   };
@@ -2450,6 +2452,7 @@ function App() {
       case 'models': return 'Featured talent';
       case 'integrations': return 'Connect your services';
       case 'chatgpt': return 'AI-powered dashboard control';
+      case 'eventbrite': return `${eventbriteMetrics.totalTicketsSold} tickets sold • $${eventbriteMetrics.totalNetRevenue.toLocaleString()} revenue`;
       default: return `${stats.pending} pending review`;
     }
   };
@@ -2581,11 +2584,16 @@ function App() {
             <NavItem label="Tables" active={activeView === 'tables'} icon="🪑" count={tableStats.total} onClick={() => navigateTo('tables')} />
             <NavItem label="Sponsors" active={activeView === 'sponsors'} icon="💎" count={sponsorStats.total} onClick={() => navigateTo('sponsors')} />
 
+            {/* Eventbrite Section Label */}
+            <div style={{ fontSize: 10, fontWeight: 600, color: '#555', textTransform: 'uppercase', letterSpacing: '0.5px', padding: '16px 8px 8px', marginTop: 8 }}>
+              Eventbrite
+            </div>
+            <NavItem label="Eventbrite" active={activeView === 'eventbrite'} icon="🎫" count={eventbriteMetrics.totalTicketsSold} onClick={() => navigateTo('eventbrite')} />
+
             {/* Operations Section Label */}
             <div style={{ fontSize: 10, fontWeight: 600, color: '#555', textTransform: 'uppercase', letterSpacing: '0.5px', padding: '16px 8px 8px', marginTop: 8 }}>
               Operations
             </div>
-            <NavItem label="Check-In" active={activeView === 'checkin'} icon="✓" count={stats.checkedIn} onClick={() => navigateTo('checkin')} />
             <NavItem label="Emails" active={activeView === 'emails'} icon="✉" count={stats.emailsSent} onClick={() => navigateTo('emails')} />
             <NavItem label="Staff" active={activeView === 'staff'} icon="🧑‍💼" count={staffStats.total} onClick={() => navigateTo('staff')} />
 
@@ -7578,6 +7586,128 @@ function App() {
 
         {/* SMS AI Conversations View */}
         {activeView === 'sms' && <SMSView onToast={addToast} />}
+
+        {/* ============================================ */}
+        {/* EVENTBRITE VIEW - Standalone Section */}
+        {/* ============================================ */}
+        {activeView === 'eventbrite' && (
+          <div style={{ padding: '24px 32px' }}>
+            {/* Eventbrite Sub-Navigation - Simplified */}
+            <div style={{ display: 'flex', gap: 8, marginBottom: 24, flexWrap: 'wrap', padding: '12px 0', borderBottom: '1px solid #1a1a1a' }}>
+              {[
+                { key: 'analytics', label: 'Overview', icon: '📊' },
+                { key: 'orders', label: 'Orders', icon: '🧾' },
+                { key: 'checkin', label: 'Check-in', icon: '📱' },
+                { key: 'promos', label: 'Promos', icon: '🎁' },
+                { key: 'alerts', label: 'Alerts', icon: '🔔' },
+                { key: 'create', label: 'Create', icon: '➕' },
+                { key: 'email', label: 'Email', icon: '✉️' },
+                { key: 'refunds', label: 'Refunds', icon: '💸' },
+                { key: 'reports', label: 'Reports', icon: '📄' },
+              ].map((tab) => (
+                <button
+                  key={tab.key}
+                  onClick={() => setEventbriteSubTab(tab.key as typeof eventbriteSubTab)}
+                  style={{
+                    padding: '10px 16px',
+                    borderRadius: 8,
+                    border: eventbriteSubTab === tab.key ? '1px solid #d4af37' : '1px solid #333',
+                    background: eventbriteSubTab === tab.key ? 'linear-gradient(135deg, #d4af37 0%, #b8960c 100%)' : '#111',
+                    color: eventbriteSubTab === tab.key ? '#000' : '#888',
+                    cursor: 'pointer',
+                    fontSize: 13,
+                    fontWeight: eventbriteSubTab === tab.key ? 600 : 500,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    transition: 'all 0.2s ease',
+                  }}
+                >
+                  <span>{tab.icon}</span>
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Eventbrite Overview */}
+            {eventbriteSubTab === 'analytics' && (
+              <div>
+                {/* Quick Stats */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16, marginBottom: 24 }}>
+                  <div style={{ background: '#0a0a0a', border: '1px solid #1a1a1a', borderRadius: 12, padding: 20 }}>
+                    <div style={{ color: '#888', fontSize: 12, marginBottom: 8 }}>TICKETS SOLD</div>
+                    <div style={{ fontSize: 28, fontWeight: 700, color: '#22c55e' }}>{eventbriteMetrics.totalTicketsSold.toLocaleString()}</div>
+                  </div>
+                  <div style={{ background: '#0a0a0a', border: '1px solid #1a1a1a', borderRadius: 12, padding: 20 }}>
+                    <div style={{ color: '#888', fontSize: 12, marginBottom: 8 }}>NET REVENUE</div>
+                    <div style={{ fontSize: 28, fontWeight: 700, color: '#d4af37' }}>${eventbriteMetrics.totalNetRevenue.toLocaleString()}</div>
+                  </div>
+                  <div style={{ background: '#0a0a0a', border: '1px solid #1a1a1a', borderRadius: 12, padding: 20 }}>
+                    <div style={{ color: '#888', fontSize: 12, marginBottom: 8 }}>CHECK-IN RATE</div>
+                    <div style={{ fontSize: 28, fontWeight: 700, color: '#3b82f6' }}>
+                      {eventbriteMetrics.totalAttendees > 0 ? Math.round((eventbriteMetrics.checkedIn / eventbriteMetrics.totalAttendees) * 100) : 0}%
+                    </div>
+                  </div>
+                  <div style={{ background: '#0a0a0a', border: '1px solid #1a1a1a', borderRadius: 12, padding: 20 }}>
+                    <div style={{ color: '#888', fontSize: 12, marginBottom: 8 }}>CONVERSION</div>
+                    <div style={{ fontSize: 28, fontWeight: 700, color: '#8b5cf6' }}>{eventbriteMetrics.conversionRate.toFixed(1)}%</div>
+                  </div>
+                </div>
+
+                {/* Events List */}
+                <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 16, color: '#fff' }}>Connected Events</h3>
+                <div style={{ display: 'grid', gap: 12 }}>
+                  {eventbriteMetrics.events.length > 0 ? eventbriteMetrics.events.map((evt) => (
+                    <div key={evt.id} style={{ background: '#0a0a0a', border: '1px solid #1a1a1a', borderRadius: 12, padding: 20, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: 16 }}>{evt.name}</div>
+                        <div style={{ color: '#888', fontSize: 13, marginTop: 4 }}>{evt.ticketsSold} tickets • ${evt.grossRevenue.toLocaleString()} revenue</div>
+                      </div>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <span style={{ background: '#22c55e20', color: '#22c55e', padding: '4px 12px', borderRadius: 20, fontSize: 12 }}>
+                          {evt.attendees.checkedIn}/{evt.attendees.registered} checked in
+                        </span>
+                      </div>
+                    </div>
+                  )) : (
+                    <div style={{ background: '#0a0a0a', border: '1px solid #1a1a1a', borderRadius: 12, padding: 40, textAlign: 'center' }}>
+                      <div style={{ fontSize: 48, marginBottom: 16 }}>🎫</div>
+                      <div style={{ color: '#888', marginBottom: 8 }}>No events connected yet</div>
+                      <div style={{ color: '#666', fontSize: 13 }}>Connect your Eventbrite account in Integrations</div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Orders Feed */}
+            {eventbriteSubTab === 'orders' && <OrdersFeed events={eventbriteMetrics.events} />}
+
+            {/* Alerts Manager */}
+            {eventbriteSubTab === 'alerts' && <AlertsManager events={eventbriteMetrics.events} />}
+
+            {/* Event Creator */}
+            {eventbriteSubTab === 'create' && <EventCreator />}
+
+            {/* Promo Codes */}
+            {eventbriteSubTab === 'promos' && <PromoCodesManager events={eventbriteMetrics.events} />}
+
+            {/* Check-in Scanner */}
+            {eventbriteSubTab === 'checkin' && <CheckInScanner events={eventbriteMetrics.events} />}
+
+            {/* Email Composer */}
+            {eventbriteSubTab === 'email' && <EmailComposer events={eventbriteMetrics.events} />}
+
+            {/* Event Comparison */}
+            {eventbriteSubTab === 'compare' && <EventComparisonView events={eventbriteMetrics.events} />}
+
+            {/* Refund Manager */}
+            {eventbriteSubTab === 'refunds' && <RefundManager events={eventbriteMetrics.events} />}
+
+            {/* Reports Export */}
+            {eventbriteSubTab === 'reports' && <ReportsExport events={eventbriteMetrics.events} />}
+          </div>
+        )}
       </main>
 
       {/* Mobile Bottom Navigation */}

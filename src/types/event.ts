@@ -19,7 +19,8 @@ export type ViewType =
   | 'monitoring'
   | 'integrations'
   | 'chatgpt'
-  | 'sms';
+  | 'sms'
+  | 'eventbrite';
 
 export interface Event {
   id: number;
