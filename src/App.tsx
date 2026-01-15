@@ -6131,7 +6131,7 @@ function App() {
                         Cancel
                       </button>
                       <button
-                        onClick={() => { createEvent(); setShowEventForm(false); }}
+                        onClick={() => createEvent()}
                         style={{ padding: '10px 24px', background: '#d4af37', border: 'none', borderRadius: 8, color: '#000', fontWeight: 600, cursor: 'pointer' }}
                       >
                         Publish Event
