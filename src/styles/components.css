@@ -1,0 +1,125 @@
+/* Component Styles - Berry Dashboard */
+
+/* Hover Effects */
+.btn-hover:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+}
+
+.btn-hover:active {
+  transform: translateY(0);
+  box-shadow: none;
+}
+
+.row-hover:hover {
+  background: #0a0a0a !important;
+}
+
+.nav-hover:hover {
+  background: #1a1a1a !important;
+}
+
+.stat-hover:hover {
+  background: #1a1a1a !important;
+  cursor: pointer;
+}
+
+/* Form Elements */
+.input-focus:focus {
+  border-color: #333 !important;
+  box-shadow: 0 0 0 3px rgba(255,255,255,0.05);
+}
+
+.checkbox-custom {
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  border: 2px solid #333;
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  position: relative;
+  flex-shrink: 0;
+}
+
+.checkbox-custom:hover {
+  border-color: #555;
+}
+
+.checkbox-custom:checked {
+  background: #fff;
+  border-color: #fff;
+}
+
+.checkbox-custom:checked::after {
+  content: '✓';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: #000;
+  font-size: 14px;
+  font-weight: bold;
+}
+
+/* Transitions - only on interactive elements */
+button, a, input, select, textarea, .btn-hover, .nav-hover, .stat-hover, .row-hover {
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
+}
+
+/* Sidebar Overlay */
+.sidebar-overlay {
+  display: none;
+}
+
+.sidebar-overlay.active {
+  display: block;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.7);
+  z-index: 149;
+}
+
+/* Mobile Menu Button */
+.mobile-menu-btn {
+  display: none;
+}
+
+/* Table Wrapper */
+.table-wrapper {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.hide-mobile {
+  display: table-cell;
+}
+
+.mobile-card {
+  display: none;
+}
+
+/* SMS View Styles */
+.sms-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+}
+
+.sms-main-grid {
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  gap: 24px;
+  min-height: 500px;
+}
+
+.sms-thread-list {
+  max-height: 450px;
+  overflow-y: auto;
+}
+
+.sms-messages-container {
+  max-height: 350px;
+  overflow-y: auto;
+}

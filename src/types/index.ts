@@ -36,6 +36,15 @@ export type {
   Integration,
   EventbriteMetrics,
   EventbriteEventMetrics,
+  EventbriteAlert,
+  EventbriteAlertNotification,
+  EventbriteOrder,
+  OrderDailyStats,
+  EventbritePromoCode,
+  EventbriteAttendee,
+  EventbriteRefund,
+  EventComparison,
+  EventbriteReportSummary,
 } from './integration';
 
 // Budget

@@ -1424,6 +1424,166 @@ const initDatabase = async () => {
       console.log('Eventbrite columns migration:', e.message);
     }
 
+    // ═══════════════════════════════════════════════════════════════════════
+    // FEATURE 1: Eventbrite Alerts Table
+    // ═══════════════════════════════════════════════════════════════════════
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS eventbrite_alerts (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL,
+        event_id VARCHAR(100),
+        alert_type VARCHAR(50) NOT NULL,
+        threshold_value DECIMAL(10, 2),
+        threshold_operator VARCHAR(10) DEFAULT 'gte',
+        is_active BOOLEAN DEFAULT true,
+        notification_channels JSONB DEFAULT '["dashboard"]',
+        last_triggered_at TIMESTAMP,
+        trigger_count INTEGER DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_alerts_user ON eventbrite_alerts(user_id);
+      CREATE INDEX IF NOT EXISTS idx_alerts_event ON eventbrite_alerts(event_id);
+      CREATE INDEX IF NOT EXISTS idx_alerts_type ON eventbrite_alerts(alert_type);
+    `);
+    console.log('Eventbrite alerts table initialized');
+
+    // Table for triggered alert notifications
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS eventbrite_alert_notifications (
+        id SERIAL PRIMARY KEY,
+        alert_id INTEGER REFERENCES eventbrite_alerts(id) ON DELETE CASCADE,
+        user_id INTEGER NOT NULL,
+        event_id VARCHAR(100),
+        alert_type VARCHAR(50) NOT NULL,
+        title VARCHAR(255) NOT NULL,
+        message TEXT,
+        data JSONB,
+        is_read BOOLEAN DEFAULT false,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_alert_notif_user ON eventbrite_alert_notifications(user_id);
+      CREATE INDEX IF NOT EXISTS idx_alert_notif_read ON eventbrite_alert_notifications(is_read);
+    `);
+    console.log('Eventbrite alert notifications table initialized');
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // FEATURE 2: Eventbrite Orders Table (Real-time orders)
+    // ═══════════════════════════════════════════════════════════════════════
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS eventbrite_orders (
+        id VARCHAR(100) PRIMARY KEY,
+        user_id INTEGER NOT NULL,
+        event_id VARCHAR(100) NOT NULL,
+        event_name VARCHAR(255),
+        buyer_name VARCHAR(255),
+        buyer_email VARCHAR(255),
+        buyer_phone VARCHAR(50),
+        status VARCHAR(50) DEFAULT 'placed',
+        costs JSONB,
+        gross_amount DECIMAL(10, 2) DEFAULT 0,
+        fees DECIMAL(10, 2) DEFAULT 0,
+        net_amount DECIMAL(10, 2) DEFAULT 0,
+        ticket_count INTEGER DEFAULT 1,
+        attendees JSONB,
+        promo_code VARCHAR(100),
+        order_date TIMESTAMP,
+        raw_data JSONB,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_eb_orders_user ON eventbrite_orders(user_id);
+      CREATE INDEX IF NOT EXISTS idx_eb_orders_event ON eventbrite_orders(event_id);
+      CREATE INDEX IF NOT EXISTS idx_eb_orders_date ON eventbrite_orders(order_date DESC);
+      CREATE INDEX IF NOT EXISTS idx_eb_orders_email ON eventbrite_orders(buyer_email);
+    `);
+    console.log('Eventbrite orders table initialized');
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // FEATURE 6: Eventbrite Promo Codes Table
+    // ═══════════════════════════════════════════════════════════════════════
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS eventbrite_promo_codes (
+        id VARCHAR(100) PRIMARY KEY,
+        user_id INTEGER NOT NULL,
+        event_id VARCHAR(100),
+        code VARCHAR(100) NOT NULL,
+        discount_type VARCHAR(20) DEFAULT 'percentage',
+        discount_value DECIMAL(10, 2) NOT NULL,
+        quantity_available INTEGER,
+        quantity_sold INTEGER DEFAULT 0,
+        start_date TIMESTAMP,
+        end_date TIMESTAMP,
+        ticket_class_ids JSONB,
+        is_active BOOLEAN DEFAULT true,
+        raw_data JSONB,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_eb_promo_user ON eventbrite_promo_codes(user_id);
+      CREATE INDEX IF NOT EXISTS idx_eb_promo_event ON eventbrite_promo_codes(event_id);
+      CREATE INDEX IF NOT EXISTS idx_eb_promo_code ON eventbrite_promo_codes(code);
+    `);
+    console.log('Eventbrite promo codes table initialized');
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // FEATURE 7: Eventbrite Attendees Table (for Check-in)
+    // ═══════════════════════════════════════════════════════════════════════
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS eventbrite_attendees (
+        id VARCHAR(100) PRIMARY KEY,
+        user_id INTEGER NOT NULL,
+        event_id VARCHAR(100) NOT NULL,
+        order_id VARCHAR(100),
+        ticket_class_id VARCHAR(100),
+        ticket_class_name VARCHAR(255),
+        name VARCHAR(255),
+        email VARCHAR(255),
+        phone VARCHAR(50),
+        status VARCHAR(50) DEFAULT 'attending',
+        checked_in BOOLEAN DEFAULT false,
+        checked_in_at TIMESTAMP,
+        checked_in_by VARCHAR(100),
+        barcode VARCHAR(255),
+        qr_code_url VARCHAR(500),
+        answers JSONB,
+        raw_data JSONB,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_eb_attendees_user ON eventbrite_attendees(user_id);
+      CREATE INDEX IF NOT EXISTS idx_eb_attendees_event ON eventbrite_attendees(event_id);
+      CREATE INDEX IF NOT EXISTS idx_eb_attendees_order ON eventbrite_attendees(order_id);
+      CREATE INDEX IF NOT EXISTS idx_eb_attendees_barcode ON eventbrite_attendees(barcode);
+      CREATE INDEX IF NOT EXISTS idx_eb_attendees_checkin ON eventbrite_attendees(checked_in);
+    `);
+    console.log('Eventbrite attendees table initialized');
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // FEATURE 10: Eventbrite Refunds Table
+    // ═══════════════════════════════════════════════════════════════════════
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS eventbrite_refunds (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL,
+        order_id VARCHAR(100) NOT NULL,
+        event_id VARCHAR(100),
+        attendee_ids JSONB,
+        reason VARCHAR(255),
+        amount DECIMAL(10, 2),
+        status VARCHAR(50) DEFAULT 'pending',
+        eventbrite_refund_id VARCHAR(100),
+        processed_at TIMESTAMP,
+        processed_by VARCHAR(100),
+        raw_data JSONB,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_eb_refunds_user ON eventbrite_refunds(user_id);
+      CREATE INDEX IF NOT EXISTS idx_eb_refunds_order ON eventbrite_refunds(order_id);
+      CREATE INDEX IF NOT EXISTS idx_eb_refunds_event ON eventbrite_refunds(event_id);
+    `);
+    console.log('Eventbrite refunds table initialized');
+
     dbInitStatus.completed = true;
     console.log('Database tables initialized successfully (guests, email_events, tickets, activity_log, sponsors, events, budgets, vendors, staff, contracts, client_access, integrations, promoters, file_uploads)');
   } catch (error) {
@@ -12774,6 +12934,2061 @@ app.get('/api/v1/integrations/eventbrite/auto-sync/status', (req, res) => {
     running: autoSyncInterval !== null,
     message: autoSyncInterval ? 'Auto-sync is running' : 'Auto-sync is not running'
   });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// FEATURE 1: EVENTBRITE ALERTS - Intelligent Notifications
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// GET /api/v1/integrations/eventbrite/alerts - Get all alerts for user
+app.get('/api/v1/integrations/eventbrite/alerts', async (req, res) => {
+  try {
+    const userId = req.headers['x-user-id'] || 1;
+    const { event_id, is_active } = req.query;
+
+    let query = 'SELECT * FROM eventbrite_alerts WHERE user_id = $1';
+    const params = [userId];
+    let paramIndex = 2;
+
+    if (event_id) {
+      query += ` AND (event_id = $${paramIndex++} OR event_id IS NULL)`;
+      params.push(event_id);
+    }
+
+    if (is_active !== undefined) {
+      query += ` AND is_active = $${paramIndex++}`;
+      params.push(is_active === 'true');
+    }
+
+    query += ' ORDER BY created_at DESC';
+
+    const result = await pool.query(query, params);
+    res.json({ alerts: result.rows });
+  } catch (error) {
+    console.error('Error fetching alerts:', error);
+    res.status(500).json({ error: 'Failed to fetch alerts' });
+  }
+});
+
+// POST /api/v1/integrations/eventbrite/alerts - Create a new alert
+app.post('/api/v1/integrations/eventbrite/alerts', async (req, res) => {
+  try {
+    const userId = req.headers['x-user-id'] || 1;
+    const {
+      event_id,
+      alert_type,
+      threshold_value,
+      threshold_operator = 'gte',
+      notification_channels = ['dashboard']
+    } = req.body;
+
+    // Validate alert_type
+    const validTypes = [
+      'sales_spike',           // Sudden increase in sales
+      'sales_milestone',       // Reached X tickets sold
+      'revenue_milestone',     // Reached $X revenue
+      'low_inventory',         // Less than X tickets remaining
+      'sellout_warning',       // 90%+ capacity
+      'new_order',             // Every new order
+      'refund',                // Any refund processed
+      'check_in_milestone',    // X people checked in
+      'conversion_drop',       // Conversion rate dropped below X%
+      'daily_summary'          // Daily sales summary
+    ];
+
+    if (!validTypes.includes(alert_type)) {
+      return res.status(400).json({
+        error: 'Invalid alert_type',
+        valid_types: validTypes
+      });
+    }
+
+    const result = await pool.query(`
+      INSERT INTO eventbrite_alerts (
+        user_id, event_id, alert_type, threshold_value,
+        threshold_operator, notification_channels
+      ) VALUES ($1, $2, $3, $4, $5, $6)
+      RETURNING *
+    `, [userId, event_id, alert_type, threshold_value, threshold_operator, JSON.stringify(notification_channels)]);
+
+    res.json({ success: true, alert: result.rows[0] });
+  } catch (error) {
+    console.error('Error creating alert:', error);
+    res.status(500).json({ error: 'Failed to create alert' });
+  }
+});
+
+// PUT /api/v1/integrations/eventbrite/alerts/:id - Update an alert
+app.put('/api/v1/integrations/eventbrite/alerts/:id', async (req, res) => {
+  try {
+    const userId = req.headers['x-user-id'] || 1;
+    const { id } = req.params;
+    const { is_active, threshold_value, threshold_operator, notification_channels } = req.body;
+
+    const updates = [];
+    const params = [id, userId];
+    let paramIndex = 3;
+
+    if (is_active !== undefined) {
+      updates.push(`is_active = $${paramIndex++}`);
+      params.push(is_active);
+    }
+    if (threshold_value !== undefined) {
+      updates.push(`threshold_value = $${paramIndex++}`);
+      params.push(threshold_value);
+    }
+    if (threshold_operator !== undefined) {
+      updates.push(`threshold_operator = $${paramIndex++}`);
+      params.push(threshold_operator);
+    }
+    if (notification_channels !== undefined) {
+      updates.push(`notification_channels = $${paramIndex++}`);
+      params.push(JSON.stringify(notification_channels));
+    }
+
+    if (updates.length === 0) {
+      return res.status(400).json({ error: 'No fields to update' });
+    }
+
+    updates.push('updated_at = CURRENT_TIMESTAMP');
+
+    const result = await pool.query(`
+      UPDATE eventbrite_alerts
+      SET ${updates.join(', ')}
+      WHERE id = $1 AND user_id = $2
+      RETURNING *
+    `, params);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Alert not found' });
+    }
+
+    res.json({ success: true, alert: result.rows[0] });
+  } catch (error) {
+    console.error('Error updating alert:', error);
+    res.status(500).json({ error: 'Failed to update alert' });
+  }
+});
+
+// DELETE /api/v1/integrations/eventbrite/alerts/:id - Delete an alert
+app.delete('/api/v1/integrations/eventbrite/alerts/:id', async (req, res) => {
+  try {
+    const userId = req.headers['x-user-id'] || 1;
+    const { id } = req.params;
+
+    const result = await pool.query(
+      'DELETE FROM eventbrite_alerts WHERE id = $1 AND user_id = $2 RETURNING id',
+      [id, userId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Alert not found' });
+    }
+
+    res.json({ success: true, deleted_id: id });
+  } catch (error) {
+    console.error('Error deleting alert:', error);
+    res.status(500).json({ error: 'Failed to delete alert' });
+  }
+});
+
+// GET /api/v1/integrations/eventbrite/notifications - Get alert notifications
+app.get('/api/v1/integrations/eventbrite/notifications', async (req, res) => {
+  try {
+    const userId = req.headers['x-user-id'] || 1;
+    const { is_read, limit = 50, offset = 0 } = req.query;
+
+    let query = 'SELECT * FROM eventbrite_alert_notifications WHERE user_id = $1';
+    const params = [userId];
+    let paramIndex = 2;
+
+    if (is_read !== undefined) {
+      query += ` AND is_read = $${paramIndex++}`;
+      params.push(is_read === 'true');
+    }
+
+    query += ` ORDER BY created_at DESC LIMIT $${paramIndex++} OFFSET $${paramIndex++}`;
+    params.push(parseInt(limit), parseInt(offset));
+
+    const result = await pool.query(query, params);
+
+    // Get unread count
+    const unreadResult = await pool.query(
+      'SELECT COUNT(*) as count FROM eventbrite_alert_notifications WHERE user_id = $1 AND is_read = false',
+      [userId]
+    );
+
+    res.json({
+      notifications: result.rows,
+      unread_count: parseInt(unreadResult.rows[0].count)
+    });
+  } catch (error) {
+    console.error('Error fetching notifications:', error);
+    res.status(500).json({ error: 'Failed to fetch notifications' });
+  }
+});
+
+// PUT /api/v1/integrations/eventbrite/notifications/read - Mark notifications as read
+app.put('/api/v1/integrations/eventbrite/notifications/read', async (req, res) => {
+  try {
+    const userId = req.headers['x-user-id'] || 1;
+    const { notification_ids, mark_all = false } = req.body;
+
+    if (mark_all) {
+      await pool.query(
+        'UPDATE eventbrite_alert_notifications SET is_read = true WHERE user_id = $1',
+        [userId]
+      );
+    } else if (notification_ids && notification_ids.length > 0) {
+      await pool.query(
+        'UPDATE eventbrite_alert_notifications SET is_read = true WHERE user_id = $1 AND id = ANY($2)',
+        [userId, notification_ids]
+      );
+    }
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error marking notifications as read:', error);
+    res.status(500).json({ error: 'Failed to mark notifications as read' });
+  }
+});
+
+// POST /api/v1/integrations/eventbrite/alerts/trigger - Manually trigger alert check
+app.post('/api/v1/integrations/eventbrite/alerts/trigger', async (req, res) => {
+  try {
+    const userId = req.headers['x-user-id'] || 1;
+    const triggeredAlerts = [];
+
+    // Get user's active alerts
+    const alertsResult = await pool.query(
+      'SELECT * FROM eventbrite_alerts WHERE user_id = $1 AND is_active = true',
+      [userId]
+    );
+
+    // Get current metrics for comparison
+    const eventsResult = await pool.query(
+      'SELECT * FROM events WHERE user_id = $1 AND eventbrite_id IS NOT NULL',
+      [userId]
+    );
+
+    for (const alert of alertsResult.rows) {
+      let shouldTrigger = false;
+      let notificationData = {};
+
+      switch (alert.alert_type) {
+        case 'sales_milestone': {
+          // Check if total tickets sold reached threshold
+          const ticketsResult = await pool.query(
+            'SELECT COALESCE(SUM(ticket_count), 0) as total FROM eventbrite_orders WHERE user_id = $1',
+            [userId]
+          );
+          const totalSold = parseInt(ticketsResult.rows[0].total);
+          if (totalSold >= alert.threshold_value) {
+            shouldTrigger = true;
+            notificationData = { total_sold: totalSold, threshold: alert.threshold_value };
+          }
+          break;
+        }
+        case 'revenue_milestone': {
+          // Check if total revenue reached threshold
+          const revenueResult = await pool.query(
+            'SELECT COALESCE(SUM(net_amount), 0) as total FROM eventbrite_orders WHERE user_id = $1',
+            [userId]
+          );
+          const totalRevenue = parseFloat(revenueResult.rows[0].total);
+          if (totalRevenue >= alert.threshold_value) {
+            shouldTrigger = true;
+            notificationData = { total_revenue: totalRevenue, threshold: alert.threshold_value };
+          }
+          break;
+        }
+        case 'low_inventory': {
+          // Check if any event has low inventory
+          for (const event of eventsResult.rows) {
+            const capacity = event.eventbrite_capacity || event.expected_attendance || 1000;
+            const soldResult = await pool.query(
+              'SELECT COALESCE(SUM(ticket_count), 0) as total FROM eventbrite_orders WHERE event_id = $1',
+              [event.eventbrite_id]
+            );
+            const sold = parseInt(soldResult.rows[0].total);
+            const remaining = capacity - sold;
+            if (remaining <= alert.threshold_value && remaining > 0) {
+              shouldTrigger = true;
+              notificationData = { event_name: event.name, remaining, capacity };
+              break;
+            }
+          }
+          break;
+        }
+        case 'sellout_warning': {
+          // Check if any event is close to selling out
+          for (const event of eventsResult.rows) {
+            const capacity = event.eventbrite_capacity || event.expected_attendance || 1000;
+            const soldResult = await pool.query(
+              'SELECT COALESCE(SUM(ticket_count), 0) as total FROM eventbrite_orders WHERE event_id = $1',
+              [event.eventbrite_id]
+            );
+            const sold = parseInt(soldResult.rows[0].total);
+            const percentSold = (sold / capacity) * 100;
+            if (percentSold >= (alert.threshold_value || 90)) {
+              shouldTrigger = true;
+              notificationData = { event_name: event.name, percent_sold: percentSold.toFixed(1), sold, capacity };
+              break;
+            }
+          }
+          break;
+        }
+      }
+
+      if (shouldTrigger) {
+        // Create notification
+        const title = getAlertTitle(alert.alert_type, notificationData);
+        const message = getAlertMessage(alert.alert_type, notificationData);
+
+        await pool.query(`
+          INSERT INTO eventbrite_alert_notifications (
+            alert_id, user_id, event_id, alert_type, title, message, data
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+        `, [alert.id, userId, alert.event_id, alert.alert_type, title, message, JSON.stringify(notificationData)]);
+
+        // Update alert trigger count
+        await pool.query(`
+          UPDATE eventbrite_alerts
+          SET trigger_count = trigger_count + 1, last_triggered_at = CURRENT_TIMESTAMP
+          WHERE id = $1
+        `, [alert.id]);
+
+        triggeredAlerts.push({ alert_type: alert.alert_type, title, message, data: notificationData });
+      }
+    }
+
+    res.json({
+      success: true,
+      triggered_count: triggeredAlerts.length,
+      triggered_alerts: triggeredAlerts
+    });
+  } catch (error) {
+    console.error('Error triggering alerts:', error);
+    res.status(500).json({ error: 'Failed to trigger alerts' });
+  }
+});
+
+// Helper functions for alert messages
+function getAlertTitle(alertType, data) {
+  switch (alertType) {
+    case 'sales_milestone': return `🎉 Sales Milestone: ${data.total_sold} tickets sold!`;
+    case 'revenue_milestone': return `💰 Revenue Milestone: $${data.total_revenue.toLocaleString()}!`;
+    case 'low_inventory': return `⚠️ Low Inventory: ${data.remaining} tickets left`;
+    case 'sellout_warning': return `🔥 Almost Sold Out: ${data.percent_sold}%`;
+    case 'new_order': return `🎟️ New Order Received`;
+    case 'refund': return `↩️ Refund Processed`;
+    case 'check_in_milestone': return `✅ Check-in Milestone Reached`;
+    case 'sales_spike': return `📈 Sales Spike Detected!`;
+    case 'conversion_drop': return `📉 Conversion Rate Alert`;
+    case 'daily_summary': return `📊 Daily Sales Summary`;
+    default: return `📢 Alert: ${alertType}`;
+  }
+}
+
+function getAlertMessage(alertType, data) {
+  switch (alertType) {
+    case 'sales_milestone': return `Congratulations! You've sold ${data.total_sold} tickets, reaching your milestone of ${data.threshold}.`;
+    case 'revenue_milestone': return `Amazing! Total revenue has reached $${data.total_revenue.toLocaleString()}, surpassing your $${data.threshold.toLocaleString()} goal.`;
+    case 'low_inventory': return `${data.event_name} has only ${data.remaining} tickets remaining out of ${data.capacity} capacity.`;
+    case 'sellout_warning': return `${data.event_name} is ${data.percent_sold}% sold (${data.sold}/${data.capacity}). Consider increasing capacity or closing sales soon.`;
+    case 'new_order': return data.buyer_name ? `${data.buyer_name} just purchased ${data.ticket_count} ticket(s) for $${data.amount}.` : 'A new order has been placed.';
+    case 'refund': return `A refund of $${data.amount} has been processed for order ${data.order_id}.`;
+    default: return `Alert triggered for ${alertType}`;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// FEATURE 2: EVENTBRITE ORDERS - Real-time Order Feed
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// GET /api/v1/integrations/eventbrite/orders - Get Eventbrite orders with filtering
+app.get('/api/v1/integrations/eventbrite/orders', async (req, res) => {
+  try {
+    const userId = req.headers['x-user-id'] || 1;
+    const { event_id, status, limit = 50, offset = 0, sort = 'order_date', order = 'DESC' } = req.query;
+
+    let query = 'SELECT * FROM eventbrite_orders WHERE user_id = $1';
+    const params = [userId];
+    let paramIndex = 2;
+
+    if (event_id) {
+      query += ` AND event_id = $${paramIndex++}`;
+      params.push(event_id);
+    }
+
+    if (status) {
+      query += ` AND status = $${paramIndex++}`;
+      params.push(status);
+    }
+
+    // Validate sort column
+    const validSortCols = ['order_date', 'gross_amount', 'created_at', 'buyer_name'];
+    const sortCol = validSortCols.includes(sort) ? sort : 'order_date';
+    const sortOrder = order.toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
+
+    query += ` ORDER BY ${sortCol} ${sortOrder} LIMIT $${paramIndex++} OFFSET $${paramIndex++}`;
+    params.push(parseInt(limit), parseInt(offset));
+
+    const result = await pool.query(query, params);
+
+    // Get total count
+    let countQuery = 'SELECT COUNT(*) as total FROM eventbrite_orders WHERE user_id = $1';
+    const countParams = [userId];
+    if (event_id) {
+      countQuery += ' AND event_id = $2';
+      countParams.push(event_id);
+    }
+    const countResult = await pool.query(countQuery, countParams);
+
+    // Get stats
+    const statsResult = await pool.query(`
+      SELECT
+        COUNT(*) as total_orders,
+        COALESCE(SUM(ticket_count), 0) as total_tickets,
+        COALESCE(SUM(gross_amount), 0) as gross_revenue,
+        COALESCE(SUM(fees), 0) as total_fees,
+        COALESCE(SUM(net_amount), 0) as net_revenue,
+        COUNT(DISTINCT buyer_email) as unique_buyers
+      FROM eventbrite_orders WHERE user_id = $1
+    `, [userId]);
+
+    res.json({
+      orders: result.rows,
+      total: parseInt(countResult.rows[0].total),
+      stats: {
+        total_orders: parseInt(statsResult.rows[0].total_orders),
+        total_tickets: parseInt(statsResult.rows[0].total_tickets),
+        gross_revenue: parseFloat(statsResult.rows[0].gross_revenue),
+        total_fees: parseFloat(statsResult.rows[0].total_fees),
+        net_revenue: parseFloat(statsResult.rows[0].net_revenue),
+        unique_buyers: parseInt(statsResult.rows[0].unique_buyers)
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching Eventbrite orders:', error);
+    res.status(500).json({ error: 'Failed to fetch orders' });
+  }
+});
+
+// GET /api/v1/integrations/eventbrite/orders/recent - Get most recent orders (for live feed)
+app.get('/api/v1/integrations/eventbrite/orders/recent', async (req, res) => {
+  try {
+    const userId = req.headers['x-user-id'] || 1;
+    const { limit = 10, since } = req.query;
+
+    let query = 'SELECT * FROM eventbrite_orders WHERE user_id = $1';
+    const params = [userId];
+    let paramIndex = 2;
+
+    if (since) {
+      query += ` AND order_date > $${paramIndex++}`;
+      params.push(since);
+    }
+
+    query += ` ORDER BY order_date DESC LIMIT $${paramIndex++}`;
+    params.push(parseInt(limit));
+
+    const result = await pool.query(query, params);
+
+    res.json({
+      orders: result.rows,
+      count: result.rows.length,
+      latest_order_date: result.rows[0]?.order_date || null
+    });
+  } catch (error) {
+    console.error('Error fetching recent orders:', error);
+    res.status(500).json({ error: 'Failed to fetch recent orders' });
+  }
+});
+
+// GET /api/v1/integrations/eventbrite/orders/:id - Get single order details
+app.get('/api/v1/integrations/eventbrite/orders/:id', async (req, res) => {
+  try {
+    const userId = req.headers['x-user-id'] || 1;
+    const { id } = req.params;
+
+    const result = await pool.query(
+      'SELECT * FROM eventbrite_orders WHERE id = $1 AND user_id = $2',
+      [id, userId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Order not found' });
+    }
+
+    // Get attendees for this order
+    const attendeesResult = await pool.query(
+      'SELECT * FROM eventbrite_attendees WHERE order_id = $1',
+      [id]
+    );
+
+    res.json({
+      order: result.rows[0],
+      attendees: attendeesResult.rows
+    });
+  } catch (error) {
+    console.error('Error fetching order:', error);
+    res.status(500).json({ error: 'Failed to fetch order' });
+  }
+});
+
+// POST /api/v1/integrations/eventbrite/orders/sync - Sync orders from Eventbrite API
+app.post('/api/v1/integrations/eventbrite/orders/sync', async (req, res) => {
+  try {
+    const userId = req.headers['x-user-id'] || 1;
+    const { event_id, since_date } = req.body;
+
+    // Get API key
+    const apiKey = await getEventbriteApiKey(userId);
+    if (!apiKey) {
+      return res.status(400).json({ error: 'Eventbrite not connected' });
+    }
+
+    // Get org ID
+    const orgResult = await pool.query(
+      "SELECT metadata->>'organization_id' as org_id FROM user_integrations WHERE user_id = $1 AND provider = 'eventbrite'",
+      [userId]
+    );
+    const orgId = orgResult.rows[0]?.org_id;
+    if (!orgId) {
+      return res.status(400).json({ error: 'Organization not found' });
+    }
+
+    let ordersUrl = `https://www.eventbriteapi.com/v3/organizations/${orgId}/orders/?expand=attendees,event`;
+    if (event_id) {
+      ordersUrl = `https://www.eventbriteapi.com/v3/events/${event_id}/orders/?expand=attendees`;
+    }
+    if (since_date) {
+      ordersUrl += `&changed_since=${since_date}`;
+    }
+
+    const response = await fetch(ordersUrl, {
+      headers: { 'Authorization': `Bearer ${apiKey}` }
+    });
+
+    if (!response.ok) {
+      throw new Error(`Eventbrite API error: ${response.status}`);
+    }
+
+    const data = await response.json();
+    const orders = data.orders || [];
+    let synced = 0, created = 0, updated = 0;
+
+    for (const order of orders) {
+      const eventName = order.event?.name?.text || '';
+      const grossAmount = order.costs?.gross?.major_value || 0;
+      const fees = order.costs?.eventbrite_fee?.major_value || 0;
+      const netAmount = grossAmount - fees;
+
+      const existing = await pool.query('SELECT id FROM eventbrite_orders WHERE id = $1', [order.id]);
+
+      if (existing.rows.length > 0) {
+        await pool.query(`
+          UPDATE eventbrite_orders SET
+            status = $1, costs = $2, gross_amount = $3, fees = $4, net_amount = $5,
+            ticket_count = $6, attendees = $7, updated_at = CURRENT_TIMESTAMP
+          WHERE id = $8
+        `, [
+          order.status, JSON.stringify(order.costs), grossAmount, fees, netAmount,
+          order.attendees?.length || 1, JSON.stringify(order.attendees), order.id
+        ]);
+        updated++;
+      } else {
+        await pool.query(`
+          INSERT INTO eventbrite_orders (
+            id, user_id, event_id, event_name, buyer_name, buyer_email,
+            status, costs, gross_amount, fees, net_amount, ticket_count,
+            attendees, order_date, raw_data
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+        `, [
+          order.id, userId, order.event_id, eventName,
+          order.name || '', order.email || '', order.status,
+          JSON.stringify(order.costs), grossAmount, fees, netAmount,
+          order.attendees?.length || 1, JSON.stringify(order.attendees),
+          order.created, JSON.stringify(order)
+        ]);
+        created++;
+
+        // Trigger new_order alert
+        await triggerOrderAlert(userId, order, eventName, grossAmount);
+      }
+      synced++;
+    }
+
+    // Log sync
+    await pool.query(`
+      INSERT INTO eventbrite_sync_log (user_id, sync_type, items_synced, items_created, items_updated, status, completed_at)
+      VALUES ($1, 'orders', $2, $3, $4, 'completed', CURRENT_TIMESTAMP)
+    `, [userId, synced, created, updated]);
+
+    res.json({
+      success: true,
+      synced,
+      created,
+      updated,
+      message: `Synced ${synced} orders (${created} new, ${updated} updated)`
+    });
+  } catch (error) {
+    console.error('Error syncing orders:', error);
+    res.status(500).json({ error: 'Failed to sync orders' });
+  }
+});
+
+// Helper to trigger order alerts
+async function triggerOrderAlert(userId, order, eventName, amount) {
+  try {
+    // Check if user has new_order alerts enabled
+    const alertResult = await pool.query(
+      "SELECT * FROM eventbrite_alerts WHERE user_id = $1 AND alert_type = 'new_order' AND is_active = true",
+      [userId]
+    );
+
+    for (const alert of alertResult.rows) {
+      const title = '🎟️ New Order Received';
+      const message = `${order.name || 'A buyer'} just purchased ${order.attendees?.length || 1} ticket(s) for ${eventName}${amount ? ` ($${amount})` : ''}.`;
+
+      await pool.query(`
+        INSERT INTO eventbrite_alert_notifications (
+          alert_id, user_id, event_id, alert_type, title, message, data
+        ) VALUES ($1, $2, $3, 'new_order', $4, $5, $6)
+      `, [alert.id, userId, order.event_id, title, message, JSON.stringify({
+        order_id: order.id,
+        buyer_name: order.name,
+        buyer_email: order.email,
+        ticket_count: order.attendees?.length || 1,
+        amount: amount,
+        event_name: eventName
+      })]);
+
+      await pool.query(
+        'UPDATE eventbrite_alerts SET trigger_count = trigger_count + 1, last_triggered_at = CURRENT_TIMESTAMP WHERE id = $1',
+        [alert.id]
+      );
+    }
+  } catch (error) {
+    console.error('Error triggering order alert:', error);
+  }
+}
+
+// GET /api/v1/integrations/eventbrite/orders/stats/daily - Get daily order stats
+app.get('/api/v1/integrations/eventbrite/orders/stats/daily', async (req, res) => {
+  try {
+    const userId = req.headers['x-user-id'] || 1;
+    const { days = 30, event_id } = req.query;
+
+    let query = `
+      SELECT
+        DATE(order_date) as date,
+        COUNT(*) as orders,
+        COALESCE(SUM(ticket_count), 0) as tickets,
+        COALESCE(SUM(gross_amount), 0) as gross,
+        COALESCE(SUM(net_amount), 0) as net
+      FROM eventbrite_orders
+      WHERE user_id = $1 AND order_date >= CURRENT_DATE - INTERVAL '${parseInt(days)} days'
+    `;
+    const params = [userId];
+
+    if (event_id) {
+      query += ' AND event_id = $2';
+      params.push(event_id);
+    }
+
+    query += ' GROUP BY DATE(order_date) ORDER BY date ASC';
+
+    const result = await pool.query(query, params);
+
+    res.json({
+      daily_stats: result.rows,
+      period_days: parseInt(days)
+    });
+  } catch (error) {
+    console.error('Error fetching daily stats:', error);
+    res.status(500).json({ error: 'Failed to fetch daily stats' });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// FEATURE 6: EVENTBRITE PROMO CODES
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// GET /api/v1/integrations/eventbrite/promo-codes - Get all promo codes
+app.get('/api/v1/integrations/eventbrite/promo-codes', async (req, res) => {
+  try {
+    const userId = req.headers['x-user-id'] || 1;
+    const { event_id, is_active } = req.query;
+
+    let query = 'SELECT * FROM eventbrite_promo_codes WHERE user_id = $1';
+    const params = [userId];
+    let paramIndex = 2;
+
+    if (event_id) {
+      query += ` AND event_id = $${paramIndex++}`;
+      params.push(event_id);
+    }
+
+    if (is_active !== undefined) {
+      query += ` AND is_active = $${paramIndex++}`;
+      params.push(is_active === 'true');
+    }
+
+    query += ' ORDER BY created_at DESC';
+
+    const result = await pool.query(query, params);
+    res.json({ promo_codes: result.rows });
+  } catch (error) {
+    console.error('Error fetching promo codes:', error);
+    res.status(500).json({ error: 'Failed to fetch promo codes' });
+  }
+});
+
+// POST /api/v1/integrations/eventbrite/promo-codes - Create promo code via Eventbrite API
+app.post('/api/v1/integrations/eventbrite/promo-codes', async (req, res) => {
+  try {
+    const userId = req.headers['x-user-id'] || 1;
+    const {
+      event_id,
+      code,
+      discount_type = 'percentage',
+      discount_value,
+      quantity_available,
+      start_date,
+      end_date,
+      ticket_class_ids
+    } = req.body;
+
+    if (!event_id || !code || !discount_value) {
+      return res.status(400).json({ error: 'event_id, code, and discount_value are required' });
+    }
+
+    // Get API key
+    const apiKey = await getEventbriteApiKey(userId);
+    if (!apiKey) {
+      return res.status(400).json({ error: 'Eventbrite not connected' });
+    }
+
+    // Create discount on Eventbrite
+    const discountData = {
+      discount: {
+        code: code.toUpperCase(),
+        type: discount_type === 'percentage' ? 'coded' : 'coded',
+        amount_off: discount_type === 'fixed' ? discount_value.toString() : undefined,
+        percent_off: discount_type === 'percentage' ? discount_value.toString() : undefined,
+        event_id: event_id,
+        quantity_available: quantity_available || undefined,
+        start_date: start_date || undefined,
+        end_date: end_date || undefined,
+        ticket_class_ids: ticket_class_ids || undefined
+      }
+    };
+
+    const response = await fetch(`https://www.eventbriteapi.com/v3/organizations/me/discounts/`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(discountData)
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      return res.status(response.status).json({
+        error: 'Failed to create promo code on Eventbrite',
+        details: errorData
+      });
+    }
+
+    const ebPromo = await response.json();
+
+    // Save to database
+    const result = await pool.query(`
+      INSERT INTO eventbrite_promo_codes (
+        id, user_id, event_id, code, discount_type, discount_value,
+        quantity_available, start_date, end_date, ticket_class_ids, raw_data
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+      RETURNING *
+    `, [
+      ebPromo.id, userId, event_id, code.toUpperCase(), discount_type, discount_value,
+      quantity_available, start_date, end_date, JSON.stringify(ticket_class_ids), JSON.stringify(ebPromo)
+    ]);
+
+    res.json({ success: true, promo_code: result.rows[0] });
+  } catch (error) {
+    console.error('Error creating promo code:', error);
+    res.status(500).json({ error: 'Failed to create promo code' });
+  }
+});
+
+// DELETE /api/v1/integrations/eventbrite/promo-codes/:id - Delete promo code
+app.delete('/api/v1/integrations/eventbrite/promo-codes/:id', async (req, res) => {
+  try {
+    const userId = req.headers['x-user-id'] || 1;
+    const { id } = req.params;
+
+    // Get API key
+    const apiKey = await getEventbriteApiKey(userId);
+    if (!apiKey) {
+      return res.status(400).json({ error: 'Eventbrite not connected' });
+    }
+
+    // Delete on Eventbrite
+    const response = await fetch(`https://www.eventbriteapi.com/v3/discounts/${id}/`, {
+      method: 'DELETE',
+      headers: { 'Authorization': `Bearer ${apiKey}` }
+    });
+
+    // Delete from local database regardless of Eventbrite response
+    await pool.query(
+      'DELETE FROM eventbrite_promo_codes WHERE id = $1 AND user_id = $2',
+      [id, userId]
+    );
+
+    res.json({ success: true, deleted_id: id });
+  } catch (error) {
+    console.error('Error deleting promo code:', error);
+    res.status(500).json({ error: 'Failed to delete promo code' });
+  }
+});
+
+// POST /api/v1/integrations/eventbrite/promo-codes/sync - Sync promo codes from Eventbrite
+app.post('/api/v1/integrations/eventbrite/promo-codes/sync', async (req, res) => {
+  try {
+    const userId = req.headers['x-user-id'] || 1;
+
+    const apiKey = await getEventbriteApiKey(userId);
+    if (!apiKey) {
+      return res.status(400).json({ error: 'Eventbrite not connected' });
+    }
+
+    const orgResult = await pool.query(
+      "SELECT metadata->>'organization_id' as org_id FROM user_integrations WHERE user_id = $1 AND provider = 'eventbrite'",
+      [userId]
+    );
+    const orgId = orgResult.rows[0]?.org_id;
+
+    const response = await fetch(`https://www.eventbriteapi.com/v3/organizations/${orgId}/discounts/`, {
+      headers: { 'Authorization': `Bearer ${apiKey}` }
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch discounts');
+
+    const data = await response.json();
+    const discounts = data.discounts || [];
+    let synced = 0;
+
+    for (const discount of discounts) {
+      const existing = await pool.query('SELECT id FROM eventbrite_promo_codes WHERE id = $1', [discount.id]);
+
+      if (existing.rows.length > 0) {
+        await pool.query(`
+          UPDATE eventbrite_promo_codes SET
+            quantity_sold = $1, is_active = $2, updated_at = CURRENT_TIMESTAMP
+          WHERE id = $3
+        `, [discount.quantity_sold || 0, discount.status === 'active', discount.id]);
+      } else {
+        await pool.query(`
+          INSERT INTO eventbrite_promo_codes (
+            id, user_id, event_id, code, discount_type, discount_value,
+            quantity_available, quantity_sold, is_active, raw_data
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        `, [
+          discount.id, userId, discount.event_id, discount.code,
+          discount.percent_off ? 'percentage' : 'fixed',
+          discount.percent_off || discount.amount_off || 0,
+          discount.quantity_available, discount.quantity_sold || 0,
+          discount.status === 'active', JSON.stringify(discount)
+        ]);
+      }
+      synced++;
+    }
+
+    res.json({ success: true, synced });
+  } catch (error) {
+    console.error('Error syncing promo codes:', error);
+    res.status(500).json({ error: 'Failed to sync promo codes' });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// FEATURE 7: EVENTBRITE ATTENDEES & CHECK-IN
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// GET /api/v1/integrations/eventbrite/attendees - Get attendees with filtering
+app.get('/api/v1/integrations/eventbrite/attendees', async (req, res) => {
+  try {
+    const userId = req.headers['x-user-id'] || 1;
+    const { event_id, checked_in, search, limit = 100, offset = 0 } = req.query;
+
+    let query = 'SELECT * FROM eventbrite_attendees WHERE user_id = $1';
+    const params = [userId];
+    let paramIndex = 2;
+
+    if (event_id) {
+      query += ` AND event_id = $${paramIndex++}`;
+      params.push(event_id);
+    }
+
+    if (checked_in !== undefined) {
+      query += ` AND checked_in = $${paramIndex++}`;
+      params.push(checked_in === 'true');
+    }
+
+    if (search) {
+      query += ` AND (name ILIKE $${paramIndex} OR email ILIKE $${paramIndex})`;
+      params.push(`%${search}%`);
+      paramIndex++;
+    }
+
+    query += ` ORDER BY name ASC LIMIT $${paramIndex++} OFFSET $${paramIndex++}`;
+    params.push(parseInt(limit), parseInt(offset));
+
+    const result = await pool.query(query, params);
+
+    // Get stats
+    const statsResult = await pool.query(`
+      SELECT
+        COUNT(*) as total,
+        COUNT(*) FILTER (WHERE checked_in = true) as checked_in,
+        COUNT(*) FILTER (WHERE checked_in = false) as not_checked_in
+      FROM eventbrite_attendees WHERE user_id = $1 ${event_id ? 'AND event_id = $2' : ''}
+    `, event_id ? [userId, event_id] : [userId]);
+
+    res.json({
+      attendees: result.rows,
+      stats: statsResult.rows[0]
+    });
+  } catch (error) {
+    console.error('Error fetching attendees:', error);
+    res.status(500).json({ error: 'Failed to fetch attendees' });
+  }
+});
+
+// POST /api/v1/integrations/eventbrite/attendees/:id/check-in - Check in an attendee
+app.post('/api/v1/integrations/eventbrite/attendees/:id/check-in', async (req, res) => {
+  try {
+    const userId = req.headers['x-user-id'] || 1;
+    const { id } = req.params;
+    const { checked_in_by } = req.body;
+
+    // Update local database
+    const result = await pool.query(`
+      UPDATE eventbrite_attendees
+      SET checked_in = true, checked_in_at = CURRENT_TIMESTAMP, checked_in_by = $1, updated_at = CURRENT_TIMESTAMP
+      WHERE id = $2 AND user_id = $3
+      RETURNING *
+    `, [checked_in_by || 'dashboard', id, userId]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Attendee not found' });
+    }
+
+    // Also update on Eventbrite if possible
+    const apiKey = await getEventbriteApiKey(userId);
+    if (apiKey) {
+      try {
+        await fetch(`https://www.eventbriteapi.com/v3/events/${result.rows[0].event_id}/attendees/${id}/`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${apiKey}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ attendee: { checked_in: true } })
+        });
+      } catch (ebError) {
+        console.warn('Could not sync check-in to Eventbrite:', ebError.message);
+      }
+    }
+
+    res.json({ success: true, attendee: result.rows[0] });
+  } catch (error) {
+    console.error('Error checking in attendee:', error);
+    res.status(500).json({ error: 'Failed to check in attendee' });
+  }
+});
+
+// POST /api/v1/integrations/eventbrite/attendees/:id/undo-check-in - Undo check-in
+app.post('/api/v1/integrations/eventbrite/attendees/:id/undo-check-in', async (req, res) => {
+  try {
+    const userId = req.headers['x-user-id'] || 1;
+    const { id } = req.params;
+
+    const result = await pool.query(`
+      UPDATE eventbrite_attendees
+      SET checked_in = false, checked_in_at = NULL, checked_in_by = NULL, updated_at = CURRENT_TIMESTAMP
+      WHERE id = $1 AND user_id = $2
+      RETURNING *
+    `, [id, userId]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Attendee not found' });
+    }
+
+    res.json({ success: true, attendee: result.rows[0] });
+  } catch (error) {
+    console.error('Error undoing check-in:', error);
+    res.status(500).json({ error: 'Failed to undo check-in' });
+  }
+});
+
+// POST /api/v1/integrations/eventbrite/attendees/check-in-by-barcode - Check in by barcode scan
+app.post('/api/v1/integrations/eventbrite/attendees/check-in-by-barcode', async (req, res) => {
+  try {
+    const userId = req.headers['x-user-id'] || 1;
+    const { barcode, event_id, checked_in_by } = req.body;
+
+    if (!barcode) {
+      return res.status(400).json({ error: 'Barcode is required' });
+    }
+
+    let query = 'SELECT * FROM eventbrite_attendees WHERE user_id = $1 AND barcode = $2';
+    const params = [userId, barcode];
+
+    if (event_id) {
+      query += ' AND event_id = $3';
+      params.push(event_id);
+    }
+
+    const findResult = await pool.query(query, params);
+
+    if (findResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Attendee not found with this barcode' });
+    }
+
+    const attendee = findResult.rows[0];
+
+    if (attendee.checked_in) {
+      return res.status(400).json({
+        error: 'Already checked in',
+        attendee,
+        checked_in_at: attendee.checked_in_at
+      });
+    }
+
+    // Check in
+    const result = await pool.query(`
+      UPDATE eventbrite_attendees
+      SET checked_in = true, checked_in_at = CURRENT_TIMESTAMP, checked_in_by = $1, updated_at = CURRENT_TIMESTAMP
+      WHERE id = $2
+      RETURNING *
+    `, [checked_in_by || 'barcode_scan', attendee.id]);
+
+    res.json({
+      success: true,
+      message: `${attendee.name} checked in successfully`,
+      attendee: result.rows[0]
+    });
+  } catch (error) {
+    console.error('Error checking in by barcode:', error);
+    res.status(500).json({ error: 'Failed to check in' });
+  }
+});
+
+// POST /api/v1/integrations/eventbrite/attendees/sync - Sync attendees from Eventbrite
+app.post('/api/v1/integrations/eventbrite/attendees/sync', async (req, res) => {
+  try {
+    const userId = req.headers['x-user-id'] || 1;
+    const { event_id } = req.body;
+
+    const apiKey = await getEventbriteApiKey(userId);
+    if (!apiKey) {
+      return res.status(400).json({ error: 'Eventbrite not connected' });
+    }
+
+    if (!event_id) {
+      return res.status(400).json({ error: 'event_id is required' });
+    }
+
+    const response = await fetch(`https://www.eventbriteapi.com/v3/events/${event_id}/attendees/`, {
+      headers: { 'Authorization': `Bearer ${apiKey}` }
+    });
+
+    if (!response.ok) throw new Error('Failed to fetch attendees');
+
+    const data = await response.json();
+    const attendees = data.attendees || [];
+    let synced = 0, created = 0, updated = 0;
+
+    for (const att of attendees) {
+      const existing = await pool.query('SELECT id FROM eventbrite_attendees WHERE id = $1', [att.id]);
+
+      const name = att.profile ? `${att.profile.first_name || ''} ${att.profile.last_name || ''}`.trim() : '';
+      const email = att.profile?.email || '';
+
+      if (existing.rows.length > 0) {
+        await pool.query(`
+          UPDATE eventbrite_attendees SET
+            name = $1, email = $2, status = $3, checked_in = $4,
+            barcode = $5, ticket_class_name = $6, updated_at = CURRENT_TIMESTAMP
+          WHERE id = $7
+        `, [name, email, att.status, att.checked_in, att.barcodes?.[0]?.barcode, att.ticket_class_name, att.id]);
+        updated++;
+      } else {
+        await pool.query(`
+          INSERT INTO eventbrite_attendees (
+            id, user_id, event_id, order_id, ticket_class_id, ticket_class_name,
+            name, email, status, checked_in, barcode, raw_data
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+        `, [
+          att.id, userId, event_id, att.order_id, att.ticket_class_id, att.ticket_class_name,
+          name, email, att.status, att.checked_in, att.barcodes?.[0]?.barcode, JSON.stringify(att)
+        ]);
+        created++;
+      }
+      synced++;
+    }
+
+    res.json({ success: true, synced, created, updated });
+  } catch (error) {
+    console.error('Error syncing attendees:', error);
+    res.status(500).json({ error: 'Failed to sync attendees' });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// FEATURE 10: EVENTBRITE REFUNDS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// GET /api/v1/integrations/eventbrite/refunds - Get all refunds
+app.get('/api/v1/integrations/eventbrite/refunds', async (req, res) => {
+  try {
+    const userId = req.headers['x-user-id'] || 1;
+    const { event_id, status, limit = 50, offset = 0 } = req.query;
+
+    let query = 'SELECT * FROM eventbrite_refunds WHERE user_id = $1';
+    const params = [userId];
+    let paramIndex = 2;
+
+    if (event_id) {
+      query += ` AND event_id = $${paramIndex++}`;
+      params.push(event_id);
+    }
+
+    if (status) {
+      query += ` AND status = $${paramIndex++}`;
+      params.push(status);
+    }
+
+    query += ` ORDER BY created_at DESC LIMIT $${paramIndex++} OFFSET $${paramIndex++}`;
+    params.push(parseInt(limit), parseInt(offset));
+
+    const result = await pool.query(query, params);
+
+    // Get stats
+    const statsResult = await pool.query(`
+      SELECT
+        COUNT(*) as total_refunds,
+        COALESCE(SUM(amount), 0) as total_amount,
+        COUNT(*) FILTER (WHERE status = 'completed') as completed,
+        COUNT(*) FILTER (WHERE status = 'pending') as pending
+      FROM eventbrite_refunds WHERE user_id = $1
+    `, [userId]);
+
+    res.json({
+      refunds: result.rows,
+      stats: statsResult.rows[0]
+    });
+  } catch (error) {
+    console.error('Error fetching refunds:', error);
+    res.status(500).json({ error: 'Failed to fetch refunds' });
+  }
+});
+
+// POST /api/v1/integrations/eventbrite/refunds - Request a refund
+app.post('/api/v1/integrations/eventbrite/refunds', async (req, res) => {
+  try {
+    const userId = req.headers['x-user-id'] || 1;
+    const { order_id, attendee_ids, reason, amount } = req.body;
+
+    if (!order_id) {
+      return res.status(400).json({ error: 'order_id is required' });
+    }
+
+    // Get order details
+    const orderResult = await pool.query(
+      'SELECT * FROM eventbrite_orders WHERE id = $1 AND user_id = $2',
+      [order_id, userId]
+    );
+
+    if (orderResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Order not found' });
+    }
+
+    const order = orderResult.rows[0];
+    const refundAmount = amount || order.net_amount;
+
+    // Get API key
+    const apiKey = await getEventbriteApiKey(userId);
+
+    let ebRefundId = null;
+    if (apiKey) {
+      // Try to process refund via Eventbrite API
+      try {
+        const response = await fetch(`https://www.eventbriteapi.com/v3/orders/${order_id}/refunds/`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${apiKey}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            from_email: true,
+            items: attendee_ids ? attendee_ids.map(id => ({ item_type: 'attendee', item_id: id })) : undefined
+          })
+        });
+
+        if (response.ok) {
+          const refundData = await response.json();
+          ebRefundId = refundData.id;
+        }
+      } catch (ebError) {
+        console.warn('Could not process refund on Eventbrite:', ebError.message);
+      }
+    }
+
+    // Save refund record
+    const result = await pool.query(`
+      INSERT INTO eventbrite_refunds (
+        user_id, order_id, event_id, attendee_ids, reason, amount,
+        status, eventbrite_refund_id, processed_by
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      RETURNING *
+    `, [
+      userId, order_id, order.event_id, JSON.stringify(attendee_ids),
+      reason, refundAmount, ebRefundId ? 'completed' : 'pending',
+      ebRefundId, 'dashboard'
+    ]);
+
+    // Update order status if full refund
+    if (!attendee_ids && ebRefundId) {
+      await pool.query(
+        "UPDATE eventbrite_orders SET status = 'refunded', updated_at = CURRENT_TIMESTAMP WHERE id = $1",
+        [order_id]
+      );
+    }
+
+    // Trigger refund alert
+    await triggerRefundAlert(userId, order_id, refundAmount, order.event_id);
+
+    res.json({
+      success: true,
+      refund: result.rows[0],
+      processed_on_eventbrite: !!ebRefundId
+    });
+  } catch (error) {
+    console.error('Error processing refund:', error);
+    res.status(500).json({ error: 'Failed to process refund' });
+  }
+});
+
+// Helper to trigger refund alerts
+async function triggerRefundAlert(userId, orderId, amount, eventId) {
+  try {
+    const alertResult = await pool.query(
+      "SELECT * FROM eventbrite_alerts WHERE user_id = $1 AND alert_type = 'refund' AND is_active = true",
+      [userId]
+    );
+
+    for (const alert of alertResult.rows) {
+      const title = '↩️ Refund Processed';
+      const message = `A refund of $${amount} has been processed for order ${orderId}.`;
+
+      await pool.query(`
+        INSERT INTO eventbrite_alert_notifications (
+          alert_id, user_id, event_id, alert_type, title, message, data
+        ) VALUES ($1, $2, $3, 'refund', $4, $5, $6)
+      `, [alert.id, userId, eventId, title, message, JSON.stringify({ order_id: orderId, amount })]);
+    }
+  } catch (error) {
+    console.error('Error triggering refund alert:', error);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// FEATURE 3: EVENTBRITE REPORTS - Export to CSV/JSON
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// GET /api/v1/integrations/eventbrite/reports/orders - Export orders report
+app.get('/api/v1/integrations/eventbrite/reports/orders', async (req, res) => {
+  try {
+    const userId = req.headers['x-user-id'] || 1;
+    const { event_id, start_date, end_date, format = 'json' } = req.query;
+
+    let query = `
+      SELECT
+        id, event_id, event_name, buyer_name, buyer_email, buyer_phone,
+        status, gross_amount, fees, net_amount, ticket_count, promo_code,
+        order_date, created_at
+      FROM eventbrite_orders WHERE user_id = $1
+    `;
+    const params = [userId];
+    let paramIndex = 2;
+
+    if (event_id) {
+      query += ` AND event_id = $${paramIndex++}`;
+      params.push(event_id);
+    }
+    if (start_date) {
+      query += ` AND order_date >= $${paramIndex++}`;
+      params.push(start_date);
+    }
+    if (end_date) {
+      query += ` AND order_date <= $${paramIndex++}`;
+      params.push(end_date);
+    }
+
+    query += ' ORDER BY order_date DESC';
+    const result = await pool.query(query, params);
+
+    if (format === 'csv') {
+      const headers = ['Order ID', 'Event ID', 'Event Name', 'Buyer Name', 'Buyer Email', 'Phone', 'Status', 'Gross', 'Fees', 'Net', 'Tickets', 'Promo Code', 'Order Date'];
+      const csvRows = [headers.join(',')];
+
+      for (const row of result.rows) {
+        csvRows.push([
+          row.id, row.event_id, `"${row.event_name || ''}"`, `"${row.buyer_name || ''}"`,
+          row.buyer_email, row.buyer_phone || '', row.status,
+          row.gross_amount, row.fees, row.net_amount, row.ticket_count,
+          row.promo_code || '', row.order_date
+        ].join(','));
+      }
+
+      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Disposition', `attachment; filename=orders_report_${new Date().toISOString().split('T')[0]}.csv`);
+      return res.send(csvRows.join('\n'));
+    }
+
+    res.json({
+      report: 'orders',
+      generated_at: new Date().toISOString(),
+      total_records: result.rows.length,
+      data: result.rows
+    });
+  } catch (error) {
+    console.error('Error generating orders report:', error);
+    res.status(500).json({ error: 'Failed to generate report' });
+  }
+});
+
+// GET /api/v1/integrations/eventbrite/reports/attendees - Export attendees report
+app.get('/api/v1/integrations/eventbrite/reports/attendees', async (req, res) => {
+  try {
+    const userId = req.headers['x-user-id'] || 1;
+    const { event_id, checked_in, format = 'json' } = req.query;
+
+    let query = `
+      SELECT
+        id, event_id, order_id, ticket_class_name, name, email, phone,
+        status, checked_in, checked_in_at, checked_in_by, barcode, created_at
+      FROM eventbrite_attendees WHERE user_id = $1
+    `;
+    const params = [userId];
+    let paramIndex = 2;
+
+    if (event_id) {
+      query += ` AND event_id = $${paramIndex++}`;
+      params.push(event_id);
+    }
+    if (checked_in !== undefined) {
+      query += ` AND checked_in = $${paramIndex++}`;
+      params.push(checked_in === 'true');
+    }
+
+    query += ' ORDER BY name ASC';
+    const result = await pool.query(query, params);
+
+    if (format === 'csv') {
+      const headers = ['Attendee ID', 'Event ID', 'Order ID', 'Ticket Type', 'Name', 'Email', 'Phone', 'Status', 'Checked In', 'Check-in Time', 'Checked In By', 'Barcode'];
+      const csvRows = [headers.join(',')];
+
+      for (const row of result.rows) {
+        csvRows.push([
+          row.id, row.event_id, row.order_id, `"${row.ticket_class_name || ''}"`,
+          `"${row.name || ''}"`, row.email, row.phone || '', row.status,
+          row.checked_in ? 'Yes' : 'No', row.checked_in_at || '', row.checked_in_by || '', row.barcode || ''
+        ].join(','));
+      }
+
+      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Disposition', `attachment; filename=attendees_report_${new Date().toISOString().split('T')[0]}.csv`);
+      return res.send(csvRows.join('\n'));
+    }
+
+    res.json({
+      report: 'attendees',
+      generated_at: new Date().toISOString(),
+      total_records: result.rows.length,
+      data: result.rows
+    });
+  } catch (error) {
+    console.error('Error generating attendees report:', error);
+    res.status(500).json({ error: 'Failed to generate report' });
+  }
+});
+
+// GET /api/v1/integrations/eventbrite/reports/summary - Generate summary report
+app.get('/api/v1/integrations/eventbrite/reports/summary', async (req, res) => {
+  try {
+    const userId = req.headers['x-user-id'] || 1;
+    const { event_id } = req.query;
+
+    // Orders stats
+    let orderStatsQuery = `
+      SELECT
+        COUNT(*) as total_orders,
+        COALESCE(SUM(ticket_count), 0) as total_tickets,
+        COALESCE(SUM(gross_amount), 0) as gross_revenue,
+        COALESCE(SUM(fees), 0) as total_fees,
+        COALESCE(SUM(net_amount), 0) as net_revenue,
+        COUNT(DISTINCT buyer_email) as unique_buyers,
+        COALESCE(AVG(gross_amount), 0) as avg_order_value
+      FROM eventbrite_orders WHERE user_id = $1
+    `;
+    const orderParams = [userId];
+    if (event_id) {
+      orderStatsQuery += ' AND event_id = $2';
+      orderParams.push(event_id);
+    }
+    const orderStats = await pool.query(orderStatsQuery, orderParams);
+
+    // Attendee stats
+    let attendeeStatsQuery = `
+      SELECT
+        COUNT(*) as total_attendees,
+        COUNT(*) FILTER (WHERE checked_in = true) as checked_in,
+        COUNT(*) FILTER (WHERE checked_in = false) as not_checked_in
+      FROM eventbrite_attendees WHERE user_id = $1
+    `;
+    const attendeeParams = [userId];
+    if (event_id) {
+      attendeeStatsQuery += ' AND event_id = $2';
+      attendeeParams.push(event_id);
+    }
+    const attendeeStats = await pool.query(attendeeStatsQuery, attendeeParams);
+
+    // Refund stats
+    let refundStatsQuery = `
+      SELECT
+        COUNT(*) as total_refunds,
+        COALESCE(SUM(amount), 0) as total_refunded
+      FROM eventbrite_refunds WHERE user_id = $1
+    `;
+    const refundParams = [userId];
+    if (event_id) {
+      refundStatsQuery += ' AND event_id = $2';
+      refundParams.push(event_id);
+    }
+    const refundStats = await pool.query(refundStatsQuery, refundParams);
+
+    // Promo code stats
+    let promoStatsQuery = `
+      SELECT
+        COUNT(*) as total_promo_codes,
+        COALESCE(SUM(quantity_sold), 0) as total_uses
+      FROM eventbrite_promo_codes WHERE user_id = $1
+    `;
+    const promoParams = [userId];
+    if (event_id) {
+      promoStatsQuery += ' AND event_id = $2';
+      promoParams.push(event_id);
+    }
+    const promoStats = await pool.query(promoStatsQuery, promoParams);
+
+    const summary = {
+      generated_at: new Date().toISOString(),
+      event_id: event_id || 'all',
+      orders: {
+        total_orders: parseInt(orderStats.rows[0].total_orders),
+        total_tickets: parseInt(orderStats.rows[0].total_tickets),
+        gross_revenue: parseFloat(orderStats.rows[0].gross_revenue),
+        total_fees: parseFloat(orderStats.rows[0].total_fees),
+        net_revenue: parseFloat(orderStats.rows[0].net_revenue),
+        unique_buyers: parseInt(orderStats.rows[0].unique_buyers),
+        avg_order_value: parseFloat(orderStats.rows[0].avg_order_value).toFixed(2)
+      },
+      attendees: {
+        total: parseInt(attendeeStats.rows[0].total_attendees),
+        checked_in: parseInt(attendeeStats.rows[0].checked_in),
+        not_checked_in: parseInt(attendeeStats.rows[0].not_checked_in),
+        check_in_rate: attendeeStats.rows[0].total_attendees > 0
+          ? ((attendeeStats.rows[0].checked_in / attendeeStats.rows[0].total_attendees) * 100).toFixed(1)
+          : '0'
+      },
+      refunds: {
+        total_refunds: parseInt(refundStats.rows[0].total_refunds),
+        total_refunded: parseFloat(refundStats.rows[0].total_refunded)
+      },
+      promo_codes: {
+        total_codes: parseInt(promoStats.rows[0].total_promo_codes),
+        total_uses: parseInt(promoStats.rows[0].total_uses)
+      }
+    };
+
+    res.json(summary);
+  } catch (error) {
+    console.error('Error generating summary report:', error);
+    res.status(500).json({ error: 'Failed to generate summary' });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// FEATURE 5: CREATE EVENTS ON EVENTBRITE
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// POST /api/v1/integrations/eventbrite/events - Create event on Eventbrite
+app.post('/api/v1/integrations/eventbrite/events', async (req, res) => {
+  try {
+    const userId = req.headers['x-user-id'] || 1;
+    const {
+      name,
+      description,
+      start_date,
+      end_date,
+      timezone = 'America/New_York',
+      venue_id,
+      online_event = false,
+      capacity,
+      currency = 'USD',
+      listed = true,
+      shareable = true,
+      category_id,
+      subcategory_id
+    } = req.body;
+
+    if (!name || !start_date || !end_date) {
+      return res.status(400).json({ error: 'name, start_date, and end_date are required' });
+    }
+
+    const apiKey = await getEventbriteApiKey(userId);
+    if (!apiKey) {
+      return res.status(400).json({ error: 'Eventbrite not connected' });
+    }
+
+    // Get org ID
+    const orgResult = await pool.query(
+      "SELECT metadata->>'organization_id' as org_id FROM user_integrations WHERE user_id = $1 AND provider = 'eventbrite'",
+      [userId]
+    );
+    const orgId = orgResult.rows[0]?.org_id;
+    if (!orgId) {
+      return res.status(400).json({ error: 'Organization not found' });
+    }
+
+    const eventData = {
+      event: {
+        name: { html: name },
+        description: description ? { html: description } : undefined,
+        start: {
+          timezone: timezone,
+          utc: new Date(start_date).toISOString().replace('.000', '')
+        },
+        end: {
+          timezone: timezone,
+          utc: new Date(end_date).toISOString().replace('.000', '')
+        },
+        currency: currency,
+        online_event: online_event,
+        listed: listed,
+        shareable: shareable,
+        capacity: capacity,
+        venue_id: venue_id,
+        category_id: category_id,
+        subcategory_id: subcategory_id
+      }
+    };
+
+    const response = await fetch(`https://www.eventbriteapi.com/v3/organizations/${orgId}/events/`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(eventData)
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      return res.status(response.status).json({
+        error: 'Failed to create event on Eventbrite',
+        details: errorData
+      });
+    }
+
+    const ebEvent = await response.json();
+
+    // Save to local events table
+    const localResult = await pool.query(`
+      INSERT INTO events (
+        user_id, name, description, event_date, event_time, end_time,
+        eventbrite_id, eventbrite_url, venue_id, eventbrite_capacity,
+        eventbrite_category_id, eventbrite_subcategory_id, eventbrite_online_event
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+      RETURNING *
+    `, [
+      userId, name, description, start_date.split('T')[0],
+      start_date.split('T')[1]?.substring(0, 5) || '19:00',
+      end_date.split('T')[1]?.substring(0, 5) || '23:00',
+      ebEvent.id, ebEvent.url, venue_id, capacity,
+      category_id, subcategory_id, online_event
+    ]);
+
+    res.json({
+      success: true,
+      eventbrite_event: ebEvent,
+      local_event: localResult.rows[0]
+    });
+  } catch (error) {
+    console.error('Error creating event:', error);
+    res.status(500).json({ error: 'Failed to create event' });
+  }
+});
+
+// PUT /api/v1/integrations/eventbrite/events/:id - Update event on Eventbrite
+app.put('/api/v1/integrations/eventbrite/events/:id', async (req, res) => {
+  try {
+    const userId = req.headers['x-user-id'] || 1;
+    const { id } = req.params;
+    const updates = req.body;
+
+    const apiKey = await getEventbriteApiKey(userId);
+    if (!apiKey) {
+      return res.status(400).json({ error: 'Eventbrite not connected' });
+    }
+
+    const eventData = { event: {} };
+
+    if (updates.name) eventData.event.name = { html: updates.name };
+    if (updates.description) eventData.event.description = { html: updates.description };
+    if (updates.start_date) {
+      eventData.event.start = {
+        timezone: updates.timezone || 'America/New_York',
+        utc: new Date(updates.start_date).toISOString().replace('.000', '')
+      };
+    }
+    if (updates.end_date) {
+      eventData.event.end = {
+        timezone: updates.timezone || 'America/New_York',
+        utc: new Date(updates.end_date).toISOString().replace('.000', '')
+      };
+    }
+    if (updates.capacity !== undefined) eventData.event.capacity = updates.capacity;
+    if (updates.listed !== undefined) eventData.event.listed = updates.listed;
+
+    const response = await fetch(`https://www.eventbriteapi.com/v3/events/${id}/`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(eventData)
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      return res.status(response.status).json({ error: 'Failed to update event', details: errorData });
+    }
+
+    const ebEvent = await response.json();
+
+    // Update local event
+    await pool.query(`
+      UPDATE events SET
+        name = COALESCE($1, name),
+        description = COALESCE($2, description),
+        eventbrite_capacity = COALESCE($3, eventbrite_capacity),
+        updated_at = CURRENT_TIMESTAMP
+      WHERE eventbrite_id = $4 AND user_id = $5
+    `, [updates.name, updates.description, updates.capacity, id, userId]);
+
+    res.json({ success: true, event: ebEvent });
+  } catch (error) {
+    console.error('Error updating event:', error);
+    res.status(500).json({ error: 'Failed to update event' });
+  }
+});
+
+// POST /api/v1/integrations/eventbrite/events/:id/publish - Publish event
+app.post('/api/v1/integrations/eventbrite/events/:id/publish', async (req, res) => {
+  try {
+    const userId = req.headers['x-user-id'] || 1;
+    const { id } = req.params;
+
+    const apiKey = await getEventbriteApiKey(userId);
+    if (!apiKey) {
+      return res.status(400).json({ error: 'Eventbrite not connected' });
+    }
+
+    const response = await fetch(`https://www.eventbriteapi.com/v3/events/${id}/publish/`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${apiKey}` }
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      return res.status(response.status).json({ error: 'Failed to publish event', details: errorData });
+    }
+
+    res.json({ success: true, message: 'Event published successfully' });
+  } catch (error) {
+    console.error('Error publishing event:', error);
+    res.status(500).json({ error: 'Failed to publish event' });
+  }
+});
+
+// POST /api/v1/integrations/eventbrite/events/:id/ticket-classes - Create ticket type
+app.post('/api/v1/integrations/eventbrite/events/:id/ticket-classes', async (req, res) => {
+  try {
+    const userId = req.headers['x-user-id'] || 1;
+    const { id } = req.params;
+    const {
+      name,
+      description,
+      price,
+      quantity_total,
+      free = false,
+      hidden = false,
+      sales_start,
+      sales_end
+    } = req.body;
+
+    if (!name) {
+      return res.status(400).json({ error: 'name is required' });
+    }
+
+    const apiKey = await getEventbriteApiKey(userId);
+    if (!apiKey) {
+      return res.status(400).json({ error: 'Eventbrite not connected' });
+    }
+
+    const ticketData = {
+      ticket_class: {
+        name: name,
+        description: description,
+        quantity_total: quantity_total,
+        free: free || price === 0,
+        hidden: hidden
+      }
+    };
+
+    if (!free && price > 0) {
+      ticketData.ticket_class.cost = `USD,${Math.round(price * 100)}`;
+    }
+
+    if (sales_start) ticketData.ticket_class.sales_start = sales_start;
+    if (sales_end) ticketData.ticket_class.sales_end = sales_end;
+
+    const response = await fetch(`https://www.eventbriteapi.com/v3/events/${id}/ticket_classes/`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(ticketData)
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      return res.status(response.status).json({ error: 'Failed to create ticket class', details: errorData });
+    }
+
+    const ticketClass = await response.json();
+    res.json({ success: true, ticket_class: ticketClass });
+  } catch (error) {
+    console.error('Error creating ticket class:', error);
+    res.status(500).json({ error: 'Failed to create ticket class' });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// FEATURE 8: EMAIL BUYERS WITH RESEND
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// POST /api/v1/integrations/eventbrite/email/send - Send email to order buyers
+app.post('/api/v1/integrations/eventbrite/email/send', async (req, res) => {
+  try {
+    const userId = req.headers['x-user-id'] || 1;
+    const { order_ids, event_id, subject, body, send_to_all = false } = req.body;
+
+    if (!subject || !body) {
+      return res.status(400).json({ error: 'subject and body are required' });
+    }
+
+    // Get recipients
+    let recipientQuery = 'SELECT DISTINCT buyer_email, buyer_name FROM eventbrite_orders WHERE user_id = $1';
+    const params = [userId];
+
+    if (order_ids && order_ids.length > 0) {
+      recipientQuery += ' AND id = ANY($2)';
+      params.push(order_ids);
+    } else if (event_id) {
+      recipientQuery += ' AND event_id = $2';
+      params.push(event_id);
+    } else if (!send_to_all) {
+      return res.status(400).json({ error: 'Specify order_ids, event_id, or set send_to_all=true' });
+    }
+
+    recipientQuery += " AND buyer_email IS NOT NULL AND buyer_email != ''";
+
+    const recipientsResult = await pool.query(recipientQuery, params);
+    const recipients = recipientsResult.rows;
+
+    if (recipients.length === 0) {
+      return res.status(404).json({ error: 'No recipients found' });
+    }
+
+    // Send emails using Resend
+    const sent = [];
+    const failed = [];
+
+    for (const recipient of recipients) {
+      try {
+        const personalizedBody = body
+          .replace(/\{\{name\}\}/g, recipient.buyer_name || 'Guest')
+          .replace(/\{\{email\}\}/g, recipient.buyer_email);
+
+        const result = await resend.emails.send({
+          from: EMAIL_CONFIG.from,
+          to: recipient.buyer_email,
+          subject: subject,
+          html: `<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">${personalizedBody}</div>`,
+          replyTo: EMAIL_CONFIG.replyTo
+        });
+
+        if (result.error) {
+          failed.push({ email: recipient.buyer_email, error: result.error.message });
+        } else {
+          sent.push({ email: recipient.buyer_email, id: result.data?.id });
+        }
+      } catch (emailError) {
+        failed.push({ email: recipient.buyer_email, error: emailError.message });
+      }
+    }
+
+    res.json({
+      success: true,
+      total_recipients: recipients.length,
+      sent: sent.length,
+      failed: failed.length,
+      sent_details: sent,
+      failed_details: failed
+    });
+  } catch (error) {
+    console.error('Error sending emails:', error);
+    res.status(500).json({ error: 'Failed to send emails' });
+  }
+});
+
+// POST /api/v1/integrations/eventbrite/email/attendees - Send email to attendees
+app.post('/api/v1/integrations/eventbrite/email/attendees', async (req, res) => {
+  try {
+    const userId = req.headers['x-user-id'] || 1;
+    const { event_id, subject, body, filter_checked_in } = req.body;
+
+    if (!event_id || !subject || !body) {
+      return res.status(400).json({ error: 'event_id, subject, and body are required' });
+    }
+
+    let query = "SELECT DISTINCT email, name FROM eventbrite_attendees WHERE user_id = $1 AND event_id = $2 AND email IS NOT NULL AND email != ''";
+    const params = [userId, event_id];
+
+    if (filter_checked_in !== undefined) {
+      query += ' AND checked_in = $3';
+      params.push(filter_checked_in);
+    }
+
+    const attendeesResult = await pool.query(query, params);
+    const attendees = attendeesResult.rows;
+
+    if (attendees.length === 0) {
+      return res.status(404).json({ error: 'No attendees found' });
+    }
+
+    const sent = [];
+    const failed = [];
+
+    for (const attendee of attendees) {
+      try {
+        const personalizedBody = body
+          .replace(/\{\{name\}\}/g, attendee.name || 'Guest')
+          .replace(/\{\{email\}\}/g, attendee.email);
+
+        const result = await resend.emails.send({
+          from: EMAIL_CONFIG.from,
+          to: attendee.email,
+          subject: subject,
+          html: `<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">${personalizedBody}</div>`,
+          replyTo: EMAIL_CONFIG.replyTo
+        });
+
+        if (result.error) {
+          failed.push({ email: attendee.email, error: result.error.message });
+        } else {
+          sent.push({ email: attendee.email, id: result.data?.id });
+        }
+      } catch (emailError) {
+        failed.push({ email: attendee.email, error: emailError.message });
+      }
+    }
+
+    res.json({
+      success: true,
+      total_attendees: attendees.length,
+      sent: sent.length,
+      failed: failed.length,
+      sent_details: sent,
+      failed_details: failed
+    });
+  } catch (error) {
+    console.error('Error sending emails to attendees:', error);
+    res.status(500).json({ error: 'Failed to send emails' });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// FEATURE 9: COMPARE EVENTS SIDE-BY-SIDE
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// GET /api/v1/integrations/eventbrite/compare - Compare multiple events
+app.get('/api/v1/integrations/eventbrite/compare', async (req, res) => {
+  try {
+    const userId = req.headers['x-user-id'] || 1;
+    const { event_ids } = req.query;
+
+    if (!event_ids) {
+      return res.status(400).json({ error: 'event_ids query parameter is required (comma-separated)' });
+    }
+
+    const eventIdList = event_ids.split(',').map(id => id.trim());
+
+    if (eventIdList.length < 2) {
+      return res.status(400).json({ error: 'At least 2 event IDs are required for comparison' });
+    }
+
+    const comparisons = [];
+
+    for (const eventId of eventIdList) {
+      // Get event info
+      const eventResult = await pool.query(
+        'SELECT * FROM events WHERE user_id = $1 AND eventbrite_id = $2',
+        [userId, eventId]
+      );
+
+      // Get order stats
+      const orderStats = await pool.query(`
+        SELECT
+          COUNT(*) as total_orders,
+          COALESCE(SUM(ticket_count), 0) as total_tickets,
+          COALESCE(SUM(gross_amount), 0) as gross_revenue,
+          COALESCE(SUM(fees), 0) as total_fees,
+          COALESCE(SUM(net_amount), 0) as net_revenue,
+          COUNT(DISTINCT buyer_email) as unique_buyers,
+          COALESCE(AVG(gross_amount), 0) as avg_order_value
+        FROM eventbrite_orders WHERE user_id = $1 AND event_id = $2
+      `, [userId, eventId]);
+
+      // Get attendee stats
+      const attendeeStats = await pool.query(`
+        SELECT
+          COUNT(*) as total,
+          COUNT(*) FILTER (WHERE checked_in = true) as checked_in
+        FROM eventbrite_attendees WHERE user_id = $1 AND event_id = $2
+      `, [userId, eventId]);
+
+      // Get refund stats
+      const refundStats = await pool.query(`
+        SELECT
+          COUNT(*) as total_refunds,
+          COALESCE(SUM(amount), 0) as total_refunded
+        FROM eventbrite_refunds WHERE user_id = $1 AND event_id = $2
+      `, [userId, eventId]);
+
+      // Get promo code stats
+      const promoStats = await pool.query(`
+        SELECT
+          COUNT(*) as total_codes,
+          COALESCE(SUM(quantity_sold), 0) as total_uses
+        FROM eventbrite_promo_codes WHERE user_id = $1 AND event_id = $2
+      `, [userId, eventId]);
+
+      const event = eventResult.rows[0] || {};
+      const orders = orderStats.rows[0];
+      const attendees = attendeeStats.rows[0];
+      const refunds = refundStats.rows[0];
+      const promos = promoStats.rows[0];
+
+      const capacity = event.eventbrite_capacity || event.expected_attendance || 1000;
+      const ticketsSold = parseInt(orders.total_tickets);
+
+      comparisons.push({
+        event_id: eventId,
+        event_name: event.name || `Event ${eventId}`,
+        event_date: event.event_date,
+        metrics: {
+          tickets: {
+            sold: ticketsSold,
+            capacity: capacity,
+            percent_sold: ((ticketsSold / capacity) * 100).toFixed(1)
+          },
+          revenue: {
+            gross: parseFloat(orders.gross_revenue),
+            fees: parseFloat(orders.total_fees),
+            net: parseFloat(orders.net_revenue),
+            avg_order: parseFloat(orders.avg_order_value).toFixed(2)
+          },
+          orders: {
+            total: parseInt(orders.total_orders),
+            unique_buyers: parseInt(orders.unique_buyers)
+          },
+          attendees: {
+            total: parseInt(attendees.total),
+            checked_in: parseInt(attendees.checked_in),
+            check_in_rate: attendees.total > 0
+              ? ((attendees.checked_in / attendees.total) * 100).toFixed(1)
+              : '0'
+          },
+          refunds: {
+            count: parseInt(refunds.total_refunds),
+            amount: parseFloat(refunds.total_refunded)
+          },
+          promo_codes: {
+            count: parseInt(promos.total_codes),
+            uses: parseInt(promos.total_uses)
+          }
+        }
+      });
+    }
+
+    // Calculate comparisons (best/worst for each metric)
+    const analysis = {
+      best_revenue: comparisons.reduce((a, b) =>
+        parseFloat(b.metrics.revenue.net) > parseFloat(a.metrics.revenue.net) ? b : a
+      ).event_name,
+      best_attendance: comparisons.reduce((a, b) =>
+        parseFloat(b.metrics.tickets.percent_sold) > parseFloat(a.metrics.tickets.percent_sold) ? b : a
+      ).event_name,
+      best_check_in_rate: comparisons.reduce((a, b) =>
+        parseFloat(b.metrics.attendees.check_in_rate) > parseFloat(a.metrics.attendees.check_in_rate) ? b : a
+      ).event_name,
+      lowest_refund_rate: comparisons.reduce((a, b) => {
+        const aRate = a.metrics.revenue.gross > 0 ? a.metrics.refunds.amount / a.metrics.revenue.gross : 0;
+        const bRate = b.metrics.revenue.gross > 0 ? b.metrics.refunds.amount / b.metrics.revenue.gross : 0;
+        return bRate < aRate ? b : a;
+      }).event_name
+    };
+
+    res.json({
+      compared_at: new Date().toISOString(),
+      event_count: comparisons.length,
+      events: comparisons,
+      analysis
+    });
+  } catch (error) {
+    console.error('Error comparing events:', error);
+    res.status(500).json({ error: 'Failed to compare events' });
+  }
 });
 
 // GET /api/v1/orders - Get all orders with stats
