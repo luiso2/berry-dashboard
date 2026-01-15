@@ -424,7 +424,7 @@ const initDatabase = async () => {
         venue_address TEXT,
         venue_city VARCHAR(100),
         venue_capacity INTEGER,
-        event_date DATE NOT NULL,
+        event_date DATE,
         start_time TIME,
         end_time TIME,
         doors_open TIME,
@@ -442,6 +442,20 @@ const initDatabase = async () => {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
+    `);
+
+    // Migration: Add event_date column if missing (for existing tables)
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='events' AND column_name='event_date') THEN
+          ALTER TABLE events ADD COLUMN event_date DATE;
+        END IF;
+      END $$;
+    `);
+
+    // Create indexes after migration ensures columns exist
+    await client.query(`
       CREATE INDEX IF NOT EXISTS idx_events_date ON events(event_date);
       CREATE INDEX IF NOT EXISTS idx_events_status ON events(status);
     `);
@@ -1459,7 +1473,7 @@ const initDatabase = async () => {
     await client.query(`
       CREATE TABLE IF NOT EXISTS eventbrite_alerts (
         id SERIAL PRIMARY KEY,
-        user_id INTEGER NOT NULL,
+        user_id INTEGER,
         event_id VARCHAR(100),
         alert_type VARCHAR(50) NOT NULL,
         threshold_value DECIMAL(10, 2),
@@ -1471,6 +1485,20 @@ const initDatabase = async () => {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
+    `);
+
+    // Migration: Add user_id to existing eventbrite_alerts table
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'eventbrite_alerts' AND column_name = 'user_id') THEN
+          ALTER TABLE eventbrite_alerts ADD COLUMN user_id INTEGER;
+        END IF;
+      END $$;
+    `);
+
+    // Create indexes AFTER migration
+    await client.query(`
       CREATE INDEX IF NOT EXISTS idx_alerts_user ON eventbrite_alerts(user_id);
       CREATE INDEX IF NOT EXISTS idx_alerts_event ON eventbrite_alerts(event_id);
       CREATE INDEX IF NOT EXISTS idx_alerts_type ON eventbrite_alerts(alert_type);
@@ -1481,8 +1509,8 @@ const initDatabase = async () => {
     await client.query(`
       CREATE TABLE IF NOT EXISTS eventbrite_alert_notifications (
         id SERIAL PRIMARY KEY,
-        alert_id INTEGER REFERENCES eventbrite_alerts(id) ON DELETE CASCADE,
-        user_id INTEGER NOT NULL,
+        alert_id INTEGER,
+        user_id INTEGER,
         event_id VARCHAR(100),
         alert_type VARCHAR(50) NOT NULL,
         title VARCHAR(255) NOT NULL,
@@ -1491,6 +1519,20 @@ const initDatabase = async () => {
         is_read BOOLEAN DEFAULT false,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
+    `);
+
+    // Migration: Add user_id to existing eventbrite_alert_notifications table
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'eventbrite_alert_notifications' AND column_name = 'user_id') THEN
+          ALTER TABLE eventbrite_alert_notifications ADD COLUMN user_id INTEGER;
+        END IF;
+      END $$;
+    `);
+
+    // Create indexes AFTER migration
+    await client.query(`
       CREATE INDEX IF NOT EXISTS idx_alert_notif_user ON eventbrite_alert_notifications(user_id);
       CREATE INDEX IF NOT EXISTS idx_alert_notif_read ON eventbrite_alert_notifications(is_read);
     `);
@@ -1502,7 +1544,7 @@ const initDatabase = async () => {
     await client.query(`
       CREATE TABLE IF NOT EXISTS eventbrite_orders (
         id VARCHAR(100) PRIMARY KEY,
-        user_id INTEGER NOT NULL,
+        user_id INTEGER,
         event_id VARCHAR(100) NOT NULL,
         event_name VARCHAR(255),
         buyer_name VARCHAR(255),
@@ -1521,10 +1563,6 @@ const initDatabase = async () => {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
-      CREATE INDEX IF NOT EXISTS idx_eb_orders_user ON eventbrite_orders(user_id);
-      CREATE INDEX IF NOT EXISTS idx_eb_orders_event ON eventbrite_orders(event_id);
-      CREATE INDEX IF NOT EXISTS idx_eb_orders_date ON eventbrite_orders(order_date DESC);
-      CREATE INDEX IF NOT EXISTS idx_eb_orders_email ON eventbrite_orders(buyer_email);
     `);
 
     // Migration: Add missing columns to existing eventbrite_orders table
@@ -1554,6 +1592,14 @@ const initDatabase = async () => {
         END IF;
       END $$;
     `);
+
+    // Create indexes AFTER migration ensures columns exist
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_eb_orders_user ON eventbrite_orders(user_id);
+      CREATE INDEX IF NOT EXISTS idx_eb_orders_event ON eventbrite_orders(event_id);
+      CREATE INDEX IF NOT EXISTS idx_eb_orders_date ON eventbrite_orders(order_date DESC);
+      CREATE INDEX IF NOT EXISTS idx_eb_orders_email ON eventbrite_orders(buyer_email);
+    `);
     console.log('Eventbrite orders table initialized');
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -1562,7 +1608,7 @@ const initDatabase = async () => {
     await client.query(`
       CREATE TABLE IF NOT EXISTS eventbrite_promo_codes (
         id VARCHAR(100) PRIMARY KEY,
-        user_id INTEGER NOT NULL,
+        user_id INTEGER,
         event_id VARCHAR(100),
         code VARCHAR(100) NOT NULL,
         discount_type VARCHAR(20) DEFAULT 'percentage',
@@ -1577,6 +1623,20 @@ const initDatabase = async () => {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
+    `);
+
+    // Migration: Add user_id to existing eventbrite_promo_codes table
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'eventbrite_promo_codes' AND column_name = 'user_id') THEN
+          ALTER TABLE eventbrite_promo_codes ADD COLUMN user_id INTEGER;
+        END IF;
+      END $$;
+    `);
+
+    // Create indexes AFTER migration
+    await client.query(`
       CREATE INDEX IF NOT EXISTS idx_eb_promo_user ON eventbrite_promo_codes(user_id);
       CREATE INDEX IF NOT EXISTS idx_eb_promo_event ON eventbrite_promo_codes(event_id);
       CREATE INDEX IF NOT EXISTS idx_eb_promo_code ON eventbrite_promo_codes(code);
@@ -1589,7 +1649,7 @@ const initDatabase = async () => {
     await client.query(`
       CREATE TABLE IF NOT EXISTS eventbrite_attendees (
         id VARCHAR(100) PRIMARY KEY,
-        user_id INTEGER NOT NULL,
+        user_id INTEGER,
         event_id VARCHAR(100) NOT NULL,
         order_id VARCHAR(100),
         ticket_class_id VARCHAR(100),
@@ -1608,11 +1668,6 @@ const initDatabase = async () => {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
-      CREATE INDEX IF NOT EXISTS idx_eb_attendees_user ON eventbrite_attendees(user_id);
-      CREATE INDEX IF NOT EXISTS idx_eb_attendees_event ON eventbrite_attendees(event_id);
-      CREATE INDEX IF NOT EXISTS idx_eb_attendees_order ON eventbrite_attendees(order_id);
-      CREATE INDEX IF NOT EXISTS idx_eb_attendees_barcode ON eventbrite_attendees(barcode);
-      CREATE INDEX IF NOT EXISTS idx_eb_attendees_checkin ON eventbrite_attendees(checked_in);
     `);
 
     // Migration: Add user_id to existing eventbrite_attendees table
@@ -1624,6 +1679,15 @@ const initDatabase = async () => {
         END IF;
       END $$;
     `);
+
+    // Create indexes AFTER migration ensures columns exist
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_eb_attendees_user ON eventbrite_attendees(user_id);
+      CREATE INDEX IF NOT EXISTS idx_eb_attendees_event ON eventbrite_attendees(event_id);
+      CREATE INDEX IF NOT EXISTS idx_eb_attendees_order ON eventbrite_attendees(order_id);
+      CREATE INDEX IF NOT EXISTS idx_eb_attendees_barcode ON eventbrite_attendees(barcode);
+      CREATE INDEX IF NOT EXISTS idx_eb_attendees_checkin ON eventbrite_attendees(checked_in);
+    `);
     console.log('Eventbrite attendees table initialized');
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -1632,7 +1696,7 @@ const initDatabase = async () => {
     await client.query(`
       CREATE TABLE IF NOT EXISTS eventbrite_refunds (
         id SERIAL PRIMARY KEY,
-        user_id INTEGER NOT NULL,
+        user_id INTEGER,
         order_id VARCHAR(100) NOT NULL,
         event_id VARCHAR(100),
         attendee_ids JSONB,
@@ -1645,6 +1709,20 @@ const initDatabase = async () => {
         raw_data JSONB,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
+    `);
+
+    // Migration: Add user_id to existing eventbrite_refunds table
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'eventbrite_refunds' AND column_name = 'user_id') THEN
+          ALTER TABLE eventbrite_refunds ADD COLUMN user_id INTEGER;
+        END IF;
+      END $$;
+    `);
+
+    // Create indexes AFTER migration
+    await client.query(`
       CREATE INDEX IF NOT EXISTS idx_eb_refunds_user ON eventbrite_refunds(user_id);
       CREATE INDEX IF NOT EXISTS idx_eb_refunds_order ON eventbrite_refunds(order_id);
       CREATE INDEX IF NOT EXISTS idx_eb_refunds_event ON eventbrite_refunds(event_id);
@@ -12036,18 +12114,40 @@ app.post('/api/v1/integrations/eventbrite/sync', async (req, res) => {
 // EVENTBRITE WEBHOOKS - Real-time ticket sales
 // ============================================
 
-// POST /api/webhooks/eventbrite - Receive webhook events from Eventbrite
+// POST /api/webhooks/eventbrite - Receive webhook events from Eventbrite (Multi-tenant)
 app.post('/api/webhooks/eventbrite', async (req, res) => {
   try {
     const payload = req.body;
     console.log('Eventbrite webhook received:', payload?.config?.action);
 
-    // Verify we have the integration connected
-    const integration = await pool.query('SELECT * FROM integrations WHERE provider = $1', ['eventbrite']);
-    if (!integration.rows[0] || integration.rows[0].status !== 'connected') {
-      console.log('Eventbrite webhook received but integration not connected');
+    const organizationId = payload?.config?.organization_id;
+
+    // Multi-tenant: Find the correct integration based on organization_id
+    let integration;
+    if (organizationId) {
+      // Find integration by organization_id stored in config
+      integration = await pool.query(
+        `SELECT * FROM integrations WHERE provider = $1 AND status = $2
+         AND (config->>'organization_id' = $3 OR config->>'organization_id' = $4)`,
+        ['eventbrite', 'connected', organizationId, String(organizationId)]
+      );
+    }
+
+    // Fallback: find any connected Eventbrite integration
+    if (!integration?.rows[0]) {
+      integration = await pool.query(
+        'SELECT * FROM integrations WHERE provider = $1 AND status = $2 LIMIT 1',
+        ['eventbrite', 'connected']
+      );
+    }
+
+    if (!integration.rows[0]) {
+      console.log('Eventbrite webhook received but no matching integration found');
       return res.status(200).json({ received: true });
     }
+
+    const integrationUserId = integration.rows[0].user_id;
+    console.log(`Processing webhook for user_id: ${integrationUserId}, org: ${organizationId}`);
 
     const apiKey = decryptApiKey(integration.rows[0].api_key_encrypted);
     const action = payload?.config?.action;
@@ -13322,8 +13422,8 @@ app.get('/api/v1/integrations/eventbrite/metrics', async (req, res) => {
         fees: fees,
         refunds: 0,
         netRevenue: grossRevenue - fees,
-        pageViews: Math.floor(Math.random() * 5000) + 1000,
-        uniqueVisitors: Math.floor(Math.random() * 2000) + 500,
+        pageViews: 0, // Real data requires Eventbrite Analytics API access
+        uniqueVisitors: 0, // Real data requires Eventbrite Analytics API access
         attendees: guests,
         salesByDay: []
       };
