@@ -3573,6 +3573,43 @@ app.get('/api/v1/version', (_req, res) => {
   res.json({ version: API_VERSION, timestamp: new Date().toISOString() });
 });
 
+// Migration endpoint - Fix SMS tables schema
+app.post('/api/v1/migrate/sms-fix', async (req, res) => {
+  try {
+    // Add missing columns to sms_conversations
+    await pool.query(`
+      ALTER TABLE sms_conversations ADD COLUMN IF NOT EXISTS is_read BOOLEAN DEFAULT false;
+      ALTER TABLE sms_conversations ADD COLUMN IF NOT EXISTS is_human_takeover BOOLEAN DEFAULT false;
+      ALTER TABLE sms_conversations ADD COLUMN IF NOT EXISTS ai_response TEXT;
+    `);
+    // Create scheduled_messages if not exists
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS scheduled_messages (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER,
+        event_id INTEGER,
+        recipients JSONB NOT NULL,
+        message TEXT NOT NULL,
+        scheduled_at TIMESTAMP NOT NULL,
+        status VARCHAR(50) DEFAULT 'pending',
+        sent_at TIMESTAMP,
+        sent_count INTEGER DEFAULT 0,
+        failed_count INTEGER DEFAULT 0,
+        results JSONB,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_scheduled_status ON scheduled_messages(status);
+      CREATE INDEX IF NOT EXISTS idx_scheduled_time ON scheduled_messages(scheduled_at);
+      CREATE INDEX IF NOT EXISTS idx_scheduled_user ON scheduled_messages(user_id);
+    `);
+    res.json({ success: true, message: 'SMS tables fixed successfully' });
+  } catch (error) {
+    console.error('Migration error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // NOTE: All guest-lists routes are in the PROXY ROUTES section below
 // They fetch data from the monorepo backend and handle emails via Resend
 
