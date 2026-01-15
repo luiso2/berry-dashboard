@@ -14768,6 +14768,7 @@ app.post('/api/v1/integrations/eventbrite/events', async (req, res) => {
 
     res.json({
       success: true,
+      id: ebEvent.id,  // Frontend expects id at root level
       eventbrite_event: ebEvent,
       local_event: localResult.rows[0]
     });

@@ -53,7 +53,7 @@ export function SMSView({ onToast }: SMSViewProps) {
 
   const fetchMessages = async (phone: string) => {
     try {
-      const res = await fetch(`${API_URL}/sms/messages/${encodeURIComponent(phone)}`);
+      const res = await fetch(`${API_URL}/sms/conversations/thread/${encodeURIComponent(phone)}`);
       if (!res.ok) throw new Error('Failed to fetch');
       const data = await res.json();
       setMessages(data.messages || []);
@@ -66,10 +66,10 @@ export function SMSView({ onToast }: SMSViewProps) {
 
   const toggleHumanTakeover = async (phone: string, enable: boolean) => {
     try {
-      const res = await fetch(`${API_URL}/sms/human-takeover`, {
-        method: 'POST',
+      const res = await fetch(`${API_URL}/sms/conversations/takeover/${encodeURIComponent(phone)}`, {
+        method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone, enable }),
+        body: JSON.stringify({ enable }),
       });
       if (!res.ok) throw new Error('Failed');
       onToast(enable ? 'Human takeover enabled' : 'AI resumed', 'success');
@@ -82,7 +82,7 @@ export function SMSView({ onToast }: SMSViewProps) {
   const sendReply = async (phone: string, message: string) => {
     setSending(true);
     try {
-      const res = await fetch(`${API_URL}/sms/send`, {
+      const res = await fetch(`${API_URL}/sms/conversations/reply`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ to: phone, message }),
@@ -104,7 +104,7 @@ export function SMSView({ onToast }: SMSViewProps) {
   const deleteThread = async (phone: string) => {
     if (!confirm('Delete this conversation?')) return;
     try {
-      const res = await fetch(`${API_URL}/sms/threads/${encodeURIComponent(phone)}`, {
+      const res = await fetch(`${API_URL}/sms/conversations/thread/${encodeURIComponent(phone)}`, {
         method: 'DELETE',
       });
       if (!res.ok) throw new Error('Failed');
@@ -118,11 +118,13 @@ export function SMSView({ onToast }: SMSViewProps) {
   };
 
   const deleteMessage = async (id: number, phone: string) => {
+    if (!confirm('Delete this message?')) return;
     try {
-      const res = await fetch(`${API_URL}/sms/messages/${id}`, {
+      const res = await fetch(`${API_URL}/sms/conversations/${id}`, {
         method: 'DELETE',
       });
       if (!res.ok) throw new Error('Failed');
+      onToast('Message deleted', 'success');
       await fetchMessages(phone);
     } catch (error) {
       onToast('Error deleting message', 'error');
