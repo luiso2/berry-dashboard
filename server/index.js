@@ -1707,6 +1707,12 @@ const initDatabase = async () => {
         IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'eventbrite_attendees' AND column_name = 'checked_in') THEN
           ALTER TABLE eventbrite_attendees ADD COLUMN checked_in BOOLEAN DEFAULT false;
         END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'eventbrite_attendees' AND column_name = 'name') THEN
+          ALTER TABLE eventbrite_attendees ADD COLUMN name VARCHAR(255);
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'eventbrite_attendees' AND column_name = 'email') THEN
+          ALTER TABLE eventbrite_attendees ADD COLUMN email VARCHAR(255);
+        END IF;
       END $$;
     `);
 
