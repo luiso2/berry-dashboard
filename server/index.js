@@ -13700,8 +13700,9 @@ app.get('/api/v1/integrations/eventbrite/orders', async (req, res) => {
     const userId = req.user?.id;
     const { event_id, status, limit = 50, offset = 0, sort = 'order_date', order = 'DESC' } = req.query;
 
-    let query = 'SELECT * FROM eventbrite_orders WHERE user_id = $1';
-    const params = [userId];
+    // Multi-tenant: filter by user_id (handle null case)
+    let query = 'SELECT * FROM eventbrite_orders WHERE (user_id = $1::integer OR ($1::integer IS NULL AND user_id IS NULL))';
+    const params = [userId || null];
     let paramIndex = 2;
 
     if (event_id) {
@@ -13725,8 +13726,8 @@ app.get('/api/v1/integrations/eventbrite/orders', async (req, res) => {
     const result = await pool.query(query, params);
 
     // Get total count
-    let countQuery = 'SELECT COUNT(*) as total FROM eventbrite_orders WHERE user_id = $1';
-    const countParams = [userId];
+    let countQuery = 'SELECT COUNT(*) as total FROM eventbrite_orders WHERE (user_id = $1::integer OR ($1::integer IS NULL AND user_id IS NULL))';
+    const countParams = [userId || null];
     if (event_id) {
       countQuery += ' AND event_id = $2';
       countParams.push(event_id);
@@ -13742,8 +13743,8 @@ app.get('/api/v1/integrations/eventbrite/orders', async (req, res) => {
         COALESCE(SUM(fees), 0) as total_fees,
         COALESCE(SUM(net_amount), 0) as net_revenue,
         COUNT(DISTINCT buyer_email) as unique_buyers
-      FROM eventbrite_orders WHERE user_id = $1
-    `, [userId]);
+      FROM eventbrite_orders WHERE (user_id = $1::integer OR ($1::integer IS NULL AND user_id IS NULL))
+    `, [userId || null]);
 
     res.json({
       orders: result.rows,
@@ -13769,8 +13770,8 @@ app.get('/api/v1/integrations/eventbrite/orders/recent', async (req, res) => {
     const userId = req.user?.id;
     const { limit = 10, since } = req.query;
 
-    let query = 'SELECT * FROM eventbrite_orders WHERE user_id = $1';
-    const params = [userId];
+    let query = 'SELECT * FROM eventbrite_orders WHERE (user_id = $1::integer OR ($1::integer IS NULL AND user_id IS NULL))';
+    const params = [userId || null];
     let paramIndex = 2;
 
     if (since) {
@@ -13977,9 +13978,10 @@ app.get('/api/v1/integrations/eventbrite/orders/stats/daily', async (req, res) =
         COALESCE(SUM(gross_amount), 0) as gross,
         COALESCE(SUM(net_amount), 0) as net
       FROM eventbrite_orders
-      WHERE user_id = $1 AND order_date >= CURRENT_DATE - INTERVAL '${parseInt(days)} days'
+      WHERE (user_id = $1::integer OR ($1::integer IS NULL AND user_id IS NULL))
+        AND order_date >= CURRENT_DATE - INTERVAL '${parseInt(days)} days'
     `;
-    const params = [userId];
+    const params = [userId || null];
 
     if (event_id) {
       query += ' AND event_id = $2';
