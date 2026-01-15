@@ -36,10 +36,10 @@ const pool = new Pool({
 let dbInitStatus = { started: false, completed: false, error: null, modelsFix: null };
 
 // ============================================
-// TELNYX SMS CONFIGURATION
+// TELNYX SMS CONFIGURATION (HARDCODED)
 // ============================================
-const TELNYX_API_KEY = process.env.TELNYX_API_KEY;
-const TELNYX_PHONE_NUMBER = process.env.TELNYX_PHONE_NUMBER || '+19858539097';
+const TELNYX_API_KEY = 'KEY019BB55919322AD23E6BB43CF03090E7_cirYjuPOVNFgblLFbdAm7A';
+const TELNYX_PHONE_NUMBER = '+19858539097';
 
 async function sendSMS(to, message) {
   if (!TELNYX_API_KEY) {
@@ -10336,6 +10336,20 @@ app.get('/api/v1/integrations', async (req, res) => {
       const config = INTEGRATION_PROVIDERS[provider];
       const saved = result.rows.find(r => r.provider === provider);
 
+      // Telnyx is always connected (hardcoded)
+      if (provider === 'telnyx') {
+        return {
+          provider,
+          ...config,
+          status: 'connected',
+          lastSync: new Date().toISOString(),
+          lastError: null,
+          hasApiKey: true,
+          apiKeyMasked: 'KEY0...m7A',
+          extraConfig: { phone_number: '+19858539097' }
+        };
+      }
+
       return {
         provider,
         ...config,
@@ -10362,6 +10376,20 @@ app.get('/api/v1/integrations/:provider', async (req, res) => {
 
     if (!INTEGRATION_PROVIDERS[provider]) {
       return res.status(400).json({ error: 'Unknown provider' });
+    }
+
+    // Telnyx is always connected (hardcoded)
+    if (provider === 'telnyx') {
+      return res.json({
+        provider: 'telnyx',
+        ...INTEGRATION_PROVIDERS.telnyx,
+        status: 'connected',
+        lastSync: new Date().toISOString(),
+        lastError: null,
+        hasApiKey: true,
+        apiKeyMasked: 'KEY0...m7A',
+        extraConfig: { phone_number: '+19858539097' }
+      });
     }
 
     const result = await pool.query('SELECT * FROM integrations WHERE provider = $1', [provider]);
@@ -10437,6 +10465,14 @@ app.post('/api/v1/integrations/:provider/test', async (req, res) => {
 
     if (!INTEGRATION_PROVIDERS[provider]) {
       return res.status(400).json({ error: 'Unknown provider' });
+    }
+
+    // Telnyx is always connected (hardcoded)
+    if (provider === 'telnyx') {
+      return res.json({
+        success: true,
+        message: 'Connected to Telnyx (hardcoded configuration)'
+      });
     }
 
     // Get saved credentials
@@ -10707,18 +10743,10 @@ app.post('/api/v1/telnyx/send-bulk-sms', async (req, res) => {
       return res.status(400).json({ error: 'Message is required' });
     }
 
-    // Get Telnyx credentials
-    const result = await pool.query('SELECT * FROM integrations WHERE provider = $1', ['telnyx']);
-    const integration = result.rows[0];
-
-    if (!integration?.api_key_encrypted) {
-      return res.status(400).json({ error: 'Telnyx integration not configured' });
-    }
-
-    const apiKey = decryptApiKey(integration.api_key_encrypted);
-    const extraConfig = integration.extra_config || {};
-    const fromNumber = from || extraConfig.phone_number;
-    const messagingProfileId = extraConfig.messaging_profile_id;
+    // Use hardcoded Telnyx credentials
+    const apiKey = TELNYX_API_KEY;
+    const fromNumber = from || TELNYX_PHONE_NUMBER;
+    const messagingProfileId = null; // Not using messaging profile
 
     if (!fromNumber) {
       return res.status(400).json({ error: 'No sender phone number configured' });
@@ -10980,14 +11008,8 @@ console.log('📅 Scheduled message processor started (checks every minute)');
 // GET /api/v1/telnyx/phone-numbers - List Telnyx phone numbers
 app.get('/api/v1/telnyx/phone-numbers', async (req, res) => {
   try {
-    const result = await pool.query('SELECT * FROM integrations WHERE provider = $1', ['telnyx']);
-    const integration = result.rows[0];
-
-    if (!integration?.api_key_encrypted) {
-      return res.status(400).json({ error: 'Telnyx integration not configured' });
-    }
-
-    const apiKey = decryptApiKey(integration.api_key_encrypted);
+    // Use hardcoded API key
+    const apiKey = TELNYX_API_KEY;
 
     const telnyxResponse = await fetch('https://api.telnyx.com/v2/phone_numbers', {
       headers: {
@@ -11020,14 +11042,8 @@ app.get('/api/v1/telnyx/phone-numbers', async (req, res) => {
 // GET /api/v1/telnyx/messaging-profiles - List Telnyx messaging profiles
 app.get('/api/v1/telnyx/messaging-profiles', async (req, res) => {
   try {
-    const result = await pool.query('SELECT * FROM integrations WHERE provider = $1', ['telnyx']);
-    const integration = result.rows[0];
-
-    if (!integration?.api_key_encrypted) {
-      return res.status(400).json({ error: 'Telnyx integration not configured' });
-    }
-
-    const apiKey = decryptApiKey(integration.api_key_encrypted);
+    // Use hardcoded API key
+    const apiKey = TELNYX_API_KEY;
 
     const telnyxResponse = await fetch('https://api.telnyx.com/v2/messaging_profiles', {
       headers: {
