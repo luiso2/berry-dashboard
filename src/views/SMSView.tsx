@@ -182,18 +182,18 @@ export function SMSView({ onToast }: SMSViewProps) {
             ) : (
               threads.map((thread) => (
                 <div
-                  key={thread.phone}
-                  onClick={() => fetchMessages(thread.phone)}
+                  key={thread.contact_number}
+                  onClick={() => fetchMessages(thread.contact_number)}
                   style={{
                     padding: '12px 16px',
                     borderBottom: '1px solid #1a1a1a',
                     cursor: 'pointer',
-                    background: selectedThread === thread.phone ? 'rgba(59,130,246,0.1)' : 'transparent',
+                    background: selectedThread === thread.contact_number ? 'rgba(59,130,246,0.1)' : 'transparent',
                     transition: 'background 0.2s'
                   }}
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
-                    <span style={{ fontWeight: 600, fontSize: 14 }}>{thread.phone}</span>
+                    <span style={{ fontWeight: 600, fontSize: 14 }}>{thread.contact_number}</span>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                       {thread.is_human_takeover && (
                         <span style={{ background: '#8b5cf6', color: '#fff', fontSize: 10, padding: '2px 6px', borderRadius: 4 }}>Human</span>
@@ -207,7 +207,7 @@ export function SMSView({ onToast }: SMSViewProps) {
                     {thread.last_message}
                   </div>
                   <div style={{ fontSize: 11, color: '#555', marginTop: 4 }}>
-                    {new Date(thread.last_message_time).toLocaleString()}
+                    {new Date(thread.last_message_at).toLocaleString()}
                   </div>
                 </div>
               ))
@@ -227,11 +227,11 @@ export function SMSView({ onToast }: SMSViewProps) {
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                 <button
                   onClick={() => {
-                    const thread = threads.find(t => t.phone === selectedThread);
+                    const thread = threads.find(t => t.contact_number === selectedThread);
                     toggleHumanTakeover(selectedThread, !thread?.is_human_takeover);
                   }}
                   style={{
-                    background: threads.find(t => t.phone === selectedThread)?.is_human_takeover ? '#8b5cf6' : '#333',
+                    background: threads.find(t => t.contact_number === selectedThread)?.is_human_takeover ? '#8b5cf6' : '#333',
                     border: 'none',
                     color: '#fff',
                     padding: '8px 12px',
@@ -240,7 +240,7 @@ export function SMSView({ onToast }: SMSViewProps) {
                     cursor: 'pointer'
                   }}
                 >
-                  {threads.find(t => t.phone === selectedThread)?.is_human_takeover ? 'Switch to AI' : 'Take Over'}
+                  {threads.find(t => t.contact_number === selectedThread)?.is_human_takeover ? 'Switch to AI' : 'Take Over'}
                 </button>
                 <button
                   onClick={() => deleteThread(selectedThread)}

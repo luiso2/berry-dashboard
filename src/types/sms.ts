@@ -14,12 +14,14 @@ export interface SMSMessage {
 }
 
 export interface SMSThread {
-  phone: string;
-  message_count: number;
-  unread_count: number;
+  contact_number: string;
+  message_count: number | string;
+  unread_count: number | string;
   is_human_takeover: boolean;
+  is_read: boolean;
   last_message: string;
-  last_message_time: string;
+  last_direction: 'inbound' | 'outbound';
+  last_message_at: string;
 }
 
 export interface SMSStats {
