@@ -481,13 +481,9 @@ function App() {
 
   // Integrations state
   const [integrations, setIntegrations] = useState<Integration[]>([]);
-  const [selectedIntegration, setSelectedIntegration] = useState<Integration | null>(null);
-  const [integrationFormData, setIntegrationFormData] = useState({ apiKey: '', apiSecret: '', serverPrefix: '', phoneNumber: '', messagingProfileId: '' });
   const [showSmsModal, setShowSmsModal] = useState(false);
   const [smsFormData, setSmsFormData] = useState({ to: '', message: '' });
   const [smsSending, setSmsSending] = useState(false);
-  const [integrationLoading, setIntegrationLoading] = useState<string | null>(null);
-  const [mailchimpAudiences, setMailchimpAudiences] = useState<{id: string, name: string, memberCount: number}[]>([]);
 
   // Eventbrite Metrics state
   const [eventbriteMetrics, setEventbriteMetrics] = useState<EventbriteMetrics>({
@@ -919,48 +915,6 @@ function App() {
     }
   }, [user?.id]);
 
-  // Save Integration Config
-  const saveIntegrationConfig = async (provider: string) => {
-    setIntegrationLoading(provider);
-    try {
-      const extraConfig: Record<string, string> = {};
-      if (provider === 'mailchimp' && integrationFormData.serverPrefix) {
-        extraConfig.server_prefix = integrationFormData.serverPrefix;
-      }
-      if (provider === 'telnyx') {
-        if (integrationFormData.phoneNumber) {
-          extraConfig.phone_number = integrationFormData.phoneNumber;
-        }
-        if (integrationFormData.messagingProfileId) {
-          extraConfig.messaging_profile_id = integrationFormData.messagingProfileId;
-        }
-      }
-
-      const res = await fetch(`${API_URL}/integrations/${provider}/config`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          apiKey: integrationFormData.apiKey,
-          apiSecret: integrationFormData.apiSecret || undefined,
-          extraConfig
-        })
-      });
-
-      const data = await res.json();
-      if (data.success) {
-        addToast('Configuration saved! Click Test Connection to verify.', 'success');
-        fetchIntegrations();
-        setIntegrationFormData({ apiKey: '', apiSecret: '', serverPrefix: '', phoneNumber: '', messagingProfileId: '' });
-      } else {
-        addToast(data.error || 'Failed to save', 'error');
-      }
-    } catch (error) {
-      addToast('Failed to save configuration', 'error');
-    } finally {
-      setIntegrationLoading(null);
-    }
-  };
-
   // Send SMS via Telnyx
   const sendTelnyxSms = async () => {
     if (!smsFormData.to || !smsFormData.message) {
@@ -990,105 +944,6 @@ function App() {
       addToast('Failed to send SMS', 'error');
     } finally {
       setSmsSending(false);
-    }
-  };
-
-  // Test Integration Connection
-  const testIntegration = async (provider: string) => {
-    setIntegrationLoading(provider);
-    try {
-      const res = await fetch(`${API_URL}/integrations/${provider}/test`, {
-        method: 'POST'
-      });
-      const data = await res.json();
-      if (data.success) {
-        addToast(data.message || 'Connected successfully!', 'success');
-      } else {
-        addToast(data.message || 'Connection failed', 'error');
-      }
-      fetchIntegrations();
-    } catch (error) {
-      addToast('Connection test failed', 'error');
-    } finally {
-      setIntegrationLoading(null);
-    }
-  };
-
-  // Sync with Integration
-  const syncIntegration = async (provider: string, options?: Record<string, string>) => {
-    setIntegrationLoading(provider);
-    try {
-      // Add userId for per-user integrations
-      const syncOptions = {
-        ...options,
-        userId: user?.id
-      };
-
-      const res = await fetch(`${API_URL}/integrations/${provider}/sync`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(syncOptions)
-      });
-      const data = await res.json();
-      if (data.success) {
-        addToast(data.message || 'Sync completed!', 'success');
-        // Refresh relevant data
-        if (provider === 'eventbrite') {
-          fetchTickets();
-          fetchEvents();
-        }
-      } else {
-        addToast(data.error || 'Sync failed', 'error');
-      }
-    } catch (error) {
-      addToast('Sync failed', 'error');
-    } finally {
-      setIntegrationLoading(null);
-    }
-  };
-
-  // Disconnect Integration
-  const disconnectIntegration = async (provider: string) => {
-    if (!confirm(`Are you sure you want to disconnect ${provider}?`)) return;
-
-    setIntegrationLoading(provider);
-    try {
-      let res;
-      if (provider === 'eventbrite') {
-        // Use per-user disconnect for Eventbrite
-        res = await fetch(`${API_URL}/auth/eventbrite/disconnect`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ userId: user?.id })
-        });
-      } else {
-        res = await fetch(`${API_URL}/integrations/${provider}`, {
-          method: 'DELETE'
-        });
-      }
-      const data = await res.json();
-      if (data.success) {
-        addToast(`${provider} disconnected`, 'success');
-        fetchIntegrations();
-        setSelectedIntegration(null);
-      } else {
-        addToast(data.error || 'Failed to disconnect', 'error');
-      }
-    } catch (error) {
-      addToast('Failed to disconnect', 'error');
-    } finally {
-      setIntegrationLoading(null);
-    }
-  };
-
-  // Fetch Mailchimp Audiences
-  const fetchMailchimpAudiences = async () => {
-    try {
-      const res = await fetch(`${API_URL}/integrations/mailchimp/audiences`);
-      const data = await res.json();
-      setMailchimpAudiences(data.audiences || []);
-    } catch (error) {
-      console.error('Error fetching audiences:', error);
     }
   };
 
@@ -7667,7 +7522,7 @@ function App() {
         {/* Integrations View */}
         {activeView === 'integrations' && (
           <IntegrationsView
-            userId={user?.id}
+            userId={user?.id?.toString()}
             onToast={addToast}
             onOpenSmsModal={() => setShowSmsModal(true)}
             onRefreshTickets={fetchTickets}
