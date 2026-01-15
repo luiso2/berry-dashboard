@@ -7536,15 +7536,15 @@ app.get('/api/v1/events/:id', async (req, res) => {
     const queries = [];
 
     if (existingTables.includes('guest_lists')) {
-      queries.push(pool.query('SELECT COUNT(*) FROM guest_lists WHERE event_id = $1', [id]).then(r => { guestsCount = parseInt(r.rows[0].count); }));
+      queries.push(pool.query('SELECT COUNT(*) FROM guest_lists WHERE event_id = $1', [eventId]).then(r => { guestsCount = parseInt(r.rows[0].count); }));
     } else if (existingTables.includes('guests')) {
-      queries.push(pool.query('SELECT COUNT(*) FROM guests WHERE event_id = $1', [id]).then(r => { guestsCount = parseInt(r.rows[0].count); }));
+      queries.push(pool.query('SELECT COUNT(*) FROM guests WHERE event_id = $1', [eventId]).then(r => { guestsCount = parseInt(r.rows[0].count); }));
     }
 
     if (existingTables.includes('tickets')) {
       // Try event_ref_id first, fallback to event_id
       queries.push(
-        pool.query('SELECT COUNT(*) FROM tickets WHERE event_ref_id = $1 OR event_id::text = $1', [id])
+        pool.query('SELECT COUNT(*) FROM tickets WHERE event_ref_id = $1 OR event_id::text = $1', [eventId])
           .then(r => { ticketsCount = parseInt(r.rows[0].count); })
           .catch(() => { ticketsCount = 0; })
       );
@@ -7552,7 +7552,7 @@ app.get('/api/v1/events/:id', async (req, res) => {
 
     if (existingTables.includes('sponsors')) {
       queries.push(
-        pool.query('SELECT COUNT(*) FROM sponsors WHERE event_id = $1', [id])
+        pool.query('SELECT COUNT(*) FROM sponsors WHERE event_id = $1', [eventId])
           .then(r => { sponsorsCount = parseInt(r.rows[0].count); })
           .catch(() => { sponsorsCount = 0; })
       );
@@ -7560,7 +7560,7 @@ app.get('/api/v1/events/:id', async (req, res) => {
 
     if (existingTables.includes('budgets')) {
       queries.push(
-        pool.query('SELECT COALESCE(SUM(total_budget), 0) as budget FROM budgets WHERE event_id = $1', [id])
+        pool.query('SELECT COALESCE(SUM(total_budget), 0) as budget FROM budgets WHERE event_id = $1', [eventId])
           .then(r => { budgetSum = parseFloat(r.rows[0].budget); })
           .catch(() => { budgetSum = 0; })
       );
@@ -14848,25 +14848,47 @@ app.post('/api/v1/integrations/eventbrite/events', async (req, res) => {
 
     const ebEvent = await response.json();
 
-    // Save to local events table
+    // Generate slug from event name
+    const generateEventSlug = (eventName) => {
+      return eventName
+        .toLowerCase()
+        .replace(/[^a-z0-9\s-]/g, '')
+        .replace(/\s+/g, '-')
+        .replace(/-+/g, '-')
+        .substring(0, 50)
+        + '-' + Date.now().toString(36);
+    };
+    const slug = generateEventSlug(name);
+
+    // Save to local events table with slug
     const localResult = await pool.query(`
       INSERT INTO events (
         user_id, name, description, event_date, event_time, end_time,
         eventbrite_id, eventbrite_url, venue_id, eventbrite_capacity,
-        eventbrite_category_id, eventbrite_subcategory_id, eventbrite_online_event
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+        eventbrite_category_id, eventbrite_subcategory_id, eventbrite_online_event,
+        slug, is_public
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
       RETURNING *
     `, [
       userId, name, description, start_date.split('T')[0],
       start_date.split('T')[1]?.substring(0, 5) || '19:00',
       end_date.split('T')[1]?.substring(0, 5) || '23:00',
-      ebEvent.id, ebEvent.url, venue_id, capacity,
-      category_id, subcategory_id, online_event
+      ebEvent.id, ebEvent.url, finalVenueId, capacity,
+      category_id, subcategory_id, online_event,
+      slug, true  // is_public = true for shareable events
     ]);
+
+    // Build the local portal URL
+    const baseUrl = process.env.FRONTEND_URL || 'https://berry.merktop.com';
+    const portalUrl = `${baseUrl}/e/${slug}`;
 
     res.json({
       success: true,
       id: ebEvent.id,  // Frontend expects id at root level
+      localId: localResult.rows[0].id,
+      slug: slug,
+      portalUrl: portalUrl,  // URL to share on local portal
+      eventbriteUrl: ebEvent.url,  // URL on Eventbrite
       eventbrite_event: ebEvent,
       local_event: localResult.rows[0]
     });

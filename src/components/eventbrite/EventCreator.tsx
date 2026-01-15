@@ -19,6 +19,8 @@ export function EventCreator({ onEventCreated }: EventCreatorProps) {
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [createdEventId, setCreatedEventId] = useState<string | null>(null);
+  const [portalUrl, setPortalUrl] = useState<string | null>(null);
+  const [eventbriteUrl, setEventbriteUrl] = useState<string | null>(null);
 
   // Event details
   const [eventData, setEventData] = useState({
@@ -95,6 +97,8 @@ export function EventCreator({ onEventCreated }: EventCreatorProps) {
       if (res.ok) {
         const data = await res.json();
         setCreatedEventId(data.id);
+        setPortalUrl(data.portalUrl || null);
+        setEventbriteUrl(data.eventbriteUrl || data.eventbrite_event?.url || null);
         setStep(2);
       } else {
         const error = await res.json();
@@ -195,6 +199,8 @@ export function EventCreator({ onEventCreated }: EventCreatorProps) {
   const resetForm = () => {
     setStep(1);
     setCreatedEventId(null);
+    setPortalUrl(null);
+    setEventbriteUrl(null);
     setEventData({
       name: '',
       description: '',
@@ -599,17 +605,53 @@ export function EventCreator({ onEventCreated }: EventCreatorProps) {
             <span className="text-4xl">🎉</span>
           </div>
           <h3 className="text-2xl font-bold text-white mb-2">Event Published!</h3>
-          <p className="text-white/60 mb-8">Your event is now live on Eventbrite.</p>
+          <p className="text-white/60 mb-8">Your event is now live and ready to share.</p>
 
-          <div className="flex justify-center gap-4">
-            <a
-              href={`https://www.eventbrite.com/e/${createdEventId}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="px-6 py-3 bg-gradient-to-r from-amber-500 to-yellow-600 rounded-lg text-white font-medium hover:opacity-90 transition-opacity"
-            >
-              View on Eventbrite →
-            </a>
+          {/* Share Links */}
+          {portalUrl && (
+            <div className="mb-6 p-4 bg-white/5 rounded-xl border border-white/10">
+              <p className="text-white/60 text-sm mb-2">Share your event page:</p>
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  readOnly
+                  value={portalUrl}
+                  className="flex-1 px-4 py-2 bg-white/10 border border-white/20 rounded-lg text-white text-sm"
+                />
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(portalUrl);
+                    alert('Link copied!');
+                  }}
+                  className="px-4 py-2 bg-amber-500 rounded-lg text-white font-medium hover:bg-amber-600"
+                >
+                  Copy
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div className="flex flex-col sm:flex-row justify-center gap-4">
+            {portalUrl && (
+              <a
+                href={portalUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-6 py-3 bg-gradient-to-r from-amber-500 to-yellow-600 rounded-lg text-white font-medium hover:opacity-90 transition-opacity"
+              >
+                View Event Page →
+              </a>
+            )}
+            {eventbriteUrl && (
+              <a
+                href={eventbriteUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-6 py-3 bg-white/10 hover:bg-white/20 rounded-lg text-white transition-colors"
+              >
+                View on Eventbrite
+              </a>
+            )}
             <button
               onClick={resetForm}
               className="px-6 py-3 bg-white/10 hover:bg-white/20 rounded-lg text-white transition-colors"
