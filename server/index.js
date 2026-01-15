@@ -14680,6 +14680,7 @@ app.post('/api/v1/integrations/eventbrite/events', async (req, res) => {
       end_date,
       timezone = 'America/New_York',
       venue_id,
+      venue,  // Frontend sends venue object with name and address
       online_event = false,
       capacity,
       currency = 'USD',
@@ -14708,6 +14709,45 @@ app.post('/api/v1/integrations/eventbrite/events', async (req, res) => {
       return res.status(400).json({ error: 'Organization not found' });
     }
 
+    // Create venue in Eventbrite if venue data is provided (not just venue_id)
+    let finalVenueId = venue_id;
+    if (!online_event && venue && venue.name && !venue_id) {
+      try {
+        const venueData = {
+          venue: {
+            name: venue.name,
+            address: {
+              address_1: venue.address?.address_1 || venue.address?.address || '',
+              city: venue.address?.city || '',
+              region: venue.address?.region || '',
+              postal_code: venue.address?.postal_code || '',
+              country: venue.address?.country || 'US'
+            }
+          }
+        };
+
+        const venueResponse = await fetch(`https://www.eventbriteapi.com/v3/organizations/${orgId}/venues/`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${apiKey}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(venueData)
+        });
+
+        if (venueResponse.ok) {
+          const createdVenue = await venueResponse.json();
+          finalVenueId = createdVenue.id;
+          console.log('Created venue in Eventbrite:', createdVenue.id);
+        } else {
+          console.warn('Failed to create venue, continuing without venue:', await venueResponse.text());
+        }
+      } catch (venueError) {
+        console.warn('Error creating venue:', venueError.message);
+        // Continue without venue - event can still be created
+      }
+    }
+
     const eventData = {
       event: {
         name: { html: name },
@@ -14725,7 +14765,7 @@ app.post('/api/v1/integrations/eventbrite/events', async (req, res) => {
         listed: listed,
         shareable: shareable,
         capacity: capacity,
-        venue_id: venue_id,
+        venue_id: finalVenueId,
         category_id: category_id,
         subcategory_id: subcategory_id
       }
