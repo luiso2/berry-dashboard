@@ -13039,21 +13039,26 @@ app.get('/api/v1/integrations/eventbrite/metrics', async (req, res) => {
       `, [userId]);
     } catch (e) {
       try {
-        // Fallback: without user_id filter
+        // Fallback: minimal query with only id and name
         eventsResult = await pool.query(`
           SELECT
-            e.id,
-            e.name,
-            COALESCE(e.event_date, e.start_date, e.date, e.created_at) as "startDate",
-            COALESCE(e.venue_name, e.venue, e.location, 'TBD') as venue,
-            COALESCE(e.status, 'draft') as status,
-            COALESCE(e.expected_attendance, e.capacity, 100) as capacity
-          FROM events e
-          ORDER BY e.id DESC
+            id,
+            name
+          FROM events
+          ORDER BY id DESC
           LIMIT 50
         `);
+        // Add default values for other fields
+        eventsResult.rows = eventsResult.rows.map(row => ({
+          ...row,
+          startDate: new Date().toISOString(),
+          venue: 'TBD',
+          status: 'draft',
+          capacity: 100
+        }));
       } catch (e2) {
         // No events table - return empty
+        console.log('Note: events table not accessible:', e2.message);
         eventsResult = { rows: [] };
       }
     }
