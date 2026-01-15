@@ -11650,14 +11650,33 @@ app.get('/api/v1/auth/eventbrite/callback', async (req, res) => {
     const eventbriteEmail = userData.emails?.[0]?.email;
     console.log('Eventbrite user:', userData.name, eventbriteEmail);
 
+    // Get user's organizations
+    let organizationId = null;
+    let organizationName = null;
+    try {
+      const orgResponse = await fetch('https://www.eventbriteapi.com/v3/users/me/organizations/', {
+        headers: { 'Authorization': `Bearer ${accessToken}` }
+      });
+      if (orgResponse.ok) {
+        const orgData = await orgResponse.json();
+        if (orgData.organizations && orgData.organizations.length > 0) {
+          organizationId = orgData.organizations[0].id;
+          organizationName = orgData.organizations[0].name;
+          console.log('Found organization:', organizationName, organizationId);
+        }
+      }
+    } catch (orgErr) {
+      console.log('Could not fetch organizations:', orgErr.message);
+    }
+
     // Encrypt and store the access token
     const encryptedToken = encryptApiKey(accessToken);
 
     // Store in user_integrations table (per-user)
     if (userId && userId !== 'global') {
       await pool.query(`
-        INSERT INTO user_integrations (user_id, provider, api_key_encrypted, status, provider_user_id, provider_user_email, provider_user_name, last_sync, extra_config)
-        VALUES ($1, 'eventbrite', $2, 'connected', $3, $4, $5, NOW(), $6)
+        INSERT INTO user_integrations (user_id, provider, api_key_encrypted, status, provider_user_id, provider_user_email, provider_user_name, last_sync, extra_config, metadata)
+        VALUES ($1, 'eventbrite', $2, 'connected', $3, $4, $5, NOW(), $6, $7)
         ON CONFLICT (user_id, provider)
         DO UPDATE SET
           api_key_encrypted = $2,
@@ -11667,6 +11686,7 @@ app.get('/api/v1/auth/eventbrite/callback', async (req, res) => {
           provider_user_name = $5,
           last_sync = NOW(),
           extra_config = $6,
+          metadata = $7,
           updated_at = NOW()
       `, [
         userId,
@@ -11674,9 +11694,10 @@ app.get('/api/v1/auth/eventbrite/callback', async (req, res) => {
         userData.id,
         eventbriteEmail,
         userData.name,
-        JSON.stringify({ connectedAt: new Date().toISOString() })
+        JSON.stringify({ connectedAt: new Date().toISOString(), organization_id: organizationId, organization_name: organizationName }),
+        JSON.stringify({ organization_id: organizationId, organization_name: organizationName })
       ]);
-      console.log(`Eventbrite connected for user ${userId}: ${eventbriteEmail}`);
+      console.log(`Eventbrite connected for user ${userId}: ${eventbriteEmail} (org: ${organizationName})`);
     } else {
       // Fallback to global integrations table (backward compatibility)
       await pool.query(`
@@ -14042,14 +14063,41 @@ app.post('/api/v1/integrations/eventbrite/orders/sync', async (req, res) => {
       return res.status(400).json({ error: 'Eventbrite not connected' });
     }
 
-    // Get org ID
+    // Get org ID from metadata or extra_config
     const orgResult = await pool.query(
-      "SELECT metadata->>'organization_id' as org_id FROM user_integrations WHERE user_id = $1 AND provider = 'eventbrite'",
+      `SELECT
+        COALESCE(metadata->>'organization_id', extra_config->>'organization_id') as org_id
+       FROM user_integrations
+       WHERE user_id = $1 AND provider = 'eventbrite'`,
       [userId]
     );
-    const orgId = orgResult.rows[0]?.org_id;
+    let orgId = orgResult.rows[0]?.org_id;
+
+    // If no org ID stored, fetch from Eventbrite API
     if (!orgId) {
-      return res.status(400).json({ error: 'Organization not found' });
+      console.log('No organization_id stored, fetching from API...');
+      const orgResponse = await fetch('https://www.eventbriteapi.com/v3/users/me/organizations/', {
+        headers: { 'Authorization': `Bearer ${apiKey}` }
+      });
+      if (orgResponse.ok) {
+        const orgData = await orgResponse.json();
+        if (orgData.organizations && orgData.organizations.length > 0) {
+          orgId = orgData.organizations[0].id;
+          // Save it for future use
+          await pool.query(
+            `UPDATE user_integrations
+             SET metadata = COALESCE(metadata, '{}'::jsonb) || $1::jsonb,
+                 extra_config = COALESCE(extra_config, '{}'::jsonb) || $1::jsonb
+             WHERE user_id = $2 AND provider = 'eventbrite'`,
+            [JSON.stringify({ organization_id: orgId }), userId]
+          );
+          console.log('Saved organization_id:', orgId);
+        }
+      }
+    }
+
+    if (!orgId) {
+      return res.status(400).json({ error: 'Organization not found. Please reconnect Eventbrite.' });
     }
 
     let ordersUrl = `https://www.eventbriteapi.com/v3/organizations/${orgId}/orders/?expand=attendees,event`;
@@ -15062,14 +15110,37 @@ app.post('/api/v1/integrations/eventbrite/events', async (req, res) => {
       return res.status(400).json({ error: 'Eventbrite not connected' });
     }
 
-    // Get org ID
+    // Get org ID from metadata or extra_config
     const orgResult = await pool.query(
-      "SELECT metadata->>'organization_id' as org_id FROM user_integrations WHERE user_id = $1 AND provider = 'eventbrite'",
+      `SELECT
+        COALESCE(metadata->>'organization_id', extra_config->>'organization_id') as org_id
+       FROM user_integrations
+       WHERE user_id = $1 AND provider = 'eventbrite'`,
       [userId]
     );
-    const orgId = orgResult.rows[0]?.org_id;
+    let orgId = orgResult.rows[0]?.org_id;
+
+    // If no org ID stored, fetch from Eventbrite API
     if (!orgId) {
-      return res.status(400).json({ error: 'Organization not found' });
+      const orgResponse = await fetch('https://www.eventbriteapi.com/v3/users/me/organizations/', {
+        headers: { 'Authorization': `Bearer ${apiKey}` }
+      });
+      if (orgResponse.ok) {
+        const orgData = await orgResponse.json();
+        if (orgData.organizations && orgData.organizations.length > 0) {
+          orgId = orgData.organizations[0].id;
+          await pool.query(
+            `UPDATE user_integrations
+             SET metadata = COALESCE(metadata, '{}'::jsonb) || $1::jsonb
+             WHERE user_id = $2 AND provider = 'eventbrite'`,
+            [JSON.stringify({ organization_id: orgId }), userId]
+          );
+        }
+      }
+    }
+
+    if (!orgId) {
+      return res.status(400).json({ error: 'Organization not found. Please reconnect Eventbrite.' });
     }
 
     // Create venue in Eventbrite if venue data is provided (not just venue_id)
