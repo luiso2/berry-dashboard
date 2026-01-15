@@ -137,32 +137,32 @@ export function ReportsExport({ events }: ReportsExportProps) {
       )}
 
       {/* Financial Breakdown */}
-      {summary && (
+      {summary?.financials && (
         <div className="bg-white/5 rounded-xl p-6 border border-white/10">
           <h3 className="text-white font-medium mb-4">Financial Breakdown</h3>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div>
               <p className="text-white/60 text-sm">Gross Revenue</p>
               <p className="text-xl font-bold text-white">
-                {formatCurrency(summary.financials.gross_revenue)}
+                {formatCurrency(summary.financials.gross_revenue ?? 0)}
               </p>
             </div>
             <div>
               <p className="text-white/60 text-sm">Platform Fees</p>
               <p className="text-xl font-bold text-red-400">
-                -{formatCurrency(summary.financials.total_fees)}
+                -{formatCurrency(summary.financials.total_fees ?? 0)}
               </p>
             </div>
             <div>
               <p className="text-white/60 text-sm">Refunds</p>
               <p className="text-xl font-bold text-orange-400">
-                -{formatCurrency(summary.financials.total_refunds)}
+                -{formatCurrency(summary.financials.total_refunds ?? 0)}
               </p>
             </div>
             <div>
               <p className="text-white/60 text-sm">Net Revenue</p>
               <p className="text-xl font-bold text-green-400">
-                {formatCurrency(summary.financials.net_revenue)}
+                {formatCurrency(summary.financials.net_revenue ?? 0)}
               </p>
             </div>
           </div>
@@ -170,7 +170,7 @@ export function ReportsExport({ events }: ReportsExportProps) {
       )}
 
       {/* Top Events */}
-      {summary && summary.top_events.length > 0 && (
+      {summary?.top_events && summary.top_events.length > 0 && (
         <div className="bg-white/5 rounded-xl p-6 border border-white/10">
           <h3 className="text-white font-medium mb-4">Top Performing Events</h3>
           <div className="space-y-3">
@@ -320,7 +320,7 @@ export function ReportsExport({ events }: ReportsExportProps) {
       </div>
 
       {/* Orders by Status */}
-      {summary && summary.orders_by_status.length > 0 && (
+      {summary?.orders_by_status && summary.orders_by_status.length > 0 && (
         <div className="bg-white/5 rounded-xl p-6 border border-white/10">
           <h3 className="text-white font-medium mb-4">Orders by Status</h3>
           <div className="flex flex-wrap gap-4">
