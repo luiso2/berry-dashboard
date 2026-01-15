@@ -353,7 +353,7 @@ export function OrdersFeed({ events }: OrdersFeedProps) {
               <div className="bg-white/5 rounded-xl p-6 border border-white/10">
                 <h3 className="text-white font-medium mb-4">Revenue by Day (Last 30 Days)</h3>
                 <div className="flex items-end gap-1 h-48">
-                  {dailyStats.slice(-30).map((stat, index) => {
+                  {dailyStats.slice(-30).map((stat) => {
                     const maxRevenue = Math.max(...dailyStats.map(s => s.total_revenue));
                     const height = maxRevenue > 0 ? (stat.total_revenue / maxRevenue) * 100 : 0;
                     return (

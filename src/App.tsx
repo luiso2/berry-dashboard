@@ -34,8 +34,6 @@ import type {
   HealthStatus,
   ServerStatus,
   ClientPortalData,
-  SMSMessage,
-  SMSThread,
   SMSStats,
 } from './types';
 
@@ -64,6 +62,7 @@ import {
   Input,
 } from './components/common';
 import { GuestList, EmailsList } from './components/guests';
+import { SMSView, MonitoringView, ChatGPTView } from './views';
 
 // Styles
 import './styles/index.css';
@@ -509,19 +508,13 @@ function App() {
   });
 
   // Monitoring state
-  const [healthStatus, setHealthStatus] = useState<HealthStatus | null>(null);
-  const [serverStatus, setServerStatus] = useState<ServerStatus | null>(null);
-  const [isLoadingHealth, setIsLoadingHealth] = useState(false);
-  const [lastHealthCheck, setLastHealthCheck] = useState<string | null>(null);
+  const [, setHealthStatus] = useState<HealthStatus | null>(null);
+  const [, setServerStatus] = useState<ServerStatus | null>(null);
+  const [, setIsLoadingHealth] = useState(false);
+  const [, setLastHealthCheck] = useState<string | null>(null);
 
-  // SMS Conversations state
-  const [smsThreads, setSmsThreads] = useState<SMSThread[]>([]);
-  const [smsMessages, setSmsMessages] = useState<SMSMessage[]>([]);
+  // SMS Stats state
   const [smsStats, setSmsStats] = useState<SMSStats>({ total_conversations: 0, total_messages: 0, unread_messages: 0, human_takeover_count: 0, messages_today: 0 });
-  const [selectedSmsThread, setSelectedSmsThread] = useState<string | null>(null);
-  const [smsReplyText, setSmsReplyText] = useState('');
-  const [smsSendingReply, setSmsSendingReply] = useState(false);
-  const [loadingSmsThreads, setLoadingSmsThreads] = useState(false);
 
   // Toast notifications
   const addToast = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
@@ -1939,38 +1932,7 @@ function App() {
     }
   }, []);
 
-  // Send Test Alert
-  const sendTestAlert = useCallback(async () => {
-    try {
-      const res = await fetch(`${API_URL}/health/test-alert`, { method: 'POST' });
-      const data = await res.json();
-      if (data.success) {
-        addToast('Test alert sent to admin email!', 'success');
-      } else {
-        addToast('Failed to send test alert', 'error');
-      }
-    } catch (error) {
-      console.error('Error sending test alert:', error);
-      addToast('Failed to send test alert', 'error');
-    }
-  }, []);
-
-  // SMS Conversations functions
-  const fetchSmsThreads = useCallback(async () => {
-    setLoadingSmsThreads(true);
-    try {
-      const res = await fetch(`${API_URL}/api/v1/sms/conversations/threads`);
-      if (res.ok) {
-        const data = await res.json();
-        setSmsThreads(data.threads || []);
-      }
-    } catch (error) {
-      console.error('Error fetching SMS threads:', error);
-    } finally {
-      setLoadingSmsThreads(false);
-    }
-  }, []);
-
+  // SMS Stats function
   const fetchSmsStats = useCallback(async () => {
     try {
       const res = await fetch(`${API_URL}/api/v1/sms/conversations/stats`);
@@ -1982,94 +1944,6 @@ function App() {
       console.error('Error fetching SMS stats:', error);
     }
   }, []);
-
-  const fetchSmsMessages = useCallback(async (phone: string) => {
-    try {
-      const res = await fetch(`${API_URL}/api/v1/sms/conversations/thread/${encodeURIComponent(phone)}`);
-      if (res.ok) {
-        const data = await res.json();
-        setSmsMessages(data.messages || []);
-      }
-    } catch (error) {
-      console.error('Error fetching SMS messages:', error);
-    }
-  }, []);
-
-  const sendSmsReply = useCallback(async (toPhone: string, message: string) => {
-    setSmsSendingReply(true);
-    try {
-      const res = await fetch(`${API_URL}/api/v1/sms/conversations/reply`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ to: toPhone, message })
-      });
-      if (res.ok) {
-        addToast('Reply sent successfully!', 'success');
-        setSmsReplyText('');
-        fetchSmsMessages(toPhone);
-        fetchSmsStats();
-      } else {
-        addToast('Failed to send reply', 'error');
-      }
-    } catch (error) {
-      console.error('Error sending SMS reply:', error);
-      addToast('Failed to send reply', 'error');
-    } finally {
-      setSmsSendingReply(false);
-    }
-  }, [fetchSmsMessages, fetchSmsStats]);
-
-  const toggleHumanTakeover = useCallback(async (phone: string, enable: boolean) => {
-    try {
-      const res = await fetch(`${API_URL}/api/v1/sms/conversations/takeover/${encodeURIComponent(phone)}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enable })
-      });
-      if (res.ok) {
-        addToast(enable ? 'Human mode enabled' : 'AI mode restored', 'success');
-        fetchSmsThreads();
-      }
-    } catch (error) {
-      console.error('Error toggling human takeover:', error);
-      addToast('Failed to toggle mode', 'error');
-    }
-  }, [fetchSmsThreads]);
-
-  const deleteSmsThread = useCallback(async (phone: string) => {
-    if (!confirm('Are you sure you want to delete this entire conversation?')) return;
-    try {
-      const res = await fetch(`${API_URL}/api/v1/sms/conversations/thread/${encodeURIComponent(phone)}`, {
-        method: 'DELETE'
-      });
-      if (res.ok) {
-        addToast('Conversation deleted', 'success');
-        setSelectedSmsThread(null);
-        setSmsMessages([]);
-        fetchSmsThreads();
-        fetchSmsStats();
-      }
-    } catch (error) {
-      console.error('Error deleting SMS thread:', error);
-      addToast('Failed to delete conversation', 'error');
-    }
-  }, [fetchSmsThreads, fetchSmsStats]);
-
-  const deleteSmsMessage = useCallback(async (id: number, phone: string) => {
-    try {
-      const res = await fetch(`${API_URL}/api/v1/sms/conversations/${id}`, {
-        method: 'DELETE'
-      });
-      if (res.ok) {
-        addToast('Message deleted', 'success');
-        fetchSmsMessages(phone);
-        fetchSmsStats();
-      }
-    } catch (error) {
-      console.error('Error deleting SMS message:', error);
-      addToast('Failed to delete message', 'error');
-    }
-  }, [fetchSmsMessages, fetchSmsStats]);
 
   // Flyer ref for html-to-image
   const flyerRef = useRef<HTMLDivElement>(null);
@@ -2128,8 +2002,8 @@ function App() {
     if (activeView === 'budget' && selectedEvent) fetchBudget(selectedEvent.id);
     if (activeView === 'monitoring') fetchHealthStatus();
     if (activeView === 'integrations') fetchIntegrations();
-    if (activeView === 'sms') { fetchSmsThreads(); fetchSmsStats(); }
-  }, [activeView, fetchModels, fetchTables, fetchTickets, fetchOrders, fetchSponsors, fetchPromoters, fetchPromoterLeaderboard, fetchEvents, fetchVendors, fetchStaff, fetchBudget, fetchHealthStatus, fetchIntegrations, fetchSmsThreads, fetchSmsStats, selectedEvent]);
+    if (activeView === 'sms') { fetchSmsStats(); }
+  }, [activeView, fetchModels, fetchTables, fetchTickets, fetchOrders, fetchSponsors, fetchPromoters, fetchPromoterLeaderboard, fetchEvents, fetchVendors, fetchStaff, fetchBudget, fetchHealthStatus, fetchIntegrations, fetchSmsStats, selectedEvent]);
 
   // Sync All Data - refreshes all data sources
   const syncAllData = useCallback(async () => {
@@ -2808,7 +2682,7 @@ function App() {
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 32 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <div style={{ width: 32, height: 32, background: 'linear-gradient(135deg, #d4af37 0%, #b8972e 100%)', borderRadius: 8 }} />
-            <span style={{ fontSize: 16, fontWeight: 600, letterSpacing: '-0.3px' }}>Berry Bly</span>
+            <span style={{ fontSize: 16, fontWeight: 600, letterSpacing: '-0.3px' }}>Event Manager</span>
           </div>
           <button
             className="mobile-menu-btn"
@@ -7684,239 +7558,9 @@ function App() {
         {/* ============================================ */}
         {/* MONITORING VIEW */}
         {/* ============================================ */}
-        {activeView === 'monitoring' && (
-          <div className="page-content" style={{ padding: 32, animation: 'fadeIn 0.3s ease' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
-              <div>
-                <h2 style={{ fontSize: 20, fontWeight: 600, margin: 0 }}>System Monitoring</h2>
-                <p style={{ fontSize: 13, color: '#666', margin: '4px 0 0' }}>
-                  {lastHealthCheck ? `Last check: ${new Date(lastHealthCheck).toLocaleTimeString()}` : 'No health check yet'}
-                </p>
-              </div>
-              <div style={{ display: 'flex', gap: 12 }}>
-                <button
-                  onClick={fetchHealthStatus}
-                  disabled={isLoadingHealth}
-                  className="btn-hover"
-                  style={{ background: '#3b82f6', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: 8, fontWeight: 600, cursor: 'pointer', opacity: isLoadingHealth ? 0.6 : 1 }}
-                >
-                  {isLoadingHealth ? 'Checking...' : 'Refresh Status'}
-                </button>
-                <button
-                  onClick={sendTestAlert}
-                  className="btn-hover"
-                  style={{ background: '#f59e0b', color: '#000', border: 'none', padding: '10px 20px', borderRadius: 8, fontWeight: 600, cursor: 'pointer' }}
-                >
-                  Send Test Alert
-                </button>
-              </div>
-            </div>
 
-            {/* Overall Status */}
-            <div style={{
-              background: healthStatus?.status === 'healthy' ? '#22c55e20' : healthStatus?.status === 'degraded' ? '#f59e0b20' : '#ef444420',
-              border: `1px solid ${healthStatus?.status === 'healthy' ? '#22c55e40' : healthStatus?.status === 'degraded' ? '#f59e0b40' : '#ef444440'}`,
-              borderRadius: 12,
-              padding: 24,
-              marginBottom: 24,
-              display: 'flex',
-              alignItems: 'center',
-              gap: 16
-            }}>
-              <div style={{
-                fontSize: 48,
-                width: 80, height: 80,
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                background: '#0a0a0a',
-                borderRadius: 12
-              }}>
-                {healthStatus?.status === 'healthy' ? '✅' : healthStatus?.status === 'degraded' ? '⚠️' : '❌'}
-              </div>
-              <div>
-                <div style={{ fontSize: 24, fontWeight: 700, textTransform: 'capitalize', color: healthStatus?.status === 'healthy' ? '#22c55e' : healthStatus?.status === 'degraded' ? '#f59e0b' : '#ef4444' }}>
-                  {healthStatus?.status || 'Unknown'}
-                </div>
-                <div style={{ fontSize: 14, color: '#888', marginTop: 4 }}>
-                  {healthStatus ? `Response time: ${healthStatus.responseTime}ms • Uptime: ${Math.floor(healthStatus.uptime / 60)} minutes` : 'Click "Refresh Status" to check system health'}
-                </div>
-              </div>
-            </div>
-
-            {/* Issues Alert */}
-            {healthStatus?.issues && healthStatus.issues.length > 0 && (
-              <div style={{ background: '#ef444420', border: '1px solid #ef444440', borderRadius: 12, padding: 20, marginBottom: 24 }}>
-                <h3 style={{ fontSize: 16, fontWeight: 600, color: '#ef4444', margin: '0 0 12px', display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span>⚠️</span> Issues Detected ({healthStatus.issues.length})
-                </h3>
-                <ul style={{ margin: 0, paddingLeft: 20, color: '#fca5a5' }}>
-                  {healthStatus.issues.map((issue, idx) => (
-                    <li key={idx} style={{ marginBottom: 4 }}>{issue}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            {/* Component Status Grid */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, marginBottom: 24 }}>
-              {/* Database */}
-              <div style={{ background: '#0a0a0a', border: '1px solid #1a1a1a', borderRadius: 12, padding: 20 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                  <span style={{ fontSize: 14, color: '#666' }}>Database</span>
-                  <span style={{
-                    fontSize: 11, padding: '3px 8px', borderRadius: 4,
-                    background: healthStatus?.components?.database?.status === 'healthy' ? '#22c55e20' : '#ef444420',
-                    color: healthStatus?.components?.database?.status === 'healthy' ? '#22c55e' : '#ef4444'
-                  }}>
-                    {healthStatus?.components?.database?.status?.toUpperCase() || 'UNKNOWN'}
-                  </span>
-                </div>
-                <div style={{ fontSize: 24, fontWeight: 700, marginBottom: 4 }}>
-                  {healthStatus?.components?.database?.responseTime ? `${healthStatus.components.database.responseTime}ms` : '--'}
-                </div>
-                <div style={{ fontSize: 12, color: '#666' }}>
-                  {healthStatus?.components?.database?.message || healthStatus?.components?.database?.error || 'No data'}
-                </div>
-              </div>
-
-              {/* Tables */}
-              <div style={{ background: '#0a0a0a', border: '1px solid #1a1a1a', borderRadius: 12, padding: 20 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                  <span style={{ fontSize: 14, color: '#666' }}>Tables</span>
-                  <span style={{
-                    fontSize: 11, padding: '3px 8px', borderRadius: 4,
-                    background: healthStatus?.components?.tables?.status === 'healthy' ? '#22c55e20' : '#f59e0b20',
-                    color: healthStatus?.components?.tables?.status === 'healthy' ? '#22c55e' : '#f59e0b'
-                  }}>
-                    {healthStatus?.components?.tables?.status?.toUpperCase() || 'UNKNOWN'}
-                  </span>
-                </div>
-                <div style={{ fontSize: 24, fontWeight: 700, marginBottom: 4 }}>
-                  {healthStatus?.components?.tables?.existing || 0} / {healthStatus?.components?.tables?.total || 0}
-                </div>
-                <div style={{ fontSize: 12, color: '#666' }}>
-                  {healthStatus?.components?.tables?.missing?.length ? `Missing: ${healthStatus.components.tables.missing.join(', ')}` : 'All tables present'}
-                </div>
-              </div>
-
-              {/* Memory */}
-              <div style={{ background: '#0a0a0a', border: '1px solid #1a1a1a', borderRadius: 12, padding: 20 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                  <span style={{ fontSize: 14, color: '#666' }}>Memory</span>
-                  <span style={{
-                    fontSize: 11, padding: '3px 8px', borderRadius: 4,
-                    background: healthStatus?.components?.memory?.status === 'healthy' ? '#22c55e20' : '#f59e0b20',
-                    color: healthStatus?.components?.memory?.status === 'healthy' ? '#22c55e' : '#f59e0b'
-                  }}>
-                    {healthStatus?.components?.memory?.percentage || 0}%
-                  </span>
-                </div>
-                <div style={{ fontSize: 24, fontWeight: 700, marginBottom: 4 }}>
-                  {healthStatus?.components?.memory?.heapUsed || '--'}
-                </div>
-                <div style={{ fontSize: 12, color: '#666' }}>
-                  of {healthStatus?.components?.memory?.heapTotal || '--'} total
-                </div>
-              </div>
-            </div>
-
-            {/* Server Info & Data Counts */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-              {/* Server Info */}
-              <div style={{ background: '#0a0a0a', border: '1px solid #1a1a1a', borderRadius: 12, padding: 20 }}>
-                <h3 style={{ fontSize: 14, color: '#888', marginBottom: 16, textTransform: 'uppercase', letterSpacing: 1 }}>Server Info</h3>
-                {serverStatus ? (
-                  <div style={{ display: 'grid', gap: 12, fontSize: 14 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span style={{ color: '#666' }}>Node Version</span>
-                      <span>{serverStatus.server?.nodeVersion || '--'}</span>
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span style={{ color: '#666' }}>Platform</span>
-                      <span>{serverStatus.server?.platform || '--'}</span>
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span style={{ color: '#666' }}>Uptime</span>
-                      <span>
-                        {serverStatus.server?.uptime ?
-                          `${serverStatus.server.uptime.days}d ${serverStatus.server.uptime.hours}h ${serverStatus.server.uptime.minutes}m` :
-                          '--'
-                        }
-                      </span>
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span style={{ color: '#666' }}>Environment</span>
-                      <span style={{ textTransform: 'capitalize' }}>{serverStatus.config?.environment || '--'}</span>
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span style={{ color: '#666' }}>Port</span>
-                      <span>{serverStatus.config?.port || '--'}</span>
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span style={{ color: '#666' }}>Email Service</span>
-                      <span style={{ color: serverStatus.config?.emailConfigured ? '#22c55e' : '#ef4444' }}>
-                        {serverStatus.config?.emailConfigured ? 'Configured' : 'Not Configured'}
-                      </span>
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span style={{ color: '#666' }}>DB Connections</span>
-                      <span>{serverStatus.database?.totalConnections || 0} total, {serverStatus.database?.idleConnections || 0} idle</span>
-                    </div>
-                  </div>
-                ) : (
-                  <div style={{ color: '#666', textAlign: 'center', padding: 20 }}>Click "Refresh Status" to load server info</div>
-                )}
-              </div>
-
-              {/* Data Counts */}
-              <div style={{ background: '#0a0a0a', border: '1px solid #1a1a1a', borderRadius: 12, padding: 20 }}>
-                <h3 style={{ fontSize: 14, color: '#888', marginBottom: 16, textTransform: 'uppercase', letterSpacing: 1 }}>Data Counts</h3>
-                {healthStatus?.components?.data?.counts ? (
-                  <div style={{ display: 'grid', gap: 12, fontSize: 14 }}>
-                    {Object.entries(healthStatus.components.data.counts).map(([table, count]) => (
-                      <div key={table} style={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <span style={{ color: '#666', textTransform: 'capitalize' }}>{table}</span>
-                        <span style={{ fontWeight: 600 }}>{count === 'error' ? <span style={{ color: '#ef4444' }}>Error</span> : count}</span>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div style={{ color: '#666', textAlign: 'center', padding: 20 }}>No data available</div>
-                )}
-              </div>
-            </div>
-
-            {/* API Endpoints Info */}
-            <div style={{ marginTop: 24, background: '#0a0a0a', border: '1px solid #1a1a1a', borderRadius: 12, padding: 20 }}>
-              <h3 style={{ fontSize: 14, color: '#888', marginBottom: 16, textTransform: 'uppercase', letterSpacing: 1 }}>Health Endpoints</h3>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 12, fontSize: 13 }}>
-                <div style={{ padding: 12, background: '#111', borderRadius: 8 }}>
-                  <span style={{ color: '#22c55e' }}>GET</span> <span style={{ color: '#888' }}>/api/v1/health/deep</span>
-                  <div style={{ fontSize: 11, color: '#666', marginTop: 4 }}>Full health check with all components</div>
-                </div>
-                <div style={{ padding: 12, background: '#111', borderRadius: 8 }}>
-                  <span style={{ color: '#22c55e' }}>GET</span> <span style={{ color: '#888' }}>/api/v1/health/status</span>
-                  <div style={{ fontSize: 11, color: '#666', marginTop: 4 }}>Server status and configuration</div>
-                </div>
-                <div style={{ padding: 12, background: '#111', borderRadius: 8 }}>
-                  <span style={{ color: '#22c55e' }}>GET</span> <span style={{ color: '#888' }}>/api/v1/health/live</span>
-                  <div style={{ fontSize: 11, color: '#666', marginTop: 4 }}>Liveness probe for load balancers</div>
-                </div>
-                <div style={{ padding: 12, background: '#111', borderRadius: 8 }}>
-                  <span style={{ color: '#22c55e' }}>GET</span> <span style={{ color: '#888' }}>/api/v1/health/ready</span>
-                  <div style={{ fontSize: 11, color: '#666', marginTop: 4 }}>Readiness probe (DB connected)</div>
-                </div>
-                <div style={{ padding: 12, background: '#111', borderRadius: 8 }}>
-                  <span style={{ color: '#3b82f6' }}>POST</span> <span style={{ color: '#888' }}>/api/v1/health/test-alert</span>
-                  <div style={{ fontSize: 11, color: '#666', marginTop: 4 }}>Send test alert to admin email</div>
-                </div>
-                <div style={{ padding: 12, background: '#111', borderRadius: 8 }}>
-                  <span style={{ color: '#22c55e' }}>GET</span> <span style={{ color: '#888' }}>/api/v1/health/test-apis</span>
-                  <div style={{ fontSize: 11, color: '#666', marginTop: 4 }}>Test all API endpoints</div>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
+        {/* System Monitoring View */}
+        {activeView === 'monitoring' && <MonitoringView onToast={addToast} />}
 
         {/* Integrations Page */}
         {activeView === 'integrations' && (
@@ -8295,390 +7939,13 @@ function App() {
         )}
 
         {/* ChatGPT Session View */}
-        {activeView === 'chatgpt' && (
-          <div className="page-content" style={{ padding: 32, animation: 'fadeIn 0.3s ease' }}>
-            <div style={{ marginBottom: 24 }}>
-              <h2 style={{ fontSize: 20, fontWeight: 600, margin: 0 }}>ChatGPT Integration</h2>
-              <p style={{ color: '#666', margin: '8px 0 0', fontSize: 14 }}>Connect your dashboard to ChatGPT for AI-powered management</p>
-            </div>
 
-            {/* Connection Status Card */}
-            <div style={{
-              background: 'linear-gradient(135deg, rgba(16,163,127,0.1) 0%, rgba(16,163,127,0.05) 100%)',
-              border: '1px solid rgba(16,163,127,0.3)',
-              borderRadius: 16,
-              padding: 24,
-              marginBottom: 24
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                  <div style={{
-                    width: 56,
-                    height: 56,
-                    background: '#10a37f',
-                    borderRadius: 12,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    padding: 10
-                  }}>
-                    <svg viewBox="0 0 24 24" fill="white" style={{ width: '100%', height: '100%' }}>
-                      <path d="M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1686a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4944zm-9.6607-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1408-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.8956zm16.5963 3.8558L13.1038 8.364l2.0201-1.1638a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.4006-.6813zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997Z"/>
-                    </svg>
-                  </div>
-                  <div>
-                    <h3 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>Berry Bly Event Manager</h3>
-                    <p style={{ margin: '4px 0 0', color: '#10a37f', fontSize: 14 }}>Your AI Event Assistant</p>
-                  </div>
-                </div>
-                <a
-                  href="https://chatgpt.com/g/g-69648e5d8138819190a936f054f6dba6-berry-bly-event-manager"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  style={{
-                    background: '#10a37f',
-                    color: '#fff',
-                    padding: '12px 24px',
-                    borderRadius: 8,
-                    fontSize: 14,
-                    fontWeight: 600,
-                    textDecoration: 'none',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 8
-                  }}
-                >
-                  Open in ChatGPT →
-                </a>
-              </div>
-            </div>
+        {/* ChatGPT Integration View */}
+        {activeView === 'chatgpt' && <ChatGPTView />}
 
-            {/* What ChatGPT Can Do */}
-            <div style={{ marginBottom: 32 }}>
-              <h3 style={{ fontSize: 16, fontWeight: 600, margin: '0 0 16px' }}>What ChatGPT Can Do</h3>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16 }}>
-                {[
-                  { icon: '📅', title: 'Manage Events', desc: 'Create, update, and track all your events' },
-                  { icon: '👥', title: 'Guest Lists', desc: 'Add guests, send invitations, track RSVPs' },
-                  { icon: '🎫', title: 'Tickets & Sales', desc: 'Monitor ticket sales and check-ins' },
-                  { icon: '💎', title: 'Sponsors', desc: 'Track sponsorships and send portal emails' },
-                  { icon: '👔', title: 'Staff Management', desc: 'Assign staff and manage schedules' },
-                  { icon: '💰', title: 'Budget Tracking', desc: 'Monitor expenses and financial health' },
-                  { icon: '🔌', title: 'Integrations', desc: 'Sync with Eventbrite, Mailchimp, Telnyx' },
-                  { icon: '💻', title: 'Code Access', desc: 'Read and write project code files' }
-                ].map((item, i) => (
-                  <div key={i} style={{
-                    background: 'rgba(255,255,255,0.03)',
-                    border: '1px solid rgba(255,255,255,0.1)',
-                    borderRadius: 12,
-                    padding: 16
-                  }}>
-                    <div style={{ fontSize: 24, marginBottom: 8 }}>{item.icon}</div>
-                    <h4 style={{ margin: '0 0 4px', fontSize: 14, fontWeight: 600 }}>{item.title}</h4>
-                    <p style={{ margin: 0, fontSize: 13, color: '#888' }}>{item.desc}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* How to Use */}
-            <div style={{ marginBottom: 32 }}>
-              <h3 style={{ fontSize: 16, fontWeight: 600, margin: '0 0 16px' }}>How to Use</h3>
-              <div style={{ background: '#111', borderRadius: 12, padding: 20 }}>
-                <ol style={{ margin: 0, paddingLeft: 20, color: '#ccc', lineHeight: 2 }}>
-                  <li>Click "Open in ChatGPT" to access your assistant</li>
-                  <li>Authenticate with your Berry Dashboard account when prompted</li>
-                  <li>Start managing your events with natural language commands</li>
-                </ol>
-              </div>
-            </div>
-
-            {/* Example Commands */}
-            <div style={{ marginBottom: 32 }}>
-              <h3 style={{ fontSize: 16, fontWeight: 600, margin: '0 0 16px' }}>Example Commands</h3>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                {[
-                  '"Show me the dashboard overview"',
-                  '"Create a new event called NYE Gala 2025 on December 31st"',
-                  '"Add John Smith to the guest list for the next event"',
-                  '"How many tickets have been sold this month?"',
-                  '"Send invitation emails to all pending guests"',
-                  '"Show me the project code structure"',
-                  '"Search for useState in the codebase"'
-                ].map((cmd, i) => (
-                  <div key={i} style={{
-                    background: '#0a0a0a',
-                    border: '1px solid #222',
-                    borderRadius: 8,
-                    padding: '12px 16px',
-                    fontFamily: 'monospace',
-                    fontSize: 13,
-                    color: '#10a37f'
-                  }}>
-                    {cmd}
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* API Endpoint Info */}
-            <div style={{
-              background: 'rgba(59,130,246,0.1)',
-              border: '1px solid rgba(59,130,246,0.3)',
-              borderRadius: 12,
-              padding: 20
-            }}>
-              <h4 style={{ margin: '0 0 12px', fontSize: 14, fontWeight: 600, color: '#3b82f6' }}>Developer Info</h4>
-              <div style={{ fontSize: 13, color: '#888' }}>
-                <p style={{ margin: '0 0 8px' }}><strong>API Endpoint:</strong> <code style={{ background: '#1a1a1a', padding: '2px 6px', borderRadius: 4 }}>POST /api/v1/gpt/session</code></p>
-                <p style={{ margin: '0 0 8px' }}><strong>Code Access:</strong> <code style={{ background: '#1a1a1a', padding: '2px 6px', borderRadius: 4 }}>POST /api/v1/gpt/code</code></p>
-                <p style={{ margin: 0 }}><strong>OpenAPI Spec:</strong> <code style={{ background: '#1a1a1a', padding: '2px 6px', borderRadius: 4 }}>/server/openapi-gpt.yaml</code></p>
-              </div>
-            </div>
-
-          </div>
-        )}
 
         {/* SMS AI Conversations View */}
-        {activeView === 'sms' && (
-          <div className="page-content" style={{ padding: 32, animation: 'fadeIn 0.3s ease' }}>
-            <div style={{ marginBottom: 24 }}>
-              <h2 style={{ fontSize: 20, fontWeight: 600, margin: 0 }}>SMS AI Conversations</h2>
-              <p style={{ color: '#666', margin: '8px 0 0', fontSize: 14 }}>View and manage AI-powered SMS conversations with users</p>
-            </div>
-
-            {/* Stats Cards */}
-            <div className="sms-stats-grid" style={{ marginBottom: 24 }}>
-              <div className="sms-stat-card" style={{ background: 'rgba(59,130,246,0.1)', border: '1px solid rgba(59,130,246,0.3)', borderRadius: 12, padding: 16 }}>
-                <div style={{ fontSize: 24, fontWeight: 700, color: '#3b82f6' }}>{smsStats.total_conversations}</div>
-                <div style={{ fontSize: 12, color: '#888' }}>Total Threads</div>
-              </div>
-              <div className="sms-stat-card" style={{ background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.3)', borderRadius: 12, padding: 16 }}>
-                <div style={{ fontSize: 24, fontWeight: 700, color: '#10b981' }}>{smsStats.total_messages}</div>
-                <div style={{ fontSize: 12, color: '#888' }}>Total Messages</div>
-              </div>
-              <div className="sms-stat-card" style={{ background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.3)', borderRadius: 12, padding: 16 }}>
-                <div style={{ fontSize: 24, fontWeight: 700, color: '#f59e0b' }}>{smsStats.unread_messages}</div>
-                <div style={{ fontSize: 12, color: '#888' }}>Unread</div>
-              </div>
-              <div className="sms-stat-card" style={{ background: 'rgba(139,92,246,0.1)', border: '1px solid rgba(139,92,246,0.3)', borderRadius: 12, padding: 16 }}>
-                <div style={{ fontSize: 24, fontWeight: 700, color: '#8b5cf6' }}>{smsStats.human_takeover_count}</div>
-                <div style={{ fontSize: 12, color: '#888' }}>Human Mode</div>
-              </div>
-            </div>
-
-            {/* Main Content - Thread List + Chat */}
-            <div className="sms-main-grid" style={{ gridTemplateColumns: selectedSmsThread ? undefined : '1fr' }}>
-              {/* Thread List */}
-              <div style={{ background: '#111', borderRadius: 12, border: '1px solid #222', overflow: 'hidden' }}>
-                <div style={{ padding: 16, borderBottom: '1px solid #222', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <h3 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>Conversations</h3>
-                  <button
-                    onClick={() => { fetchSmsThreads(); fetchSmsStats(); }}
-                    style={{ background: 'none', border: 'none', color: '#3b82f6', cursor: 'pointer', fontSize: 12 }}
-                  >
-                    Refresh
-                  </button>
-                </div>
-                <div className="sms-thread-list">
-                  {loadingSmsThreads ? (
-                    <div style={{ padding: 24, textAlign: 'center', color: '#666' }}>Loading...</div>
-                  ) : smsThreads.length === 0 ? (
-                    <div style={{ padding: 24, textAlign: 'center', color: '#666' }}>No conversations yet</div>
-                  ) : (
-                    smsThreads.map((thread) => (
-                      <div
-                        key={thread.phone}
-                        onClick={() => { setSelectedSmsThread(thread.phone); fetchSmsMessages(thread.phone); }}
-                        style={{
-                          padding: '12px 16px',
-                          borderBottom: '1px solid #1a1a1a',
-                          cursor: 'pointer',
-                          background: selectedSmsThread === thread.phone ? 'rgba(59,130,246,0.1)' : 'transparent',
-                          transition: 'background 0.2s'
-                        }}
-                      >
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
-                          <span style={{ fontWeight: 600, fontSize: 14 }}>{thread.phone}</span>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                            {thread.is_human_takeover && (
-                              <span style={{ background: '#8b5cf6', color: '#fff', fontSize: 10, padding: '2px 6px', borderRadius: 4 }}>Human</span>
-                            )}
-                            {thread.unread_count > 0 && (
-                              <span style={{ background: '#3b82f6', color: '#fff', fontSize: 10, padding: '2px 6px', borderRadius: 10, minWidth: 18, textAlign: 'center' }}>{thread.unread_count}</span>
-                            )}
-                          </div>
-                        </div>
-                        <div style={{ fontSize: 12, color: '#888', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {thread.last_message}
-                        </div>
-                        <div style={{ fontSize: 11, color: '#555', marginTop: 4 }}>
-                          {new Date(thread.last_message_time).toLocaleString()}
-                        </div>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </div>
-
-              {/* Chat View */}
-              {selectedSmsThread && (
-                <div style={{ background: '#111', borderRadius: 12, border: '1px solid #222', display: 'flex', flexDirection: 'column' }}>
-                  {/* Chat Header */}
-                  <div className="sms-chat-header" style={{ padding: 16, borderBottom: '1px solid #222', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <div>
-                      <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>{selectedSmsThread}</h3>
-                      <span style={{ fontSize: 12, color: '#888' }}>{smsMessages.length} messages</span>
-                    </div>
-                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                      <button
-                        onClick={() => {
-                          const thread = smsThreads.find(t => t.phone === selectedSmsThread);
-                          toggleHumanTakeover(selectedSmsThread, !thread?.is_human_takeover);
-                        }}
-                        style={{
-                          background: smsThreads.find(t => t.phone === selectedSmsThread)?.is_human_takeover ? '#8b5cf6' : '#333',
-                          border: 'none',
-                          color: '#fff',
-                          padding: '8px 12px',
-                          borderRadius: 6,
-                          fontSize: 12,
-                          cursor: 'pointer'
-                        }}
-                      >
-                        {smsThreads.find(t => t.phone === selectedSmsThread)?.is_human_takeover ? 'Switch to AI' : 'Take Over'}
-                      </button>
-                      <button
-                        onClick={() => deleteSmsThread(selectedSmsThread)}
-                        style={{ background: '#ef4444', border: 'none', color: '#fff', padding: '8px 12px', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}
-                      >
-                        Delete
-                      </button>
-                      <button
-                        onClick={() => { setSelectedSmsThread(null); setSmsMessages([]); }}
-                        style={{ background: '#333', border: 'none', color: '#fff', padding: '8px 12px', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}
-                      >
-                        Close
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Messages */}
-                  <div className="sms-messages-container" style={{ flex: 1, overflowY: 'auto', padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
-                    {smsMessages.map((msg) => (
-                      <div
-                        key={msg.id}
-                        className="sms-message-bubble"
-                        style={{
-                          alignSelf: msg.direction === 'inbound' ? 'flex-start' : 'flex-end',
-                          maxWidth: '70%'
-                        }}
-                      >
-                        <div
-                          style={{
-                            background: msg.direction === 'inbound' ? '#1a1a1a' : '#3b82f6',
-                            padding: '10px 14px',
-                            borderRadius: 12,
-                            borderBottomLeftRadius: msg.direction === 'inbound' ? 4 : 12,
-                            borderBottomRightRadius: msg.direction === 'outbound' ? 4 : 12
-                          }}
-                        >
-                          <div style={{ fontSize: 14 }}>{msg.message}</div>
-                          {msg.ai_response && (
-                            <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid rgba(255,255,255,0.1)', fontSize: 13, color: '#10b981' }}>
-                              AI: {msg.ai_response}
-                            </div>
-                          )}
-                        </div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 }}>
-                          <span style={{ fontSize: 10, color: '#555' }}>
-                            {new Date(msg.created_at).toLocaleString()}
-                          </span>
-                          <button
-                            onClick={() => deleteSmsMessage(msg.id, selectedSmsThread)}
-                            style={{ background: 'none', border: 'none', color: '#ef4444', fontSize: 10, cursor: 'pointer', padding: '2px 6px' }}
-                          >
-                            Delete
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-
-                  {/* Reply Input */}
-                  <div style={{ padding: 16, borderTop: '1px solid #222' }}>
-                    <div className="sms-reply-input" style={{ display: 'flex', gap: 8 }}>
-                      <input
-                        type="text"
-                        value={smsReplyText}
-                        onChange={(e) => setSmsReplyText(e.target.value)}
-                        placeholder="Type a reply..."
-                        style={{
-                          flex: 1,
-                          background: '#0a0a0a',
-                          border: '1px solid #333',
-                          borderRadius: 8,
-                          padding: '12px 16px',
-                          color: '#fff',
-                          fontSize: 16
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' && smsReplyText.trim()) {
-                            sendSmsReply(selectedSmsThread, smsReplyText.trim());
-                          }
-                        }}
-                      />
-                      <button
-                        onClick={() => {
-                          if (smsReplyText.trim()) {
-                            sendSmsReply(selectedSmsThread, smsReplyText.trim());
-                          }
-                        }}
-                        disabled={smsSendingReply || !smsReplyText.trim()}
-                        style={{
-                          background: smsSendingReply ? '#333' : '#3b82f6',
-                          border: 'none',
-                          color: '#fff',
-                          padding: '12px 20px',
-                          borderRadius: 8,
-                          fontSize: 14,
-                          fontWeight: 600,
-                          cursor: smsSendingReply ? 'not-allowed' : 'pointer'
-                        }}
-                      >
-                        {smsSendingReply ? 'Sending...' : 'Send'}
-                      </button>
-                    </div>
-                    <p style={{ fontSize: 11, color: '#555', margin: '8px 0 0' }}>
-                      Messages are sent via Telnyx. Human takeover mode disables AI auto-responses.
-                    </p>
-                  </div>
-                </div>
-              )}
-
-              {/* Empty State */}
-              {!selectedSmsThread && smsThreads.length > 0 && (
-                <div style={{ background: '#111', borderRadius: 12, border: '1px solid #222', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <div style={{ textAlign: 'center', padding: 40 }}>
-                    <div style={{ fontSize: 48, marginBottom: 16 }}>💬</div>
-                    <h3 style={{ margin: '0 0 8px', fontSize: 18, fontWeight: 600 }}>Select a Conversation</h3>
-                    <p style={{ margin: 0, fontSize: 14, color: '#888' }}>Click on a thread to view messages and respond</p>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Info Section */}
-            <div style={{ marginTop: 24, background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.3)', borderRadius: 12, padding: 20 }}>
-              <h4 style={{ margin: '0 0 12px', fontSize: 14, fontWeight: 600, color: '#10b981' }}>About SMS AI</h4>
-              <div style={{ fontSize: 13, color: '#888', lineHeight: 1.6 }}>
-                <p style={{ margin: '0 0 8px' }}>The Berry Bly AI Assistant automatically responds to incoming SMS messages with event information, VIP tables, dress code, and more.</p>
-                <p style={{ margin: '0 0 8px' }}><strong>Human Takeover:</strong> Enable human mode to temporarily disable AI responses and respond manually.</p>
-                <p style={{ margin: 0 }}><strong>API Endpoint:</strong> <code style={{ background: '#1a1a1a', padding: '2px 6px', borderRadius: 4 }}>/api/v1/sms/conversations/*</code></p>
-              </div>
-            </div>
-          </div>
-        )}
+        {activeView === 'sms' && <SMSView onToast={addToast} />}
       </main>
 
       {/* Mobile Bottom Navigation */}
