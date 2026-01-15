@@ -1331,6 +1331,99 @@ const initDatabase = async () => {
 
     console.log('File Uploads table initialized');
 
+    // ============================================
+    // EVENTBRITE ENHANCED TABLES
+    // ============================================
+
+    // Create eventbrite_venues table for venue information
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS eventbrite_venues (
+        id VARCHAR(100) PRIMARY KEY,
+        user_id INTEGER,
+        name VARCHAR(255),
+        address_1 VARCHAR(255),
+        address_2 VARCHAR(255),
+        city VARCHAR(100),
+        region VARCHAR(100),
+        postal_code VARCHAR(20),
+        country VARCHAR(10),
+        latitude DECIMAL(10, 8),
+        longitude DECIMAL(11, 8),
+        capacity INTEGER,
+        age_restriction VARCHAR(50),
+        raw_data JSONB,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_eb_venues_user ON eventbrite_venues(user_id);
+      CREATE INDEX IF NOT EXISTS idx_eb_venues_city ON eventbrite_venues(city);
+    `);
+    console.log('Eventbrite venues table initialized');
+
+    // Create eventbrite_categories table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS eventbrite_categories (
+        id VARCHAR(50) PRIMARY KEY,
+        name VARCHAR(255) NOT NULL,
+        name_localized VARCHAR(255),
+        short_name VARCHAR(100),
+        short_name_localized VARCHAR(100),
+        resource_uri TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    console.log('Eventbrite categories table initialized');
+
+    // Create eventbrite_subcategories table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS eventbrite_subcategories (
+        id VARCHAR(50) PRIMARY KEY,
+        parent_category_id VARCHAR(50) REFERENCES eventbrite_categories(id),
+        name VARCHAR(255) NOT NULL,
+        name_localized VARCHAR(255),
+        resource_uri TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_eb_subcats_parent ON eventbrite_subcategories(parent_category_id);
+    `);
+    console.log('Eventbrite subcategories table initialized');
+
+    // Create eventbrite_sync_log table for tracking syncs
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS eventbrite_sync_log (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER,
+        sync_type VARCHAR(50) NOT NULL,
+        items_synced INTEGER DEFAULT 0,
+        items_created INTEGER DEFAULT 0,
+        items_updated INTEGER DEFAULT 0,
+        items_failed INTEGER DEFAULT 0,
+        error_details JSONB,
+        started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        completed_at TIMESTAMP,
+        status VARCHAR(20) DEFAULT 'running'
+      );
+      CREATE INDEX IF NOT EXISTS idx_eb_sync_user ON eventbrite_sync_log(user_id);
+      CREATE INDEX IF NOT EXISTS idx_eb_sync_type ON eventbrite_sync_log(sync_type);
+    `);
+    console.log('Eventbrite sync log table initialized');
+
+    // Add venue_id column to events table if not exists
+    try {
+      await client.query(`
+        ALTER TABLE events ADD COLUMN IF NOT EXISTS venue_id VARCHAR(100);
+        ALTER TABLE events ADD COLUMN IF NOT EXISTS eventbrite_category_id VARCHAR(50);
+        ALTER TABLE events ADD COLUMN IF NOT EXISTS eventbrite_subcategory_id VARCHAR(50);
+        ALTER TABLE events ADD COLUMN IF NOT EXISTS eventbrite_organizer_id VARCHAR(100);
+        ALTER TABLE events ADD COLUMN IF NOT EXISTS eventbrite_capacity INTEGER;
+        ALTER TABLE events ADD COLUMN IF NOT EXISTS eventbrite_is_free BOOLEAN;
+        ALTER TABLE events ADD COLUMN IF NOT EXISTS eventbrite_online_event BOOLEAN;
+      `);
+      console.log('Added enhanced Eventbrite columns to events table');
+    } catch (e) {
+      console.log('Eventbrite columns migration:', e.message);
+    }
+
     dbInitStatus.completed = true;
     console.log('Database tables initialized successfully (guests, email_events, tickets, activity_log, sponsors, events, budgets, vendors, staff, contracts, client_access, integrations, promoters, file_uploads)');
   } catch (error) {
@@ -10943,11 +11036,16 @@ app.get('/api/v1/sms/conversations/stats', async (req, res) => {
 // EVENTBRITE OAUTH 2.0 - Authentication Flow
 // ============================================
 
-// OAuth Configuration
-const EVENTBRITE_CLIENT_ID = process.env.EVENTBRITE_CLIENT_ID || 'PCQOMZRJ4RH4AAHOPU';
-const EVENTBRITE_CLIENT_SECRET = process.env.EVENTBRITE_CLIENT_SECRET || '3IUTMSV4NLEJW36TOHM757E4TET6WQCRF7RWWRQWRDXNDIP6DQ';
+// OAuth Configuration - MUST be set in environment variables
+const EVENTBRITE_CLIENT_ID = process.env.EVENTBRITE_CLIENT_ID;
+const EVENTBRITE_CLIENT_SECRET = process.env.EVENTBRITE_CLIENT_SECRET;
 const EVENTBRITE_REDIRECT_URI = process.env.EVENTBRITE_REDIRECT_URI || 'https://berry-dashboard-api-production.up.railway.app/api/v1/auth/eventbrite/callback';
 const FRONTEND_URL = process.env.FRONTEND_URL || 'https://berry-dashboard-production.up.railway.app';
+
+// Warn if Eventbrite credentials are not configured
+if (!EVENTBRITE_CLIENT_ID || !EVENTBRITE_CLIENT_SECRET) {
+  console.warn('⚠️ EVENTBRITE_CLIENT_ID and/or EVENTBRITE_CLIENT_SECRET not configured. Eventbrite OAuth will not work.');
+}
 
 // GET /api/v1/auth/eventbrite - Redirect to Eventbrite for authorization
 app.get('/api/v1/auth/eventbrite', (req, res) => {
@@ -11813,6 +11911,869 @@ app.post('/api/v1/integrations/eventbrite/setup-webhook', async (req, res) => {
     console.error('Error setting up Eventbrite webhook:', error);
     res.status(500).json({ error: 'Failed to setup webhook: ' + error.message });
   }
+});
+
+// ============================================
+// EVENTBRITE ENHANCED SYNC - Venues, Categories, Orders
+// ============================================
+
+// Helper function to get Eventbrite API key for user
+async function getEventbriteApiKey(userId) {
+  let apiKey = null;
+
+  // Check user_integrations first (per-user)
+  if (userId) {
+    const userResult = await pool.query(
+      'SELECT * FROM user_integrations WHERE user_id = $1::integer AND provider = $2 AND status = $3',
+      [userId, 'eventbrite', 'connected']
+    );
+    if (userResult.rows.length > 0) {
+      apiKey = decryptApiKey(userResult.rows[0].api_key_encrypted);
+    }
+  }
+
+  // Fallback to global integrations
+  if (!apiKey) {
+    const result = await pool.query('SELECT * FROM integrations WHERE provider = $1', ['eventbrite']);
+    const saved = result.rows[0];
+    if (saved?.api_key_encrypted && saved.status === 'connected') {
+      apiKey = decryptApiKey(saved.api_key_encrypted);
+    }
+  }
+
+  return apiKey;
+}
+
+// POST /api/v1/integrations/eventbrite/sync-venues - Sync venues from Eventbrite
+app.post('/api/v1/integrations/eventbrite/sync-venues', async (req, res) => {
+  try {
+    const userId = req.user?.id || req.body.userId;
+    const apiKey = await getEventbriteApiKey(userId);
+
+    if (!apiKey) {
+      return res.status(400).json({ error: 'Eventbrite not connected' });
+    }
+
+    // Create sync log entry
+    const syncLog = await pool.query(
+      'INSERT INTO eventbrite_sync_log (user_id, sync_type, status) VALUES ($1, $2, $3) RETURNING id',
+      [userId || null, 'venues', 'running']
+    );
+    const syncLogId = syncLog.rows[0].id;
+
+    // Get user's organizations
+    const orgResponse = await fetch('https://www.eventbriteapi.com/v3/users/me/organizations/', {
+      headers: { 'Authorization': `Bearer ${apiKey}` }
+    });
+
+    if (!orgResponse.ok) {
+      await pool.query('UPDATE eventbrite_sync_log SET status = $1, completed_at = NOW() WHERE id = $2', ['failed', syncLogId]);
+      return res.status(400).json({ error: 'Failed to fetch organizations' });
+    }
+
+    const orgData = await orgResponse.json();
+    const organizations = orgData.organizations || [];
+
+    let totalVenues = 0;
+    let created = 0;
+    let updated = 0;
+    let errors = [];
+
+    // For each organization, get venues
+    for (const org of organizations) {
+      const venuesResponse = await fetch(`https://www.eventbriteapi.com/v3/organizations/${org.id}/venues/`, {
+        headers: { 'Authorization': `Bearer ${apiKey}` }
+      });
+
+      if (!venuesResponse.ok) continue;
+
+      const venuesData = await venuesResponse.json();
+      const venues = venuesData.venues || [];
+
+      for (const venue of venues) {
+        try {
+          const existingVenue = await pool.query('SELECT id FROM eventbrite_venues WHERE id = $1', [venue.id]);
+
+          if (existingVenue.rows.length > 0) {
+            // Update existing venue
+            await pool.query(`
+              UPDATE eventbrite_venues SET
+                name = $1,
+                address_1 = $2,
+                address_2 = $3,
+                city = $4,
+                region = $5,
+                postal_code = $6,
+                country = $7,
+                latitude = $8,
+                longitude = $9,
+                capacity = $10,
+                age_restriction = $11,
+                raw_data = $12,
+                updated_at = NOW()
+              WHERE id = $13
+            `, [
+              venue.name,
+              venue.address?.address_1,
+              venue.address?.address_2,
+              venue.address?.city,
+              venue.address?.region,
+              venue.address?.postal_code,
+              venue.address?.country,
+              venue.address?.latitude,
+              venue.address?.longitude,
+              venue.capacity,
+              venue.age_restriction,
+              JSON.stringify(venue),
+              venue.id
+            ]);
+            updated++;
+          } else {
+            // Insert new venue
+            await pool.query(`
+              INSERT INTO eventbrite_venues (id, user_id, name, address_1, address_2, city, region, postal_code, country, latitude, longitude, capacity, age_restriction, raw_data)
+              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+            `, [
+              venue.id,
+              userId || null,
+              venue.name,
+              venue.address?.address_1,
+              venue.address?.address_2,
+              venue.address?.city,
+              venue.address?.region,
+              venue.address?.postal_code,
+              venue.address?.country,
+              venue.address?.latitude,
+              venue.address?.longitude,
+              venue.capacity,
+              venue.age_restriction,
+              JSON.stringify(venue)
+            ]);
+            created++;
+          }
+          totalVenues++;
+        } catch (err) {
+          errors.push({ venue: venue.name, error: err.message });
+        }
+      }
+    }
+
+    // Update sync log
+    await pool.query(`
+      UPDATE eventbrite_sync_log SET
+        items_synced = $1,
+        items_created = $2,
+        items_updated = $3,
+        items_failed = $4,
+        error_details = $5,
+        status = 'completed',
+        completed_at = NOW()
+      WHERE id = $6
+    `, [totalVenues, created, updated, errors.length, errors.length > 0 ? JSON.stringify(errors) : null, syncLogId]);
+
+    res.json({
+      success: true,
+      message: `Synced ${totalVenues} venues (${created} created, ${updated} updated)`,
+      totalVenues,
+      created,
+      updated,
+      errors: errors.length > 0 ? errors : undefined
+    });
+  } catch (error) {
+    console.error('Error syncing venues:', error);
+    res.status(500).json({ error: 'Failed to sync venues: ' + error.message });
+  }
+});
+
+// POST /api/v1/integrations/eventbrite/sync-categories - Sync categories from Eventbrite
+app.post('/api/v1/integrations/eventbrite/sync-categories', async (req, res) => {
+  try {
+    const userId = req.user?.id || req.body.userId;
+    const apiKey = await getEventbriteApiKey(userId);
+
+    if (!apiKey) {
+      return res.status(400).json({ error: 'Eventbrite not connected' });
+    }
+
+    // Create sync log entry
+    const syncLog = await pool.query(
+      'INSERT INTO eventbrite_sync_log (user_id, sync_type, status) VALUES ($1, $2, $3) RETURNING id',
+      [userId || null, 'categories', 'running']
+    );
+    const syncLogId = syncLog.rows[0].id;
+
+    // Fetch categories from Eventbrite
+    const categoriesResponse = await fetch('https://www.eventbriteapi.com/v3/categories/', {
+      headers: { 'Authorization': `Bearer ${apiKey}` }
+    });
+
+    if (!categoriesResponse.ok) {
+      await pool.query('UPDATE eventbrite_sync_log SET status = $1, completed_at = NOW() WHERE id = $2', ['failed', syncLogId]);
+      return res.status(400).json({ error: 'Failed to fetch categories' });
+    }
+
+    const categoriesData = await categoriesResponse.json();
+    const categories = categoriesData.categories || [];
+
+    let totalCategories = 0;
+    let totalSubcategories = 0;
+
+    for (const category of categories) {
+      // Upsert category
+      await pool.query(`
+        INSERT INTO eventbrite_categories (id, name, name_localized, short_name, short_name_localized, resource_uri)
+        VALUES ($1, $2, $3, $4, $5, $6)
+        ON CONFLICT (id) DO UPDATE SET
+          name = $2,
+          name_localized = $3,
+          short_name = $4,
+          short_name_localized = $5,
+          resource_uri = $6
+      `, [
+        category.id,
+        category.name,
+        category.name_localized,
+        category.short_name,
+        category.short_name_localized,
+        category.resource_uri
+      ]);
+      totalCategories++;
+
+      // Fetch subcategories for this category
+      if (category.subcategories && category.subcategories.length > 0) {
+        for (const subcategory of category.subcategories) {
+          await pool.query(`
+            INSERT INTO eventbrite_subcategories (id, parent_category_id, name, name_localized, resource_uri)
+            VALUES ($1, $2, $3, $4, $5)
+            ON CONFLICT (id) DO UPDATE SET
+              parent_category_id = $2,
+              name = $3,
+              name_localized = $4,
+              resource_uri = $5
+          `, [
+            subcategory.id,
+            category.id,
+            subcategory.name,
+            subcategory.name_localized,
+            subcategory.resource_uri
+          ]);
+          totalSubcategories++;
+        }
+      }
+    }
+
+    // Update sync log
+    await pool.query(`
+      UPDATE eventbrite_sync_log SET
+        items_synced = $1,
+        items_created = $1,
+        status = 'completed',
+        completed_at = NOW()
+      WHERE id = $2
+    `, [totalCategories + totalSubcategories, syncLogId]);
+
+    res.json({
+      success: true,
+      message: `Synced ${totalCategories} categories and ${totalSubcategories} subcategories`,
+      totalCategories,
+      totalSubcategories
+    });
+  } catch (error) {
+    console.error('Error syncing categories:', error);
+    res.status(500).json({ error: 'Failed to sync categories: ' + error.message });
+  }
+});
+
+// POST /api/v1/integrations/eventbrite/sync-orders - Sync historical orders from Eventbrite
+app.post('/api/v1/integrations/eventbrite/sync-orders', async (req, res) => {
+  try {
+    const userId = req.user?.id || req.body.userId;
+    const { eventId } = req.body; // Optional: sync orders for specific event
+    const apiKey = await getEventbriteApiKey(userId);
+
+    if (!apiKey) {
+      return res.status(400).json({ error: 'Eventbrite not connected' });
+    }
+
+    // Create sync log entry
+    const syncLog = await pool.query(
+      'INSERT INTO eventbrite_sync_log (user_id, sync_type, status) VALUES ($1, $2, $3) RETURNING id',
+      [userId || null, 'orders', 'running']
+    );
+    const syncLogId = syncLog.rows[0].id;
+
+    // Get user's organizations
+    const orgResponse = await fetch('https://www.eventbriteapi.com/v3/users/me/organizations/', {
+      headers: { 'Authorization': `Bearer ${apiKey}` }
+    });
+
+    if (!orgResponse.ok) {
+      await pool.query('UPDATE eventbrite_sync_log SET status = $1, completed_at = NOW() WHERE id = $2', ['failed', syncLogId]);
+      return res.status(400).json({ error: 'Failed to fetch organizations' });
+    }
+
+    const orgData = await orgResponse.json();
+    const organizations = orgData.organizations || [];
+
+    let totalOrders = 0;
+    let created = 0;
+    let updated = 0;
+    let errors = [];
+
+    // For each organization, get events and then orders
+    for (const org of organizations) {
+      // Get events
+      let eventsUrl = `https://www.eventbriteapi.com/v3/organizations/${org.id}/events/?status=live,started,ended`;
+      if (eventId) {
+        eventsUrl = `https://www.eventbriteapi.com/v3/events/${eventId}/`;
+      }
+
+      const eventsResponse = await fetch(eventsUrl, {
+        headers: { 'Authorization': `Bearer ${apiKey}` }
+      });
+
+      if (!eventsResponse.ok) continue;
+
+      const eventsData = await eventsResponse.json();
+      const events = eventId ? [eventsData] : (eventsData.events || []);
+
+      for (const event of events) {
+        // Get orders for this event
+        let ordersUrl = `https://www.eventbriteapi.com/v3/events/${event.id}/orders/`;
+        let hasMore = true;
+
+        while (hasMore) {
+          const ordersResponse = await fetch(ordersUrl, {
+            headers: { 'Authorization': `Bearer ${apiKey}` }
+          });
+
+          if (!ordersResponse.ok) break;
+
+          const ordersData = await ordersResponse.json();
+          const orders = ordersData.orders || [];
+
+          for (const order of orders) {
+            try {
+              const totalAmount = order.costs?.gross?.value ? parseFloat(order.costs.gross.value) / 100 : 0;
+              const ticketCount = order.attendees?.length || 1;
+
+              const existingOrder = await pool.query('SELECT id FROM orders WHERE id = $1', [order.id]);
+
+              if (existingOrder.rows.length > 0) {
+                await pool.query(`
+                  UPDATE orders SET
+                    order_status = $1,
+                    ticket_count = $2,
+                    total_amount = $3,
+                    updated_at = NOW()
+                  WHERE id = $4
+                `, [order.status, ticketCount, totalAmount, order.id]);
+                updated++;
+              } else {
+                await pool.query(`
+                  INSERT INTO orders (id, event_id, event_name, source, buyer_name, buyer_email, order_status, ticket_count, total_amount, currency, raw_data, created_at)
+                  VALUES ($1, $2, $3, 'eventbrite', $4, $5, $6, $7, $8, $9, $10, $11)
+                `, [
+                  order.id,
+                  event.id,
+                  event.name?.text || 'Unknown Event',
+                  order.name || 'Unknown',
+                  order.email || '',
+                  order.status,
+                  ticketCount,
+                  totalAmount,
+                  order.costs?.gross?.currency || 'USD',
+                  JSON.stringify(order),
+                  order.created ? new Date(order.created) : new Date()
+                ]);
+                created++;
+              }
+              totalOrders++;
+            } catch (err) {
+              errors.push({ order: order.id, error: err.message });
+            }
+          }
+
+          // Check for pagination
+          if (ordersData.pagination?.has_more_items && ordersData.pagination?.continuation) {
+            ordersUrl = `https://www.eventbriteapi.com/v3/events/${event.id}/orders/?continuation=${ordersData.pagination.continuation}`;
+          } else {
+            hasMore = false;
+          }
+        }
+      }
+    }
+
+    // Update sync log
+    await pool.query(`
+      UPDATE eventbrite_sync_log SET
+        items_synced = $1,
+        items_created = $2,
+        items_updated = $3,
+        items_failed = $4,
+        error_details = $5,
+        status = 'completed',
+        completed_at = NOW()
+      WHERE id = $6
+    `, [totalOrders, created, updated, errors.length, errors.length > 0 ? JSON.stringify(errors) : null, syncLogId]);
+
+    res.json({
+      success: true,
+      message: `Synced ${totalOrders} orders (${created} created, ${updated} updated)`,
+      totalOrders,
+      created,
+      updated,
+      errors: errors.length > 0 ? errors : undefined
+    });
+  } catch (error) {
+    console.error('Error syncing orders:', error);
+    res.status(500).json({ error: 'Failed to sync orders: ' + error.message });
+  }
+});
+
+// GET /api/v1/integrations/eventbrite/search - Search public Eventbrite events
+app.get('/api/v1/integrations/eventbrite/search', async (req, res) => {
+  try {
+    const userId = req.user?.id || req.query.userId;
+    const { q, location, category, start_date, end_date, price, page = 1 } = req.query;
+    const apiKey = await getEventbriteApiKey(userId);
+
+    if (!apiKey) {
+      return res.status(400).json({ error: 'Eventbrite not connected' });
+    }
+
+    // Build search URL
+    let searchUrl = 'https://www.eventbriteapi.com/v3/events/search/?';
+    const params = new URLSearchParams();
+
+    if (q) params.append('q', q);
+    if (location) params.append('location.address', location);
+    if (category) params.append('categories', category);
+    if (start_date) params.append('start_date.range_start', start_date);
+    if (end_date) params.append('start_date.range_end', end_date);
+    if (price === 'free') params.append('price', 'free');
+    if (price === 'paid') params.append('price', 'paid');
+    params.append('page', page);
+    params.append('expand', 'venue,category,subcategory,organizer');
+
+    const searchResponse = await fetch(searchUrl + params.toString(), {
+      headers: { 'Authorization': `Bearer ${apiKey}` }
+    });
+
+    if (!searchResponse.ok) {
+      const errorData = await searchResponse.json();
+      return res.status(400).json({ error: errorData.error_description || 'Search failed' });
+    }
+
+    const searchData = await searchResponse.json();
+
+    // Transform events to a cleaner format
+    const events = (searchData.events || []).map(event => ({
+      id: event.id,
+      name: event.name?.text,
+      description: event.description?.text,
+      url: event.url,
+      start: event.start,
+      end: event.end,
+      status: event.status,
+      currency: event.currency,
+      isFree: event.is_free,
+      isOnline: event.online_event,
+      capacity: event.capacity,
+      image: event.logo?.url,
+      venue: event.venue ? {
+        id: event.venue.id,
+        name: event.venue.name,
+        address: event.venue.address?.localized_address_display,
+        city: event.venue.address?.city,
+        latitude: event.venue.address?.latitude,
+        longitude: event.venue.address?.longitude
+      } : null,
+      category: event.category ? {
+        id: event.category.id,
+        name: event.category.name
+      } : null,
+      organizer: event.organizer ? {
+        id: event.organizer.id,
+        name: event.organizer.name
+      } : null
+    }));
+
+    res.json({
+      success: true,
+      events,
+      pagination: searchData.pagination,
+      total: searchData.pagination?.object_count || events.length
+    });
+  } catch (error) {
+    console.error('Error searching Eventbrite:', error);
+    res.status(500).json({ error: 'Search failed: ' + error.message });
+  }
+});
+
+// GET /api/v1/integrations/eventbrite/venues - Get synced venues
+app.get('/api/v1/integrations/eventbrite/venues', async (req, res) => {
+  try {
+    const userId = req.user?.id || req.query.userId;
+    const { city, limit = 100 } = req.query;
+
+    let query = 'SELECT * FROM eventbrite_venues WHERE 1=1';
+    const params = [];
+    let paramIndex = 1;
+
+    if (userId) {
+      query += ` AND user_id = $${paramIndex++}`;
+      params.push(userId);
+    }
+
+    if (city) {
+      query += ` AND city ILIKE $${paramIndex++}`;
+      params.push(`%${city}%`);
+    }
+
+    query += ` ORDER BY name LIMIT $${paramIndex}`;
+    params.push(limit);
+
+    const result = await pool.query(query, params);
+
+    res.json({
+      success: true,
+      venues: result.rows,
+      total: result.rows.length
+    });
+  } catch (error) {
+    console.error('Error fetching venues:', error);
+    res.status(500).json({ error: 'Failed to fetch venues' });
+  }
+});
+
+// GET /api/v1/integrations/eventbrite/categories - Get synced categories
+app.get('/api/v1/integrations/eventbrite/categories', async (req, res) => {
+  try {
+    const categoriesResult = await pool.query('SELECT * FROM eventbrite_categories ORDER BY name');
+    const subcategoriesResult = await pool.query('SELECT * FROM eventbrite_subcategories ORDER BY name');
+
+    // Group subcategories by parent
+    const categoriesWithSubs = categoriesResult.rows.map(cat => ({
+      ...cat,
+      subcategories: subcategoriesResult.rows.filter(sub => sub.parent_category_id === cat.id)
+    }));
+
+    res.json({
+      success: true,
+      categories: categoriesWithSubs,
+      total: categoriesResult.rows.length
+    });
+  } catch (error) {
+    console.error('Error fetching categories:', error);
+    res.status(500).json({ error: 'Failed to fetch categories' });
+  }
+});
+
+// GET /api/v1/integrations/eventbrite/sync-log - Get sync history
+app.get('/api/v1/integrations/eventbrite/sync-log', async (req, res) => {
+  try {
+    const userId = req.user?.id || req.query.userId;
+    const { sync_type, limit = 50 } = req.query;
+
+    let query = 'SELECT * FROM eventbrite_sync_log WHERE 1=1';
+    const params = [];
+    let paramIndex = 1;
+
+    if (userId) {
+      query += ` AND user_id = $${paramIndex++}`;
+      params.push(userId);
+    }
+
+    if (sync_type) {
+      query += ` AND sync_type = $${paramIndex++}`;
+      params.push(sync_type);
+    }
+
+    query += ` ORDER BY started_at DESC LIMIT $${paramIndex}`;
+    params.push(limit);
+
+    const result = await pool.query(query, params);
+
+    res.json({
+      success: true,
+      logs: result.rows,
+      total: result.rows.length
+    });
+  } catch (error) {
+    console.error('Error fetching sync log:', error);
+    res.status(500).json({ error: 'Failed to fetch sync log' });
+  }
+});
+
+// POST /api/v1/integrations/eventbrite/sync-all - Full sync of all Eventbrite data
+app.post('/api/v1/integrations/eventbrite/sync-all', async (req, res) => {
+  try {
+    const userId = req.user?.id || req.body.userId;
+    const apiKey = await getEventbriteApiKey(userId);
+
+    if (!apiKey) {
+      return res.status(400).json({ error: 'Eventbrite not connected' });
+    }
+
+    const results = {
+      events: { success: false, message: '' },
+      venues: { success: false, message: '' },
+      categories: { success: false, message: '' },
+      orders: { success: false, message: '' }
+    };
+
+    // Sync categories first (no dependencies)
+    try {
+      const catResponse = await fetch('https://www.eventbriteapi.com/v3/categories/', {
+        headers: { 'Authorization': `Bearer ${apiKey}` }
+      });
+      if (catResponse.ok) {
+        const catData = await catResponse.json();
+        let catCount = 0;
+        for (const cat of (catData.categories || [])) {
+          await pool.query(`
+            INSERT INTO eventbrite_categories (id, name, name_localized, short_name, short_name_localized, resource_uri)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            ON CONFLICT (id) DO UPDATE SET name = $2, name_localized = $3
+          `, [cat.id, cat.name, cat.name_localized, cat.short_name, cat.short_name_localized, cat.resource_uri]);
+          catCount++;
+        }
+        results.categories = { success: true, message: `Synced ${catCount} categories` };
+      }
+    } catch (e) {
+      results.categories = { success: false, message: e.message };
+    }
+
+    // Get organizations for subsequent syncs
+    const orgResponse = await fetch('https://www.eventbriteapi.com/v3/users/me/organizations/', {
+      headers: { 'Authorization': `Bearer ${apiKey}` }
+    });
+
+    if (!orgResponse.ok) {
+      return res.status(400).json({ error: 'Failed to fetch organizations', results });
+    }
+
+    const organizations = (await orgResponse.json()).organizations || [];
+
+    let totalEvents = 0;
+    let totalVenues = 0;
+    let totalOrders = 0;
+
+    for (const org of organizations) {
+      // Sync venues
+      try {
+        const venuesResponse = await fetch(`https://www.eventbriteapi.com/v3/organizations/${org.id}/venues/`, {
+          headers: { 'Authorization': `Bearer ${apiKey}` }
+        });
+        if (venuesResponse.ok) {
+          const venuesData = await venuesResponse.json();
+          for (const venue of (venuesData.venues || [])) {
+            await pool.query(`
+              INSERT INTO eventbrite_venues (id, user_id, name, address_1, city, region, country, latitude, longitude, raw_data)
+              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+              ON CONFLICT (id) DO UPDATE SET name = $3, city = $5, updated_at = NOW()
+            `, [
+              venue.id, userId || null, venue.name, venue.address?.address_1, venue.address?.city,
+              venue.address?.region, venue.address?.country, venue.address?.latitude, venue.address?.longitude,
+              JSON.stringify(venue)
+            ]);
+            totalVenues++;
+          }
+        }
+      } catch (e) {
+        console.error('Venue sync error:', e.message);
+      }
+
+      // Sync events
+      try {
+        const eventsResponse = await fetch(`https://www.eventbriteapi.com/v3/organizations/${org.id}/events/?status=live,started,ended&expand=ticket_classes,venue`, {
+          headers: { 'Authorization': `Bearer ${apiKey}` }
+        });
+        if (eventsResponse.ok) {
+          const eventsData = await eventsResponse.json();
+          for (const event of (eventsData.events || [])) {
+            const existingEvent = await pool.query(
+              'SELECT id FROM events WHERE external_id = $1 AND external_source = $2',
+              [event.id, 'eventbrite']
+            );
+
+            const eventDate = event.start?.utc ? new Date(event.start.utc).toISOString().split('T')[0] : new Date().toISOString().split('T')[0];
+            const startTime = event.start?.local ? event.start.local.split('T')[1]?.substring(0, 5) : null;
+
+            if (existingEvent.rows.length > 0) {
+              await pool.query(`
+                UPDATE events SET
+                  title = $1, description = $2, date = $3, time = $4, status = $5,
+                  eventbrite_url = $6, venue_id = $7, eventbrite_category_id = $8,
+                  eventbrite_is_free = $9, eventbrite_capacity = $10, updated_at = NOW()
+                WHERE external_id = $11 AND external_source = 'eventbrite'
+              `, [
+                event.name?.text, event.description?.text, eventDate, startTime,
+                event.status === 'live' ? 'active' : event.status,
+                event.url, event.venue_id, event.category_id,
+                event.is_free, event.capacity, event.id
+              ]);
+            } else {
+              const nextIdResult = await pool.query("SELECT COALESCE(MAX(CAST(id AS INTEGER)), 0) + 1 as next_id FROM events WHERE id ~ '^[0-9]+$'");
+              const nextId = nextIdResult.rows[0].next_id;
+              await pool.query(`
+                INSERT INTO events (id, title, description, date, time, status, category, external_id, external_source, eventbrite_url, venue_id, eventbrite_category_id, eventbrite_is_free, eventbrite_capacity, user_id)
+                VALUES ($1, $2, $3, $4, $5, $6, 'nightlife', $7, 'eventbrite', $8, $9, $10, $11, $12, $13)
+              `, [
+                nextId.toString(), event.name?.text, event.description?.text, eventDate, startTime,
+                event.status === 'live' ? 'active' : event.status,
+                event.id, event.url, event.venue_id, event.category_id,
+                event.is_free, event.capacity, userId || null
+              ]);
+            }
+            totalEvents++;
+
+            // Sync orders for this event
+            try {
+              const ordersResponse = await fetch(`https://www.eventbriteapi.com/v3/events/${event.id}/orders/`, {
+                headers: { 'Authorization': `Bearer ${apiKey}` }
+              });
+              if (ordersResponse.ok) {
+                const ordersData = await ordersResponse.json();
+                for (const order of (ordersData.orders || [])) {
+                  const totalAmount = order.costs?.gross?.value ? parseFloat(order.costs.gross.value) / 100 : 0;
+                  await pool.query(`
+                    INSERT INTO orders (id, event_id, event_name, source, buyer_name, buyer_email, order_status, ticket_count, total_amount, raw_data)
+                    VALUES ($1, $2, $3, 'eventbrite', $4, $5, $6, $7, $8, $9)
+                    ON CONFLICT (id) DO UPDATE SET order_status = $6, updated_at = NOW()
+                  `, [
+                    order.id, event.id, event.name?.text, order.name || 'Unknown',
+                    order.email || '', order.status, order.attendees?.length || 1,
+                    totalAmount, JSON.stringify(order)
+                  ]);
+                  totalOrders++;
+                }
+              }
+            } catch (e) {
+              console.error('Order sync error for event', event.id, ':', e.message);
+            }
+          }
+        }
+      } catch (e) {
+        console.error('Events sync error:', e.message);
+      }
+    }
+
+    results.events = { success: true, message: `Synced ${totalEvents} events` };
+    results.venues = { success: true, message: `Synced ${totalVenues} venues` };
+    results.orders = { success: true, message: `Synced ${totalOrders} orders` };
+
+    // Update last sync time
+    await pool.query("UPDATE integrations SET last_sync = NOW() WHERE provider = 'eventbrite'");
+    if (userId) {
+      await pool.query("UPDATE user_integrations SET last_sync = NOW() WHERE user_id = $1 AND provider = 'eventbrite'", [userId]);
+    }
+
+    // Log the sync
+    await pool.query(`
+      INSERT INTO eventbrite_sync_log (user_id, sync_type, items_synced, status, completed_at)
+      VALUES ($1, 'full', $2, 'completed', NOW())
+    `, [userId || null, totalEvents + totalVenues + totalOrders]);
+
+    res.json({
+      success: true,
+      message: 'Full sync completed',
+      results,
+      totals: { events: totalEvents, venues: totalVenues, orders: totalOrders }
+    });
+  } catch (error) {
+    console.error('Error in full sync:', error);
+    res.status(500).json({ error: 'Full sync failed: ' + error.message });
+  }
+});
+
+// Auto-sync interval (runs every 30 minutes if enabled)
+let autoSyncInterval = null;
+
+// POST /api/v1/integrations/eventbrite/auto-sync/start - Start auto-sync
+app.post('/api/v1/integrations/eventbrite/auto-sync/start', async (req, res) => {
+  try {
+    const { intervalMinutes = 30 } = req.body;
+
+    if (autoSyncInterval) {
+      clearInterval(autoSyncInterval);
+    }
+
+    const runAutoSync = async () => {
+      console.log('🔄 Running Eventbrite auto-sync...');
+      try {
+        // Get all users with Eventbrite connected
+        const usersResult = await pool.query(
+          "SELECT DISTINCT user_id FROM user_integrations WHERE provider = 'eventbrite' AND status = 'connected'"
+        );
+
+        for (const row of usersResult.rows) {
+          const userId = row.user_id;
+          const apiKey = await getEventbriteApiKey(userId);
+          if (!apiKey) continue;
+
+          // Quick sync of events only
+          const orgResponse = await fetch('https://www.eventbriteapi.com/v3/users/me/organizations/', {
+            headers: { 'Authorization': `Bearer ${apiKey}` }
+          });
+
+          if (!orgResponse.ok) continue;
+
+          const organizations = (await orgResponse.json()).organizations || [];
+
+          for (const org of organizations) {
+            const eventsResponse = await fetch(`https://www.eventbriteapi.com/v3/organizations/${org.id}/events/?status=live,started`, {
+              headers: { 'Authorization': `Bearer ${apiKey}` }
+            });
+
+            if (!eventsResponse.ok) continue;
+
+            const eventsData = await eventsResponse.json();
+            console.log(`Auto-sync: Found ${eventsData.events?.length || 0} events for user ${userId}`);
+          }
+
+          await pool.query("UPDATE user_integrations SET last_sync = NOW() WHERE user_id = $1 AND provider = 'eventbrite'", [userId]);
+        }
+
+        console.log('✅ Auto-sync completed');
+      } catch (error) {
+        console.error('❌ Auto-sync error:', error.message);
+      }
+    };
+
+    // Run immediately and then on interval
+    runAutoSync();
+    autoSyncInterval = setInterval(runAutoSync, intervalMinutes * 60 * 1000);
+
+    res.json({
+      success: true,
+      message: `Auto-sync started (every ${intervalMinutes} minutes)`,
+      intervalMinutes
+    });
+  } catch (error) {
+    console.error('Error starting auto-sync:', error);
+    res.status(500).json({ error: 'Failed to start auto-sync' });
+  }
+});
+
+// POST /api/v1/integrations/eventbrite/auto-sync/stop - Stop auto-sync
+app.post('/api/v1/integrations/eventbrite/auto-sync/stop', (req, res) => {
+  if (autoSyncInterval) {
+    clearInterval(autoSyncInterval);
+    autoSyncInterval = null;
+    res.json({ success: true, message: 'Auto-sync stopped' });
+  } else {
+    res.json({ success: true, message: 'Auto-sync was not running' });
+  }
+});
+
+// GET /api/v1/integrations/eventbrite/auto-sync/status - Check auto-sync status
+app.get('/api/v1/integrations/eventbrite/auto-sync/status', (req, res) => {
+  res.json({
+    running: autoSyncInterval !== null,
+    message: autoSyncInterval ? 'Auto-sync is running' : 'Auto-sync is not running'
+  });
 });
 
 // GET /api/v1/orders - Get all orders with stats
