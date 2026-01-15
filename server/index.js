@@ -309,7 +309,9 @@ const initDatabase = async () => {
     await client.query(`
       CREATE TABLE IF NOT EXISTS tickets (
         id VARCHAR(50) PRIMARY KEY,
+        user_id INTEGER,
         event_id VARCHAR(50) NOT NULL,
+        event_ref_id INTEGER,
         external_id VARCHAR(100),
         ticket_type VARCHAR(100) NOT NULL DEFAULT 'General',
         holder_name VARCHAR(255),
@@ -324,6 +326,23 @@ const initDatabase = async () => {
       );
       CREATE INDEX IF NOT EXISTS idx_tickets_event ON tickets(event_id);
       CREATE INDEX IF NOT EXISTS idx_tickets_status ON tickets(status);
+      CREATE INDEX IF NOT EXISTS idx_tickets_user ON tickets(user_id);
+      CREATE INDEX IF NOT EXISTS idx_tickets_event_ref ON tickets(event_ref_id);
+    `);
+
+    // Add columns to existing tickets table if they don't exist (migration)
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'tickets' AND column_name = 'user_id') THEN
+          ALTER TABLE tickets ADD COLUMN user_id INTEGER;
+          CREATE INDEX IF NOT EXISTS idx_tickets_user ON tickets(user_id);
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'tickets' AND column_name = 'event_ref_id') THEN
+          ALTER TABLE tickets ADD COLUMN event_ref_id INTEGER;
+          CREATE INDEX IF NOT EXISTS idx_tickets_event_ref ON tickets(event_ref_id);
+        END IF;
+      END $$;
     `);
 
     // Create activity_log table for persistent activity tracking
@@ -4358,14 +4377,28 @@ app.get('/api/v1/tickets', async (req, res) => {
 // GET /api/v1/tickets/stats - Get ticket statistics
 app.get('/api/v1/tickets/stats', async (req, res) => {
   try {
-    const result = await pool.query(`
+    const userId = req.user?.id;
+
+    // Multi-tenant: filter stats by user's tickets only
+    let queryText = `
       SELECT
         COUNT(*) as total,
-        COUNT(*) FILTER (WHERE status = 'valid') as valid,
-        COUNT(*) FILTER (WHERE status = 'used') as used,
-        COALESCE(SUM(price), 0) as revenue
-      FROM tickets
-    `);
+        COUNT(*) FILTER (WHERE t.status = 'valid') as valid,
+        COUNT(*) FILTER (WHERE t.status = 'used') as used,
+        COALESCE(SUM(t.price), 0) as revenue
+      FROM tickets t
+    `;
+
+    const params = [];
+    if (userId) {
+      queryText += `
+        LEFT JOIN events e ON t.event_ref_id = CAST(e.id AS INTEGER) OR t.event_id = e.external_id
+        WHERE (t.user_id = $1::integer OR e.user_id = $1::integer OR (t.user_id IS NULL AND e.user_id IS NULL))
+      `;
+      params.push(userId);
+    }
+
+    const result = await pool.query(queryText, params);
 
     const stats = result.rows[0];
     res.json({
@@ -4383,14 +4416,15 @@ app.get('/api/v1/tickets/stats', async (req, res) => {
 // POST /api/v1/tickets - Create a ticket
 app.post('/api/v1/tickets', async (req, res) => {
   try {
-    const { eventId, ticketType, holderName, holderEmail, price, source } = req.body;
+    const { eventId, eventRefId, ticketType, holderName, holderEmail, price, source } = req.body;
+    const userId = req.user?.id;
     const ticketId = generateTicketId();
 
     const result = await pool.query(
-      `INSERT INTO tickets (id, event_id, ticket_type, holder_name, holder_email, price, source)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
+      `INSERT INTO tickets (id, user_id, event_id, event_ref_id, ticket_type, holder_name, holder_email, price, source)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
        RETURNING *`,
-      [ticketId, eventId || 'default', ticketType || 'General', holderName, holderEmail, price || 0, source || 'manual']
+      [ticketId, userId || null, eventId || 'default', eventRefId || null, ticketType || 'General', holderName, holderEmail, price || 0, source || 'manual']
     );
 
     const ticket = result.rows[0];
@@ -4412,7 +4446,8 @@ app.post('/api/v1/tickets', async (req, res) => {
 // POST /api/v1/tickets/import - Import tickets from CSV data
 app.post('/api/v1/tickets/import', async (req, res) => {
   try {
-    const { tickets, eventId } = req.body;
+    const { tickets, eventId, eventRefId } = req.body;
+    const userId = req.user?.id;
 
     if (!Array.isArray(tickets)) {
       return res.status(400).json({ error: 'tickets must be an array' });
@@ -4422,11 +4457,13 @@ app.post('/api/v1/tickets/import', async (req, res) => {
     for (const ticket of tickets) {
       const ticketId = generateTicketId();
       await pool.query(
-        `INSERT INTO tickets (id, event_id, ticket_type, holder_name, holder_email, external_id, price)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        `INSERT INTO tickets (id, user_id, event_id, event_ref_id, ticket_type, holder_name, holder_email, external_id, price)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
         [
           ticketId,
+          userId || null,
           eventId || 'default',
+          eventRefId || null,
           ticket.ticketType || 'General',
           ticket.holderName,
           ticket.holderEmail,
@@ -6396,13 +6433,14 @@ app.post('/api/v1/gpt/tickets', async (req, res) => {
       }
 
       case 'create': {
-        const { ticketType, holderName, holderEmail, price } = data || {};
+        const { ticketType, holderName, holderEmail, price, userId: dataUserId } = data || {};
+        const userId = req.user?.id || dataUserId || null;
         if (!eventId || !ticketType) return res.status(400).json({ error: 'eventId and ticketType required' });
-        const ticketCode = crypto.randomBytes(8).toString('hex').toUpperCase();
+        const ticketId = generateTicketId();
         const result = await pool.query(`
-          INSERT INTO tickets (event_id, ticket_type, holder_name, holder_email, price, ticket_code, status)
-          VALUES ($1, $2, $3, $4, $5, $6, 'valid') RETURNING *
-        `, [eventId, ticketType, holderName, holderEmail, price || 0, ticketCode]);
+          INSERT INTO tickets (id, user_id, event_id, ticket_type, holder_name, holder_email, price, status)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, 'valid') RETURNING *
+        `, [ticketId, userId, eventId, ticketType, holderName, holderEmail, price || 0]);
         return res.json({ success: true, ticket: result.rows[0], message: 'Ticket created' });
       }
 
@@ -11894,15 +11932,17 @@ app.post('/api/v1/integrations/eventbrite/sync', async (req, res) => {
           for (const attendee of attendees) {
             const ticketId = `eb_${attendee.id}`;
             await pool.query(`
-              INSERT INTO tickets (id, event_id, external_id, ticket_type, holder_name, holder_email, status, source, created_at)
-              VALUES ($1, $2, $3, $4, $5, $6, $7, 'eventbrite', NOW())
+              INSERT INTO tickets (id, user_id, event_id, external_id, ticket_type, holder_name, holder_email, status, source, created_at)
+              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'eventbrite', NOW())
               ON CONFLICT (id) DO UPDATE SET
-                holder_name = $5,
-                holder_email = $6,
-                status = $7,
+                user_id = COALESCE(tickets.user_id, $2),
+                holder_name = $6,
+                holder_email = $7,
+                status = $8,
                 updated_at = NOW()
             `, [
               ticketId,
+              userId || null,
               event.id,
               attendee.id,
               attendee.ticket_class_name || 'General',
@@ -12020,18 +12060,27 @@ app.post('/api/webhooks/eventbrite', async (req, res) => {
           ]);
 
           // Also add attendees to tickets table
+          // Lookup user_id from the event to maintain multi-tenant isolation
+          const eventOwner = await pool.query(
+            'SELECT user_id FROM events WHERE external_id = $1 AND external_source = $2 LIMIT 1',
+            [order.event_id, 'eventbrite']
+          );
+          const eventUserId = eventOwner.rows[0]?.user_id || null;
+
           for (const attendee of (order.attendees || [])) {
             const ticketId = `eb_${attendee.id}`;
             await pool.query(`
-              INSERT INTO tickets (id, event_id, external_id, ticket_type, holder_name, holder_email, status, source, created_at)
-              VALUES ($1, $2, $3, $4, $5, $6, $7, 'eventbrite', NOW())
+              INSERT INTO tickets (id, user_id, event_id, external_id, ticket_type, holder_name, holder_email, status, source, created_at)
+              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'eventbrite', NOW())
               ON CONFLICT (id) DO UPDATE SET
-                holder_name = $5,
-                holder_email = $6,
-                status = $7,
+                user_id = COALESCE(tickets.user_id, $2),
+                holder_name = $6,
+                holder_email = $7,
+                status = $8,
                 updated_at = NOW()
             `, [
               ticketId,
+              eventUserId,
               order.event_id,
               attendee.id,
               attendee.ticket_class_name || 'General',
