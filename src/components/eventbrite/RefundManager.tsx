@@ -35,7 +35,7 @@ export function RefundManager({ events }: RefundManagerProps) {
       const res = await fetch(`${API_URL}/integrations/eventbrite/refunds?${params}`, { headers });
       if (res.ok) {
         const data = await res.json();
-        setRefunds(data);
+        setRefunds(Array.isArray(data) ? data : data?.refunds || []);
       }
     } catch (err) {
       console.error('Error fetching refunds:', err);
@@ -52,7 +52,7 @@ export function RefundManager({ events }: RefundManagerProps) {
       const res = await fetch(`${API_URL}/integrations/eventbrite/orders?${params}`, { headers });
       if (res.ok) {
         const data = await res.json();
-        setOrders(data);
+        setOrders(Array.isArray(data) ? data : data?.orders || []);
       }
     } catch (err) {
       console.error('Error fetching orders:', err);
@@ -139,15 +139,15 @@ export function RefundManager({ events }: RefundManagerProps) {
     }
   };
 
-  const filteredOrders = orders.filter((order) =>
-    order.buyer_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    order.buyer_email.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    order.id.includes(searchTerm)
-  );
+  const filteredOrders = Array.isArray(orders) ? orders.filter((order) =>
+    order.buyer_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    order.buyer_email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    order.id?.includes(searchTerm)
+  ) : [];
 
-  const totalRefunded = refunds
+  const totalRefunded = Array.isArray(refunds) ? refunds
     .filter(r => r.status === 'processed')
-    .reduce((sum, r) => sum + (r.amount || 0), 0);
+    .reduce((sum, r) => sum + (r.amount || 0), 0) : 0;
 
   if (loading) {
     return (

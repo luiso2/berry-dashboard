@@ -101,8 +101,38 @@ export default function Landing() {
                   ))}
                 </div>
                 <div className="grid grid-cols-3 gap-4">
-                  <div className="col-span-2 bg-zinc-800/50 rounded-xl p-4 border border-amber-500/10 h-32"></div>
-                  <div className="bg-zinc-800/50 rounded-xl p-4 border border-amber-500/10 h-32"></div>
+                  {/* Revenue Chart */}
+                  <div className="col-span-2 bg-zinc-800/50 rounded-xl p-4 border border-amber-500/10 h-40">
+                    <div className="flex justify-between items-center mb-3">
+                      <span className="text-white/60 text-sm font-medium">Revenue Trends</span>
+                      <span className="text-amber-400 text-xs">+24% this month</span>
+                    </div>
+                    <div className="flex items-end gap-2 h-20">
+                      {[40, 65, 45, 80, 55, 90, 70, 85, 60, 95, 75, 100].map((h, i) => (
+                        <div
+                          key={i}
+                          className="flex-1 bg-gradient-to-t from-amber-500/60 to-amber-400/30 rounded-t"
+                          style={{ height: `${h}%` }}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                  {/* Quick Stats */}
+                  <div className="bg-zinc-800/50 rounded-xl p-4 border border-amber-500/10 h-40">
+                    <span className="text-white/60 text-sm font-medium">Top Events</span>
+                    <div className="mt-3 space-y-2">
+                      {[
+                        { name: 'VIP Gala', value: '324 guests' },
+                        { name: 'Summer Fest', value: '512 guests' },
+                        { name: 'Launch Party', value: '189 guests' },
+                      ].map((event, i) => (
+                        <div key={i} className="flex justify-between items-center">
+                          <span className="text-white/80 text-xs">{event.name}</span>
+                          <span className="text-amber-400/80 text-xs">{event.value}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>

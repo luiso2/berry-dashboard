@@ -36,7 +36,7 @@ export function PromoCodesManager({ events }: PromoCodesManagerProps) {
       const res = await fetch(`${API_URL}/integrations/eventbrite/promo-codes?${params}`, { headers });
       if (res.ok) {
         const data = await res.json();
-        setPromoCodes(data);
+        setPromoCodes(Array.isArray(data) ? data : data?.promo_codes || []);
       }
     } catch (err) {
       console.error('Error fetching promo codes:', err);
@@ -135,14 +135,14 @@ export function PromoCodesManager({ events }: PromoCodesManagerProps) {
     return Math.round((code.quantity_sold / code.quantity_available) * 100);
   };
 
-  const totalDiscountGiven = promoCodes.reduce((sum, code) => {
+  const totalDiscountGiven = Array.isArray(promoCodes) ? promoCodes.reduce((sum, code) => {
     const discount = code.discount_type === 'percentage'
       ? 0 // Can't calculate without order amounts
-      : code.discount_value * code.quantity_sold;
+      : (code.discount_value || 0) * (code.quantity_sold || 0);
     return sum + discount;
-  }, 0);
+  }, 0) : 0;
 
-  const totalCodesUsed = promoCodes.reduce((sum, code) => sum + code.quantity_sold, 0);
+  const totalCodesUsed = Array.isArray(promoCodes) ? promoCodes.reduce((sum, code) => sum + (code.quantity_sold || 0), 0) : 0;
 
   if (loading) {
     return (

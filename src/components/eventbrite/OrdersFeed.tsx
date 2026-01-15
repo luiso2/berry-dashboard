@@ -31,7 +31,8 @@ export function OrdersFeed({ events }: OrdersFeedProps) {
       const res = await fetch(`${API_URL}/integrations/eventbrite/orders?${params}`, { headers });
       if (res.ok) {
         const data = await res.json();
-        setOrders(data);
+        // Ensure data is an array
+        setOrders(Array.isArray(data) ? data : data?.orders || []);
       }
     } catch (err) {
       console.error('Error fetching orders:', err);
@@ -43,7 +44,8 @@ export function OrdersFeed({ events }: OrdersFeedProps) {
       const res = await fetch(`${API_URL}/integrations/eventbrite/orders/recent?limit=20`, { headers });
       if (res.ok) {
         const data = await res.json();
-        setRecentOrders(data);
+        // Ensure data is an array
+        setRecentOrders(Array.isArray(data) ? data : data?.orders || []);
       }
     } catch (err) {
       console.error('Error fetching recent orders:', err);
@@ -59,7 +61,8 @@ export function OrdersFeed({ events }: OrdersFeedProps) {
       const res = await fetch(`${API_URL}/integrations/eventbrite/orders/stats/daily?${params}`, { headers });
       if (res.ok) {
         const data = await res.json();
-        setDailyStats(data);
+        // Ensure data is an array
+        setDailyStats(Array.isArray(data) ? data : data?.stats || []);
       }
     } catch (err) {
       console.error('Error fetching daily stats:', err);
@@ -127,8 +130,8 @@ export function OrdersFeed({ events }: OrdersFeedProps) {
     }
   };
 
-  const totalRevenue = orders.reduce((sum, o) => sum + o.net_amount, 0);
-  const totalTickets = orders.reduce((sum, o) => sum + o.ticket_count, 0);
+  const totalRevenue = Array.isArray(orders) ? orders.reduce((sum, o) => sum + (o.net_amount || 0), 0) : 0;
+  const totalTickets = Array.isArray(orders) ? orders.reduce((sum, o) => sum + (o.ticket_count || 0), 0) : 0;
 
   if (loading) {
     return (
