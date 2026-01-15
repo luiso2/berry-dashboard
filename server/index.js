@@ -1526,6 +1526,34 @@ const initDatabase = async () => {
       CREATE INDEX IF NOT EXISTS idx_eb_orders_date ON eventbrite_orders(order_date DESC);
       CREATE INDEX IF NOT EXISTS idx_eb_orders_email ON eventbrite_orders(buyer_email);
     `);
+
+    // Migration: Add missing columns to existing eventbrite_orders table
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'eventbrite_orders' AND column_name = 'user_id') THEN
+          ALTER TABLE eventbrite_orders ADD COLUMN user_id INTEGER;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'eventbrite_orders' AND column_name = 'order_date') THEN
+          ALTER TABLE eventbrite_orders ADD COLUMN order_date TIMESTAMP;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'eventbrite_orders' AND column_name = 'gross_amount') THEN
+          ALTER TABLE eventbrite_orders ADD COLUMN gross_amount DECIMAL(10, 2) DEFAULT 0;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'eventbrite_orders' AND column_name = 'fees') THEN
+          ALTER TABLE eventbrite_orders ADD COLUMN fees DECIMAL(10, 2) DEFAULT 0;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'eventbrite_orders' AND column_name = 'net_amount') THEN
+          ALTER TABLE eventbrite_orders ADD COLUMN net_amount DECIMAL(10, 2) DEFAULT 0;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'eventbrite_orders' AND column_name = 'ticket_count') THEN
+          ALTER TABLE eventbrite_orders ADD COLUMN ticket_count INTEGER DEFAULT 1;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'eventbrite_orders' AND column_name = 'buyer_email') THEN
+          ALTER TABLE eventbrite_orders ADD COLUMN buyer_email VARCHAR(255);
+        END IF;
+      END $$;
+    `);
     console.log('Eventbrite orders table initialized');
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -1585,6 +1613,16 @@ const initDatabase = async () => {
       CREATE INDEX IF NOT EXISTS idx_eb_attendees_order ON eventbrite_attendees(order_id);
       CREATE INDEX IF NOT EXISTS idx_eb_attendees_barcode ON eventbrite_attendees(barcode);
       CREATE INDEX IF NOT EXISTS idx_eb_attendees_checkin ON eventbrite_attendees(checked_in);
+    `);
+
+    // Migration: Add user_id to existing eventbrite_attendees table
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'eventbrite_attendees' AND column_name = 'user_id') THEN
+          ALTER TABLE eventbrite_attendees ADD COLUMN user_id INTEGER;
+        END IF;
+      END $$;
     `);
     console.log('Eventbrite attendees table initialized');
 
