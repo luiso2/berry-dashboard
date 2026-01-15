@@ -4,3 +4,4 @@ export { useToasts } from './useToasts';
 export { useGuests } from './useGuests';
 export { useSMS } from './useSMS';
 export { useEvents } from './useEvents';
+export { useIntegrations } from './useIntegrations';
