@@ -13014,7 +13014,7 @@ app.get('/api/v1/integrations/eventbrite/metrics', async (req, res) => {
         e.id,
         e.name,
         e.event_date as "startDate",
-        e.venue,
+        e.venue_name as venue,
         e.status,
         e.expected_attendance as capacity
       FROM events e
