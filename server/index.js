@@ -7516,17 +7516,24 @@ app.get('/api/v1/events/stats', async (req, res) => {
 app.get('/api/v1/events/:id', async (req, res) => {
   try {
     const { id } = req.params;
+    const userId = req.user?.id;
 
     // Support both numeric ID and slug lookup
     let result;
     const isNumericId = /^\d+$/.test(id);
 
     if (isNumericId) {
-      result = await pool.query('SELECT * FROM events WHERE id = $1', [id]);
+      // Numeric ID: filter by user_id for multi-tenant security
+      if (userId) {
+        result = await pool.query('SELECT * FROM events WHERE id = $1 AND (user_id = $2::integer OR user_id IS NULL)', [id, userId]);
+      } else {
+        // Public access only for public events
+        result = await pool.query('SELECT * FROM events WHERE id = $1 AND (is_public = true OR is_public IS NULL)', [id]);
+      }
     } else {
-      // Try to find by slug first, then by eventbrite_id
+      // Slug lookup: allow public access (via slug means it's meant to be public)
       result = await pool.query(
-        'SELECT * FROM events WHERE slug = $1 OR eventbrite_id = $1',
+        'SELECT * FROM events WHERE (slug = $1 OR eventbrite_id = $1)',
         [id]
       );
     }
@@ -11782,10 +11789,10 @@ app.post('/api/v1/integrations/eventbrite/sync', async (req, res) => {
           available: tc.on_sale_status === 'AVAILABLE'
         }));
 
-        // Check if event already exists
+        // Check if event already exists FOR THIS USER (multi-tenant)
         const existingEvent = await pool.query(
-          'SELECT id FROM events WHERE external_id = $1 AND external_source = $2',
-          [event.id, 'eventbrite']
+          'SELECT id FROM events WHERE external_id = $1 AND external_source = $2 AND (user_id = $3::integer OR (user_id IS NULL AND $3::integer IS NULL))',
+          [event.id, 'eventbrite', userId || null]
         );
 
         const eventDate = event.start?.utc ? new Date(event.start.utc).toISOString().split('T')[0] : new Date().toISOString().split('T')[0];
@@ -11795,6 +11802,7 @@ app.post('/api/v1/integrations/eventbrite/sync', async (req, res) => {
 
         if (existingEvent.rows.length > 0) {
           // Update existing event (use berry-bly schema: title, date, time, venue, category)
+          // IMPORTANT: Also filter by user_id for multi-tenant security
           await pool.query(`
             UPDATE events SET
               title = $1,
@@ -11807,6 +11815,7 @@ app.post('/api/v1/integrations/eventbrite/sync', async (req, res) => {
               flyer_url = $8,
               updated_at = NOW()
             WHERE external_id = $9 AND external_source = 'eventbrite'
+            AND (user_id = $10::integer OR (user_id IS NULL AND $10::integer IS NULL))
           `, [
             event.name?.text || 'Untitled Event',
             event.description?.text || '',
@@ -11816,7 +11825,8 @@ app.post('/api/v1/integrations/eventbrite/sync', async (req, res) => {
             event.url || '',
             JSON.stringify(ticketTypes),
             event.logo?.url || null,
-            event.id
+            event.id,
+            userId || null
           ]);
         } else {
           // Insert new event - generate ID and use berry-bly schema columns (title, date)
@@ -12861,26 +12871,29 @@ app.post('/api/v1/integrations/eventbrite/sync-all', async (req, res) => {
         if (eventsResponse.ok) {
           const eventsData = await eventsResponse.json();
           for (const event of (eventsData.events || [])) {
+            // Check for existing event - MUST filter by user_id for multi-tenant
             const existingEvent = await pool.query(
-              'SELECT id FROM events WHERE external_id = $1 AND external_source = $2',
-              [event.id, 'eventbrite']
+              'SELECT id FROM events WHERE external_id = $1 AND external_source = $2 AND (user_id = $3::integer OR (user_id IS NULL AND $3::integer IS NULL))',
+              [event.id, 'eventbrite', userId || null]
             );
 
             const eventDate = event.start?.utc ? new Date(event.start.utc).toISOString().split('T')[0] : new Date().toISOString().split('T')[0];
             const startTime = event.start?.local ? event.start.local.split('T')[1]?.substring(0, 5) : null;
 
             if (existingEvent.rows.length > 0) {
+              // Update - also filter by user_id for multi-tenant security
               await pool.query(`
                 UPDATE events SET
                   title = $1, description = $2, date = $3, time = $4, status = $5,
                   eventbrite_url = $6, venue_id = $7, eventbrite_category_id = $8,
                   eventbrite_is_free = $9, eventbrite_capacity = $10, updated_at = NOW()
                 WHERE external_id = $11 AND external_source = 'eventbrite'
+                AND (user_id = $12::integer OR (user_id IS NULL AND $12::integer IS NULL))
               `, [
                 event.name?.text, event.description?.text, eventDate, startTime,
                 event.status === 'live' ? 'active' : event.status,
                 event.url, event.venue_id, event.category_id,
-                event.is_free, event.capacity, event.id
+                event.is_free, event.capacity, event.id, userId || null
               ]);
             } else {
               const nextIdResult = await pool.query("SELECT COALESCE(MAX(CAST(id AS INTEGER)), 0) + 1 as next_id FROM events WHERE id ~ '^[0-9]+$'");
@@ -13113,15 +13126,16 @@ app.get('/api/v1/integrations/eventbrite/metrics', async (req, res) => {
       `, [userId]);
     } catch (e) {
       try {
-        // Fallback: minimal query with only id and name
+        // Fallback: minimal query with only id and name - MUST filter by user_id for multi-tenant
         eventsResult = await pool.query(`
           SELECT
             id,
-            name
+            COALESCE(name, title) as name
           FROM events
+          WHERE (user_id = $1::integer OR user_id IS NULL)
           ORDER BY id DESC
           LIMIT 50
-        `);
+        `, [userId]);
         // Add default values for other fields
         eventsResult.rows = eventsResult.rows.map(row => ({
           ...row,
