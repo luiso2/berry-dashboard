@@ -71,6 +71,7 @@ import {
   PromoCodesManager,
   CheckInScanner,
   EmailComposer,
+  SMSComposer,
   EventComparisonView,
   RefundManager,
 } from './components/eventbrite';
@@ -357,7 +358,7 @@ function App() {
   const [sending, setSending] = useState(false);
   const [activeView, setActiveView] = useState<ViewType>('analytics');
   const [dashboardTab, setDashboardTab] = useState<'overview' | 'revenue' | 'eventbrite' | 'guests'>('overview');
-  const [eventbriteSubTab, setEventbriteSubTab] = useState<'analytics' | 'orders' | 'alerts' | 'create' | 'promos' | 'checkin' | 'email' | 'compare' | 'refunds' | 'reports'>('analytics');
+  const [eventbriteSubTab, setEventbriteSubTab] = useState<'analytics' | 'orders' | 'alerts' | 'create' | 'promos' | 'checkin' | 'email' | 'sms' | 'compare' | 'refunds' | 'reports'>('analytics');
   const [lastSyncTime, setLastSyncTime] = useState<Date | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
   const [guestTab, setGuestTab] = useState<'pending' | 'all'>('pending');
@@ -3546,6 +3547,7 @@ function App() {
                 { key: 'promos', label: 'Promo Codes', icon: '🎁' },
                 { key: 'checkin', label: 'Check-in', icon: '📱' },
                 { key: 'email', label: 'Email', icon: '✉️' },
+                { key: 'sms', label: 'SMS', icon: '📱' },
                 { key: 'compare', label: 'Compare', icon: '⚖️' },
                 { key: 'refunds', label: 'Refunds', icon: '💸' },
                 { key: 'reports', label: 'Reports', icon: '📄' },
@@ -4102,6 +4104,11 @@ function App() {
             {/* Email Sub-Tab */}
             {eventbriteSubTab === 'email' && (
               <EmailComposer events={eventbriteMetrics.events} />
+            )}
+
+            {/* SMS Sub-Tab */}
+            {eventbriteSubTab === 'sms' && (
+              <SMSComposer events={eventbriteMetrics.events} />
             )}
 
             {/* Compare Sub-Tab */}
@@ -7602,6 +7609,7 @@ function App() {
                 { key: 'alerts', label: 'Alerts', icon: '🔔' },
                 { key: 'create', label: 'Create', icon: '➕' },
                 { key: 'email', label: 'Email', icon: '✉️' },
+                { key: 'sms', label: 'SMS', icon: '💬' },
                 { key: 'refunds', label: 'Refunds', icon: '💸' },
                 { key: 'reports', label: 'Reports', icon: '📄' },
               ].map((tab) => (
@@ -7697,6 +7705,9 @@ function App() {
 
             {/* Email Composer */}
             {eventbriteSubTab === 'email' && <EmailComposer events={eventbriteMetrics.events} />}
+
+            {/* SMS Composer */}
+            {eventbriteSubTab === 'sms' && <SMSComposer events={eventbriteMetrics.events} />}
 
             {/* Event Comparison */}
             {eventbriteSubTab === 'compare' && <EventComparisonView events={eventbriteMetrics.events} />}

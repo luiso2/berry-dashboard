@@ -6,5 +6,6 @@ export { EventCreator } from './EventCreator';
 export { PromoCodesManager } from './PromoCodesManager';
 export { CheckInScanner } from './CheckInScanner';
 export { EmailComposer } from './EmailComposer';
+export { SMSComposer } from './SMSComposer';
 export { EventComparisonView } from './EventComparisonView';
 export { RefundManager } from './RefundManager';

@@ -15439,6 +15439,131 @@ app.post('/api/v1/integrations/eventbrite/email/attendees', async (req, res) => 
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// FEATURE 8B: SMS ATTENDEES VIA TELNYX
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// POST /api/integrations/eventbrite/sms/send - Send SMS to attendees
+app.post('/api/integrations/eventbrite/sms/send', async (req, res) => {
+  try {
+    const userId = req.user?.id;
+    const { event_id, message, recipient_type, filter } = req.body;
+
+    if (!event_id || !message) {
+      return res.status(400).json({ error: 'event_id and message are required' });
+    }
+
+    // Get Telnyx integration
+    const telnyxIntegration = await pool.query(
+      'SELECT * FROM integrations WHERE user_id = $1 AND provider = $2 AND status = $3',
+      [userId, 'telnyx', 'connected']
+    );
+
+    if (!telnyxIntegration.rows[0]) {
+      return res.status(400).json({ error: 'Telnyx integration not configured. Please set up Telnyx first.' });
+    }
+
+    const telnyxConfig = telnyxIntegration.rows[0].config || {};
+    const fromNumber = telnyxConfig.phone_number;
+
+    if (!fromNumber) {
+      return res.status(400).json({ error: 'No Telnyx phone number configured' });
+    }
+
+    // Build query for recipients with phone numbers
+    let query = `
+      SELECT DISTINCT phone, name, email
+      FROM eventbrite_attendees
+      WHERE user_id = $1
+        AND event_id = $2
+        AND phone IS NOT NULL
+        AND phone != ''
+        AND LENGTH(phone) >= 10
+    `;
+    const params = [userId, event_id];
+
+    // Apply filters
+    if (filter?.checked_in !== undefined) {
+      query += ' AND checked_in = $' + (params.length + 1);
+      params.push(filter.checked_in);
+    }
+
+    const attendeesResult = await pool.query(query, params);
+    const attendees = attendeesResult.rows;
+
+    if (attendees.length === 0) {
+      return res.status(404).json({ error: 'No attendees with phone numbers found' });
+    }
+
+    // Get event details for personalization
+    const eventResult = await pool.query(
+      'SELECT name, start_date, venue FROM eventbrite_events WHERE id = $1',
+      [event_id]
+    );
+    const eventDetails = eventResult.rows[0] || {};
+
+    const sent = [];
+    const failed = [];
+
+    // Send SMS to each attendee
+    for (const attendee of attendees) {
+      try {
+        // Personalize message
+        const personalizedMessage = message
+          .replace(/\{\{name\}\}/g, attendee.name?.split(' ')[0] || 'Guest')
+          .replace(/\{\{event_name\}\}/g, eventDetails.name || 'the event')
+          .replace(/\{\{event_date\}\}/g, eventDetails.start_date ? new Date(eventDetails.start_date).toLocaleDateString() : 'TBD')
+          .replace(/\{\{venue\}\}/g, eventDetails.venue || 'TBD');
+
+        // Format phone number
+        let phone = attendee.phone.replace(/\D/g, '');
+        if (phone.length === 10) {
+          phone = '+1' + phone;
+        } else if (!phone.startsWith('+')) {
+          phone = '+' + phone;
+        }
+
+        // Send via Telnyx (using REST API)
+        const telnyxApiKey = decryptApiKey(telnyxIntegration.rows[0].api_key_encrypted);
+        const smsResponse = await fetch('https://api.telnyx.com/v2/messages', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${telnyxApiKey}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            from: fromNumber,
+            to: phone,
+            text: personalizedMessage
+          })
+        });
+
+        const smsResult = await smsResponse.json();
+
+        if (smsResponse.ok) {
+          sent.push({ phone: attendee.phone, name: attendee.name, id: smsResult.data?.id });
+        } else {
+          failed.push({ phone: attendee.phone, error: smsResult.errors?.[0]?.detail || 'Failed to send' });
+        }
+      } catch (smsError) {
+        failed.push({ phone: attendee.phone, error: smsError.message });
+      }
+    }
+
+    res.json({
+      success: true,
+      total_recipients: attendees.length,
+      sent: sent.length,
+      failed: failed.length,
+      sent_details: sent,
+      failed_details: failed
+    });
+  } catch (error) {
+    console.error('Error sending SMS:', error);
+    res.status(500).json({ error: 'Failed to send SMS messages' });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // FEATURE 9: COMPARE EVENTS SIDE-BY-SIDE
 // ═══════════════════════════════════════════════════════════════════════════════
 
