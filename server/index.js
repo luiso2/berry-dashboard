@@ -4526,6 +4526,22 @@ app.delete('/api/v1/tickets/all', async (req, res) => {
   }
 });
 
+// DELETE /api/v1/tickets/eventbrite - Delete only Eventbrite tickets (clean foreign data)
+app.delete('/api/v1/tickets/eventbrite', async (req, res) => {
+  try {
+    const result = await pool.query("DELETE FROM tickets WHERE source = 'eventbrite' RETURNING id");
+
+    res.json({
+      success: true,
+      message: `Deleted ${result.rowCount} Eventbrite tickets`,
+      deletedCount: result.rowCount
+    });
+  } catch (error) {
+    console.error('Error deleting Eventbrite tickets:', error);
+    res.status(500).json({ error: 'Failed to delete Eventbrite tickets' });
+  }
+});
+
 // POST /api/v1/tickets/bulk-delete - Delete multiple tickets
 app.post('/api/v1/tickets/bulk-delete', async (req, res) => {
   try {
