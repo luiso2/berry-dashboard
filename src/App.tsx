@@ -61,7 +61,7 @@ import {
   StatusBadge,
   Input,
 } from './components/common';
-import { GuestList, EmailsList } from './components/guests';
+import { GuestList, EmailsList, GuestImportModal } from './components/guests';
 import { SMSView, MonitoringView, ChatGPTView, IntegrationsView } from './views';
 import {
   AlertsManager,
@@ -348,6 +348,7 @@ function App() {
   const [guests, setGuests] = useState<Guest[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
   const [selectedGuests, setSelectedGuests] = useState<Set<string>>(new Set());
   const [confirmation, setConfirmation] = useState<ConfirmationModal>({ show: false, guests: [], category: null, emailOnly: false });
   const [customMessage, setCustomMessage] = useState('');
@@ -4241,19 +4242,58 @@ function App() {
                 <TabButton active={guestTab === 'all'} onClick={() => { setGuestTab('all'); setSelectedGuests(new Set()); }} label="Accepted" count={stats.accepted} />
               </div>
 
-              {selectedGuests.size > 0 && (
-                <div className="bulk-actions" style={{ display: 'flex', alignItems: 'center', gap: 10, animation: 'slideDown 0.2s ease' }}>
-                  <span style={{ fontSize: 15, color: '#888', background: '#1a1a1a', padding: '6px 12px', borderRadius: 6 }}>
-                    {selectedGuests.size} selected
-                  </span>
-                  <ActionBtn onClick={() => handleBulkAction(null, true)} color="#22c55e" label="✉" />
-                  <ActionBtn onClick={handleBulkReminder} color="#f59e0b" label="🔔" />
-                  <ActionBtn onClick={handleSendTicketsToGuests} color="#d4af37" label="🎫" />
-                  <ActionBtn onClick={() => handleBulkAction('A')} color="#a78bfa" label="VIP" />
-                  <ActionBtn onClick={() => handleBulkAction('B')} color="#60a5fa" label="Pri" />
-                  <ActionBtn onClick={() => handleBulkAction('C')} color="#6b7280" label="Std" />
-                </div>
-              )}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                {selectedGuests.size > 0 && (
+                  <div className="bulk-actions" style={{ display: 'flex', alignItems: 'center', gap: 10, animation: 'slideDown 0.2s ease' }}>
+                    <span style={{ fontSize: 15, color: '#888', background: '#1a1a1a', padding: '6px 12px', borderRadius: 6 }}>
+                      {selectedGuests.size} selected
+                    </span>
+                    <ActionBtn onClick={() => handleBulkAction(null, true)} color="#22c55e" label="✉" />
+                    <ActionBtn onClick={handleBulkReminder} color="#f59e0b" label="🔔" />
+                    <ActionBtn onClick={handleSendTicketsToGuests} color="#d4af37" label="🎫" />
+                    <ActionBtn onClick={() => handleBulkAction('A')} color="#a78bfa" label="VIP" />
+                    <ActionBtn onClick={() => handleBulkAction('B')} color="#60a5fa" label="Pri" />
+                    <ActionBtn onClick={() => handleBulkAction('C')} color="#6b7280" label="Std" />
+                  </div>
+                )}
+                <button
+                  onClick={() => setShowImportModal(true)}
+                  className="btn-hover"
+                  style={{
+                    background: '#1a1a1a',
+                    border: '1px solid #333',
+                    color: '#888',
+                    padding: '8px 16px',
+                    borderRadius: 8,
+                    fontSize: 14,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                  }}
+                >
+                  📥 Import
+                </button>
+                <button
+                  onClick={() => setShowForm(true)}
+                  className="btn-hover"
+                  style={{
+                    background: '#d4af37',
+                    border: 'none',
+                    color: '#000',
+                    padding: '8px 16px',
+                    borderRadius: 8,
+                    fontSize: 14,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                  }}
+                >
+                  + Add Guest
+                </button>
+              </div>
             </div>
             <GuestList
               guests={currentList}
@@ -8380,6 +8420,18 @@ function App() {
             </button>
           </div>
         </div>
+      )}
+
+      {/* Import Guests Modal */}
+      {showImportModal && (
+        <GuestImportModal
+          onClose={() => setShowImportModal(false)}
+          onSuccess={() => {
+            setShowImportModal(false);
+            fetchGuests();
+          }}
+          eventId={selectedEvent}
+        />
       )}
 
       {/* Add Guest Modal */}

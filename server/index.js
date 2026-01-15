@@ -135,19 +135,26 @@ const storage = multer.diskStorage({
 
 const fileFilter = (req, file, cb) => {
   const allowedMimes = [
+    // CSV/Excel files
     'text/csv',
     'application/vnd.ms-excel',
     'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     'application/csv',
-    'text/plain'
+    'text/plain',
+    // Image files
+    'image/jpeg',
+    'image/png',
+    'image/gif',
+    'image/webp',
+    'image/svg+xml'
   ];
-  if (allowedMimes.includes(file.mimetype) ||
-      file.originalname.endsWith('.csv') ||
-      file.originalname.endsWith('.xlsx') ||
-      file.originalname.endsWith('.xls')) {
+  const isAllowedMime = allowedMimes.includes(file.mimetype);
+  const isAllowedExt = file.originalname.match(/\.(csv|xlsx|xls|jpg|jpeg|png|gif|webp|svg)$/i);
+
+  if (isAllowedMime || isAllowedExt) {
     cb(null, true);
   } else {
-    cb(new Error('Only CSV and Excel files are allowed'), false);
+    cb(new Error('File type not allowed'), false);
   }
 };
 
@@ -156,6 +163,9 @@ const upload = multer({
   fileFilter,
   limits: { fileSize: 10 * 1024 * 1024 } // 10MB limit
 });
+
+// Serve uploaded files statically
+app.use('/uploads', express.static(uploadDir));
 
 // Initialize database tables
 const initDatabase = async () => {
@@ -3300,6 +3310,31 @@ const normalizeContactRow = (row) => {
 
   return normalized;
 };
+
+// POST /api/v1/gallery/upload - Upload image for events/gallery
+app.post('/api/v1/gallery/upload', upload.single('image'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No image file provided' });
+    }
+
+    // Get the base URL from environment or request
+    const baseUrl = process.env.BASE_URL || `${req.protocol}://${req.get('host')}`;
+    const imageUrl = `${baseUrl}/uploads/${req.file.filename}`;
+
+    res.json({
+      success: true,
+      url: imageUrl,
+      imageUrl: imageUrl,
+      filename: req.file.filename,
+      originalName: req.file.originalname,
+      size: req.file.size
+    });
+  } catch (error) {
+    console.error('Error uploading image:', error);
+    res.status(500).json({ error: 'Failed to upload image' });
+  }
+});
 
 // POST /api/v1/uploads/contacts - Upload CSV/Excel file with contacts
 app.post('/api/v1/uploads/contacts', upload.single('file'), async (req, res) => {
