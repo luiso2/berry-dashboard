@@ -8529,8 +8529,8 @@ app.get('/api/v1/staff', async (req, res) => {
         SELECT s.*,
           (SELECT COUNT(*) FROM staff_assignments sa WHERE sa.staff_id = s.id) as assignments_count,
           (SELECT COUNT(*) FROM staff_assignments sa
-           JOIN events e ON sa.event_id = e.id
-           WHERE sa.staff_id = s.id AND e.event_date >= CURRENT_DATE) as upcoming_events
+           JOIN events e ON sa.event_id::text = e.id::text
+           WHERE sa.staff_id = s.id AND e.date >= CURRENT_DATE) as upcoming_events
         FROM staff s
         WHERE (s.user_id = $1::integer OR s.user_id IS NULL)
         ORDER BY s.created_at DESC
