@@ -26,7 +26,7 @@ export function SMSView({ onToast }: SMSViewProps) {
   const fetchThreads = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${API_URL}/sms/threads`);
+      const res = await fetch(`${API_URL}/sms/conversations/threads`);
       if (!res.ok) throw new Error('Failed to fetch');
       const data = await res.json();
       setThreads(data.threads || []);
@@ -41,7 +41,7 @@ export function SMSView({ onToast }: SMSViewProps) {
 
   const fetchStats = async () => {
     try {
-      const res = await fetch(`${API_URL}/sms/stats`);
+      const res = await fetch(`${API_URL}/sms/conversations/stats`);
       if (res.ok) {
         const data = await res.json();
         setStats(data);

@@ -28,7 +28,7 @@ export function useSMS(options: UseSMSOptions = {}) {
   const fetchThreads = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${API_URL}/sms/threads`);
+      const res = await fetch(`${API_URL}/sms/conversations/threads`);
       if (!res.ok) throw new Error('Failed to fetch threads');
       const data = await res.json();
       setThreads(data.threads || []);

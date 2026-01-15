@@ -1802,7 +1802,7 @@ function App() {
   // SMS Stats function
   const fetchSmsStats = useCallback(async () => {
     try {
-      const res = await fetch(`${API_URL}/api/v1/sms/conversations/stats`);
+      const res = await fetch(`${API_URL}/sms/conversations/stats`);
       if (res.ok) {
         const data = await res.json();
         setSmsStats(data);
