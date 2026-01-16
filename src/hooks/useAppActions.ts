@@ -478,6 +478,145 @@ export function useAppActions(state: AppState, token?: string, userId?: number) 
     }
   }, [fetchSponsors, addToast]);
 
+  // Send Email to Guest (approval/confirmation)
+  const sendGuestEmail = useCallback(async (guest: Guest, emailType: 'approval' | 'confirmation' | 'custom', customMessage?: string) => {
+    try {
+      const res = await fetch(`${API_URL}/guest-lists/${guest.id}/send-email`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ emailType, customMessage })
+      });
+      if (res.ok) {
+        setGuests(prev => prev.map(g =>
+          g.id === guest.id ? { ...g, emailSent: true, emailSentAt: new Date().toISOString() } : g
+        ));
+        addToast(`Email sent to ${guest.name}`, 'success');
+        return true;
+      } else {
+        const data = await res.json();
+        addToast(data.error || 'Failed to send email', 'error');
+        return false;
+      }
+    } catch (error) {
+      console.error('Error sending email:', error);
+      addToast('Failed to send email', 'error');
+      return false;
+    }
+  }, [setGuests, addToast]);
+
+  // Send Bulk Emails to Multiple Guests
+  const sendBulkGuestEmails = useCallback(async (
+    guestIds: string[],
+    emailType: 'approval' | 'confirmation' | 'reminder' | 'custom',
+    subject?: string,
+    customMessage?: string
+  ) => {
+    try {
+      const res = await fetch(`${API_URL}/guest-lists/bulk-email`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ guestIds, emailType, subject, customMessage })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setGuests(prev => prev.map(g =>
+          guestIds.includes(g.id) ? { ...g, emailSent: true, emailSentAt: new Date().toISOString() } : g
+        ));
+        addToast(`Emails sent to ${data.sent || guestIds.length} guests`, 'success');
+        return true;
+      } else {
+        const data = await res.json();
+        addToast(data.error || 'Failed to send emails', 'error');
+        return false;
+      }
+    } catch (error) {
+      console.error('Error sending bulk emails:', error);
+      addToast('Failed to send emails', 'error');
+      return false;
+    }
+  }, [setGuests, addToast]);
+
+  // Approve Guest (move to category and optionally send email)
+  const approveGuest = useCallback(async (guest: Guest, category: GuestCategory, sendEmail: boolean = true) => {
+    try {
+      // Update category
+      const res = await fetch(`${API_URL}${ENDPOINTS.guests}/${guest.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ category })
+      });
+      if (res.ok) {
+        setGuests(prev => prev.map(g =>
+          g.id === guest.id ? { ...g, category } : g
+        ));
+
+        // Send approval email if requested
+        if (sendEmail) {
+          await sendGuestEmail(guest, 'approval');
+        }
+
+        addToast(`${guest.name} approved as ${category === 'A' ? 'VIP' : category === 'B' ? 'Priority' : 'Standard'}`, 'success');
+        return true;
+      }
+      return false;
+    } catch (error) {
+      console.error('Error approving guest:', error);
+      addToast('Failed to approve guest', 'error');
+      return false;
+    }
+  }, [setGuests, sendGuestEmail, addToast]);
+
+  // Reject Guest
+  const rejectGuest = useCallback(async (guest: Guest, _sendEmail: boolean = false) => {
+    try {
+      const res = await fetch(`${API_URL}${ENDPOINTS.guests}/${guest.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ category: 'rejected' })
+      });
+      if (res.ok) {
+        setGuests(prev => prev.map(g =>
+          g.id === guest.id ? { ...g, category: 'rejected' as GuestCategory } : g
+        ));
+        addToast(`${guest.name} has been rejected`, 'info');
+        return true;
+      }
+      return false;
+    } catch (error) {
+      console.error('Error rejecting guest:', error);
+      addToast('Failed to reject guest', 'error');
+      return false;
+    }
+  }, [setGuests, addToast]);
+
+  // Bulk Approve Guests
+  const bulkApproveGuests = useCallback(async (guestIds: string[], category: GuestCategory, sendEmails: boolean = true) => {
+    try {
+      await Promise.all(guestIds.map(id =>
+        fetch(`${API_URL}${ENDPOINTS.guests}/${id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ category })
+        })
+      ));
+
+      setGuests(prev => prev.map(g =>
+        guestIds.includes(g.id) ? { ...g, category } : g
+      ));
+
+      if (sendEmails) {
+        await sendBulkGuestEmails(guestIds, 'approval');
+      }
+
+      addToast(`${guestIds.length} guests approved as ${category === 'A' ? 'VIP' : category === 'B' ? 'Priority' : 'Standard'}`, 'success');
+      return true;
+    } catch (error) {
+      console.error('Error bulk approving guests:', error);
+      addToast('Failed to approve guests', 'error');
+      return false;
+    }
+  }, [setGuests, sendBulkGuestEmails, addToast]);
+
   return {
     addToast,
     fetchGuests,
@@ -500,6 +639,12 @@ export function useAppActions(state: AppState, token?: string, userId?: number) 
     deleteStaff,
     updateSponsor,
     deleteSponsor,
+    // Email & Approval functions
+    sendGuestEmail,
+    sendBulkGuestEmails,
+    approveGuest,
+    rejectGuest,
+    bulkApproveGuests,
   };
 }
 

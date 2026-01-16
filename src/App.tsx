@@ -305,6 +305,89 @@ function App() {
       case 'guests':
         return (
           <div>
+            {/* Bulk Action Bar */}
+            {state.selectedGuests.size > 0 && (
+              <div style={{
+                background: 'linear-gradient(135deg, #1a1a1a 0%, #0a0a0a 100%)',
+                border: '1px solid #d4af37',
+                borderRadius: 12,
+                padding: 16,
+                marginBottom: 20,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                gap: 12
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <span style={{ color: '#d4af37', fontWeight: 600 }}>
+                    {state.selectedGuests.size} selected
+                  </span>
+                  <button
+                    onClick={() => state.setSelectedGuests(new Set())}
+                    style={{ background: 'transparent', border: 'none', color: '#888', cursor: 'pointer', fontSize: 13 }}
+                  >
+                    Clear selection
+                  </button>
+                </div>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <button
+                    onClick={async () => {
+                      const ids = Array.from(state.selectedGuests);
+                      await actions.bulkApproveGuests(ids, 'A', true);
+                      state.setSelectedGuests(new Set());
+                    }}
+                    style={{ background: '#22c55e', color: '#000', border: 'none', padding: '8px 16px', borderRadius: 6, fontWeight: 600, cursor: 'pointer', fontSize: 13 }}
+                  >
+                    ✓ Approve as VIP
+                  </button>
+                  <button
+                    onClick={async () => {
+                      const ids = Array.from(state.selectedGuests);
+                      await actions.bulkApproveGuests(ids, 'B', true);
+                      state.setSelectedGuests(new Set());
+                    }}
+                    style={{ background: '#3b82f6', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: 6, fontWeight: 600, cursor: 'pointer', fontSize: 13 }}
+                  >
+                    ✓ Approve as Priority
+                  </button>
+                  <button
+                    onClick={async () => {
+                      const ids = Array.from(state.selectedGuests);
+                      await actions.bulkApproveGuests(ids, 'C', true);
+                      state.setSelectedGuests(new Set());
+                    }}
+                    style={{ background: '#6b7280', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: 6, fontWeight: 600, cursor: 'pointer', fontSize: 13 }}
+                  >
+                    ✓ Approve as Standard
+                  </button>
+                  <button
+                    onClick={async () => {
+                      const ids = Array.from(state.selectedGuests);
+                      await actions.sendBulkGuestEmails(ids, 'custom', 'Event Update', 'We have exciting news about the event!');
+                      state.setSelectedGuests(new Set());
+                    }}
+                    style={{ background: '#d4af37', color: '#000', border: 'none', padding: '8px 16px', borderRadius: 6, fontWeight: 600, cursor: 'pointer', fontSize: 13 }}
+                  >
+                    ✉ Send Bulk Email
+                  </button>
+                  <button
+                    onClick={async () => {
+                      const ids = Array.from(state.selectedGuests);
+                      for (const id of ids) {
+                        const guest = state.guests.find(g => g.id === id);
+                        if (guest) await actions.rejectGuest(guest, false);
+                      }
+                      state.setSelectedGuests(new Set());
+                    }}
+                    style={{ background: '#ef4444', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: 6, fontWeight: 600, cursor: 'pointer', fontSize: 13 }}
+                  >
+                    ✗ Reject Selected
+                  </button>
+                </div>
+              </div>
+            )}
+
             {/* Filters */}
             {state.showFilters && (
               <div style={{ background: '#0a0a0a', border: '1px solid #1a1a1a', borderRadius: 12, padding: 20, marginBottom: 20 }}>
@@ -341,49 +424,175 @@ function App() {
               </div>
             )}
 
+            {/* Guest Tabs */}
+            <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
+              <TabBtn
+                active={state.guestTab === 'pending'}
+                onClick={() => state.setGuestTab('pending')}
+                label={`Pending (${stats.pending})`}
+              />
+              <TabBtn
+                active={state.guestTab === 'all'}
+                onClick={() => state.setGuestTab('all')}
+                label={`All Guests (${stats.total})`}
+              />
+            </div>
+
             {/* Guest List Table */}
             <div style={{ background: '#0a0a0a', border: '1px solid #1a1a1a', borderRadius: 12, padding: 20 }}>
               <div style={{ overflowX: 'auto' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead>
                     <tr style={{ borderBottom: '1px solid #1a1a1a' }}>
+                      <th style={{ textAlign: 'left', padding: '12px 16px', color: '#888', fontSize: 13, width: 50 }}>
+                        <input
+                          type="checkbox"
+                          checked={state.selectedGuests.size === filteredGuests.filter(g => state.guestTab === 'all' || g.category === 'pending').length && filteredGuests.length > 0}
+                          onChange={() => {
+                            const displayedGuests = filteredGuests.filter(g => state.guestTab === 'all' || g.category === 'pending');
+                            if (state.selectedGuests.size === displayedGuests.length) {
+                              state.setSelectedGuests(new Set());
+                            } else {
+                              state.setSelectedGuests(new Set(displayedGuests.map(g => g.id)));
+                            }
+                          }}
+                          style={{ cursor: 'pointer' }}
+                        />
+                      </th>
                       <th style={{ textAlign: 'left', padding: '12px 16px', color: '#888', fontSize: 13 }}>Name</th>
                       <th style={{ textAlign: 'left', padding: '12px 16px', color: '#888', fontSize: 13 }}>Email</th>
                       <th style={{ textAlign: 'left', padding: '12px 16px', color: '#888', fontSize: 13 }}>Phone</th>
-                      <th style={{ textAlign: 'left', padding: '12px 16px', color: '#888', fontSize: 13 }}>Instagram</th>
                       <th style={{ textAlign: 'left', padding: '12px 16px', color: '#888', fontSize: 13 }}>Category</th>
                       <th style={{ textAlign: 'left', padding: '12px 16px', color: '#888', fontSize: 13 }}>Party</th>
-                      <th style={{ textAlign: 'left', padding: '12px 16px', color: '#888', fontSize: 13 }}>Email</th>
+                      <th style={{ textAlign: 'left', padding: '12px 16px', color: '#888', fontSize: 13 }}>Email Status</th>
+                      <th style={{ textAlign: 'left', padding: '12px 16px', color: '#888', fontSize: 13 }}>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredGuests.map((guest) => (
+                    {filteredGuests
+                      .filter(g => state.guestTab === 'all' || g.category === 'pending')
+                      .map((guest) => (
                       <tr key={guest.id} style={{ borderBottom: '1px solid #111' }}>
-                        <td style={{ padding: '12px 16px' }}>{guest.name}</td>
+                        <td style={{ padding: '12px 16px' }}>
+                          <input
+                            type="checkbox"
+                            checked={state.selectedGuests.has(guest.id)}
+                            onChange={() => {
+                              const newSet = new Set(state.selectedGuests);
+                              if (newSet.has(guest.id)) {
+                                newSet.delete(guest.id);
+                              } else {
+                                newSet.add(guest.id);
+                              }
+                              state.setSelectedGuests(newSet);
+                            }}
+                            style={{ cursor: 'pointer' }}
+                          />
+                        </td>
+                        <td style={{ padding: '12px 16px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                            <div style={{
+                              width: 32, height: 32, borderRadius: 8,
+                              background: getCategoryColor(guest.category) + '20',
+                              display: 'flex', alignItems: 'center', justifyContent: 'center',
+                              color: getCategoryColor(guest.category), fontWeight: 600, fontSize: 14
+                            }}>
+                              {guest.name.charAt(0).toUpperCase()}
+                            </div>
+                            <span>{guest.name}</span>
+                          </div>
+                        </td>
                         <td style={{ padding: '12px 16px', color: '#888' }}>{guest.email}</td>
                         <td style={{ padding: '12px 16px', color: '#888' }}>{formatPhone(guest.phone)}</td>
-                        <td style={{ padding: '12px 16px', color: '#888' }}>{guest.instagram || '-'}</td>
                         <td style={{ padding: '12px 16px' }}>
                           <span style={{
                             background: getCategoryColor(guest.category),
                             padding: '4px 10px',
                             borderRadius: 4,
-                            fontSize: 12
+                            fontSize: 12,
+                            color: '#fff'
                           }}>
-                            {guest.category}
+                            {guest.category === 'A' ? 'VIP' : guest.category === 'B' ? 'Priority' : guest.category === 'C' ? 'Standard' : guest.category}
                           </span>
                         </td>
                         <td style={{ padding: '12px 16px' }}>{guest.partySize}</td>
                         <td style={{ padding: '12px 16px' }}>
-                          {guest.emailSent ? '✓ Sent' : '○ Pending'}
+                          {guest.emailSent ? (
+                            <span style={{ color: '#22c55e', fontSize: 13 }}>✓ Sent</span>
+                          ) : (
+                            <span style={{ color: '#888', fontSize: 13 }}>○ Not sent</span>
+                          )}
+                        </td>
+                        <td style={{ padding: '12px 16px' }}>
+                          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                            {guest.category === 'pending' && (
+                              <>
+                                <button
+                                  onClick={() => actions.approveGuest(guest, 'A', true)}
+                                  title="Approve as VIP"
+                                  style={{ background: '#22c55e', color: '#000', border: 'none', padding: '4px 8px', borderRadius: 4, fontSize: 11, fontWeight: 600, cursor: 'pointer' }}
+                                >
+                                  VIP
+                                </button>
+                                <button
+                                  onClick={() => actions.approveGuest(guest, 'B', true)}
+                                  title="Approve as Priority"
+                                  style={{ background: '#3b82f6', color: '#fff', border: 'none', padding: '4px 8px', borderRadius: 4, fontSize: 11, fontWeight: 600, cursor: 'pointer' }}
+                                >
+                                  Pri
+                                </button>
+                                <button
+                                  onClick={() => actions.approveGuest(guest, 'C', true)}
+                                  title="Approve as Standard"
+                                  style={{ background: '#6b7280', color: '#fff', border: 'none', padding: '4px 8px', borderRadius: 4, fontSize: 11, fontWeight: 600, cursor: 'pointer' }}
+                                >
+                                  Std
+                                </button>
+                                <button
+                                  onClick={() => actions.rejectGuest(guest, false)}
+                                  title="Reject"
+                                  style={{ background: '#ef4444', color: '#fff', border: 'none', padding: '4px 8px', borderRadius: 4, fontSize: 11, fontWeight: 600, cursor: 'pointer' }}
+                                >
+                                  ✗
+                                </button>
+                              </>
+                            )}
+                            <button
+                              onClick={() => actions.sendGuestEmail(guest, 'confirmation')}
+                              title="Send Email"
+                              style={{ background: '#d4af37', color: '#000', border: 'none', padding: '4px 8px', borderRadius: 4, fontSize: 11, fontWeight: 600, cursor: 'pointer' }}
+                            >
+                              ✉
+                            </button>
+                            <button
+                              onClick={() => actions.removeGuest(guest.id)}
+                              title="Remove"
+                              style={{ background: '#333', color: '#888', border: 'none', padding: '4px 8px', borderRadius: 4, fontSize: 11, cursor: 'pointer' }}
+                            >
+                              ×
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
-              {filteredGuests.length === 0 && (
-                <p style={{ textAlign: 'center', color: '#666', padding: 40 }}>No guests found</p>
+              {filteredGuests.filter(g => state.guestTab === 'all' || g.category === 'pending').length === 0 && (
+                <div style={{ textAlign: 'center', padding: 60 }}>
+                  <div style={{ fontSize: 48, marginBottom: 16, color: '#333' }}>
+                    {state.guestTab === 'pending' ? '🎉' : '👥'}
+                  </div>
+                  <p style={{ color: '#666', fontSize: 16 }}>
+                    {state.guestTab === 'pending' ? 'No pending guests! All caught up.' : 'No guests found'}
+                  </p>
+                  <button
+                    onClick={() => state.setShowForm(true)}
+                    style={{ marginTop: 16, background: '#d4af37', color: '#000', border: 'none', padding: '12px 24px', borderRadius: 8, fontWeight: 600, cursor: 'pointer' }}
+                  >
+                    + Add Guest
+                  </button>
+                </div>
               )}
             </div>
           </div>
