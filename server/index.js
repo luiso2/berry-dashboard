@@ -1211,6 +1211,7 @@ const initDatabase = async () => {
         provider_user_email VARCHAR(255),
         provider_user_name VARCHAR(255),
         extra_config JSONB DEFAULT '{}',
+        metadata JSONB DEFAULT '{}',
         last_sync TIMESTAMP,
         last_error TEXT,
         expires_at TIMESTAMP,
@@ -1221,6 +1222,14 @@ const initDatabase = async () => {
       CREATE INDEX IF NOT EXISTS idx_user_integrations_user ON user_integrations(user_id);
       CREATE INDEX IF NOT EXISTS idx_user_integrations_provider ON user_integrations(provider);
       CREATE INDEX IF NOT EXISTS idx_user_integrations_status ON user_integrations(status);
+
+      -- Migration: Add metadata column if missing (for existing databases)
+      DO $$
+      BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'user_integrations' AND column_name = 'metadata') THEN
+          ALTER TABLE user_integrations ADD COLUMN metadata JSONB DEFAULT '{}';
+        END IF;
+      END $$;
     `);
 
     // ============================================
