@@ -4944,10 +4944,10 @@ app.post('/api/v1/sponsors', async (req, res) => {
             <p style="color: #cccccc; font-size: 16px; line-height: 1.8; margin: 0 0 20px 0;">
               We've received your partnership inquiry for <strong style="color: #d4af37;">${companyName}</strong>.
             </p>
-            <div style="background: rgba(255,255,255,0.05); border-left: 3px solid #d4af37; padding: 20px; margin: 20px 0; border-radius: 0 8px 8px 0;">
-              <p style="color: #d4af37; font-size: 14px; text-transform: uppercase; margin: 0 0 10px 0;">Partnership Level</p>
-              <p style="color: #ffffff; font-size: 18px; margin: 0;">${tierInfo.name}</p>
-            </div>
+            ${sponsorAmount > 0 ? `<div style="background: rgba(255,255,255,0.05); border-left: 3px solid #d4af37; padding: 20px; margin: 20px 0; border-radius: 0 8px 8px 0;">
+              <p style="color: #d4af37; font-size: 14px; text-transform: uppercase; margin: 0 0 10px 0;">Investment Amount</p>
+              <p style="color: #ffffff; font-size: 18px; margin: 0;">$${sponsorAmount.toLocaleString()}</p>
+            </div>` : ''}
             <p style="color: #cccccc; font-size: 16px; line-height: 1.8;">
               Our partnerships team will review your inquiry and contact you within 48 hours to discuss the next steps.
             </p>
@@ -4964,7 +4964,7 @@ app.post('/api/v1/sponsors', async (req, res) => {
     resend.emails.send({
       from: EMAIL_CONFIG.from,
       to: email,
-      subject: `Partnership Inquiry Received - ${tierInfo.name}`,
+      subject: `Partnership Inquiry Received - ${companyName}`,
       html: confirmationHtml,
     }).catch((err) => console.error('Failed to send sponsor confirmation email:', err));
 
@@ -4984,7 +4984,7 @@ app.post('/api/v1/sponsors', async (req, res) => {
               <tr><td style="padding: 8px 0; color: #666;">Email</td><td style="text-align: right;">${email}</td></tr>
               <tr><td style="padding: 8px 0; color: #666;">Phone</td><td style="text-align: right;">${phone || 'N/A'}</td></tr>
               <tr><td style="padding: 8px 0; color: #666;">Website</td><td style="text-align: right;">${website || 'N/A'}</td></tr>
-              <tr><td style="padding: 8px 0; color: #666;">Tier</td><td style="color: #d4af37; text-align: right;">${tierInfo.name} (${tierInfo.price})</td></tr>
+              <tr><td style="padding: 8px 0; color: #666;">Amount</td><td style="color: #d4af37; text-align: right;">${sponsorAmount > 0 ? '$' + sponsorAmount.toLocaleString() : 'To be discussed'}</td></tr>
             </table>
             <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.1);">
               <p style="color: #666; margin: 0 0 10px 0;">Message:</p>
@@ -4999,7 +4999,7 @@ app.post('/api/v1/sponsors', async (req, res) => {
     resend.emails.send({
       from: EMAIL_CONFIG.from,
       to: EMAIL_CONFIG.adminEmail,
-      subject: `New Sponsor Inquiry: ${companyName} - ${tierInfo.name} (${tierInfo.price})`,
+      subject: `New Sponsor Inquiry: ${companyName}${sponsorAmount > 0 ? ' - $' + sponsorAmount.toLocaleString() : ''}`,
       html: adminNotificationHtml,
     }).catch((err) => console.error('Failed to send admin sponsor notification:', err));
 

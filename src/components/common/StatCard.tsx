@@ -5,7 +5,7 @@ interface StatCardProps {
   value: number | string;
   icon: string;
   color?: string;
-  onClick: () => void;
+  onClick?: () => void;
 }
 
 export const StatCard = ({ label, value, icon, color, onClick }: StatCardProps) => (
