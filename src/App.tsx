@@ -20,6 +20,10 @@ import {
   ChatGPTView,
   IntegrationsView,
   ClientPortalView,
+  EventsView,
+  TicketsView,
+  SponsorsView,
+  PromotersView,
 } from './views';
 
 // Eventbrite Components
@@ -443,11 +447,19 @@ function App() {
           </div>
         );
 
-      // Placeholder views for modules not yet extracted
       case 'events':
+        return <EventsView onToast={actions.addToast} />;
+
       case 'tickets':
+        return <TicketsView onToast={actions.addToast} />;
+
       case 'sponsors':
+        return <SponsorsView onToast={actions.addToast} />;
+
       case 'promoters':
+        return <PromotersView onToast={actions.addToast} />;
+
+      // Placeholder views for modules not yet extracted
       case 'emails':
       case 'models':
       case 'tables':

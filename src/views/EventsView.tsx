@@ -1,6 +1,6 @@
-// Events View - Event management with Partiful-style creator
-import { useState, useRef } from 'react';
-import type { Event, ClientAccess, ViewType } from '../types';
+// Events View - Event management with Partiful-style creator (Self-contained)
+import { useState, useRef, useEffect, useCallback } from 'react';
+import type { Event, ClientAccess } from '../types';
 import { API_URL } from '../constants';
 
 // Event templates for the creator
@@ -16,23 +16,6 @@ const EVENT_TEMPLATES = [
 ];
 
 interface EventsViewProps {
-  events: Event[];
-  eventStats: {
-    total: number;
-    planning: number;
-    confirmed: number;
-    completed: number;
-    upcoming: number;
-    thisMonth: number;
-  };
-  clientAccesses: ClientAccess[];
-  onCreateEvent: (eventData: EventFormData) => Promise<void>;
-  onUpdateEventStatus: (eventId: number, status: string) => void;
-  onDeleteEvent: (eventId: number, eventName: string) => void;
-  onDeleteAllEvents: () => void;
-  onSelectEvent: (event: Event) => void;
-  onNavigate: (view: ViewType) => void;
-  onFetchClientAccesses: (eventId: number) => void;
   onToast: (message: string, type: 'success' | 'error' | 'info') => void;
 }
 
@@ -94,19 +77,25 @@ const initialFormData: EventFormData = {
   notes: '',
 };
 
-export function EventsView({
-  events,
-  eventStats,
-  clientAccesses,
-  onCreateEvent,
-  onUpdateEventStatus,
-  onDeleteEvent,
-  onDeleteAllEvents,
-  onSelectEvent,
-  onNavigate,
-  onFetchClientAccesses,
-  onToast,
-}: EventsViewProps) {
+interface EventStats {
+  total: number;
+  planning: number;
+  confirmed: number;
+  completed: number;
+  upcoming: number;
+  thisMonth: number;
+}
+
+export function EventsView({ onToast }: EventsViewProps) {
+  // Self-contained state
+  const [events, setEvents] = useState<Event[]>([]);
+  const [eventStats, setEventStats] = useState<EventStats>({
+    total: 0, planning: 0, confirmed: 0, completed: 0, upcoming: 0, thisMonth: 0
+  });
+  const [clientAccesses, setClientAccesses] = useState<ClientAccess[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  // Local UI state
   const [showEventForm, setShowEventForm] = useState(false);
   const [eventFormData, setEventFormData] = useState<EventFormData>(initialFormData);
   const [creatorTab, setCreatorTab] = useState<'basic' | 'design' | 'details' | 'rsvp' | 'visibility'>('basic');
@@ -115,6 +104,53 @@ export function EventsView({
   const [showClientAccessForm, setShowClientAccessForm] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
   const coverInputRef = useRef<HTMLInputElement>(null);
+
+  // Fetch events
+  const fetchEvents = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_URL}/events`);
+      const data = await res.json();
+      const eventList = data.events || [];
+      setEvents(eventList);
+
+      const now = new Date();
+      const thisMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+      const nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+
+      setEventStats({
+        total: eventList.length,
+        planning: eventList.filter((e: Event) => e.status === 'planning').length,
+        confirmed: eventList.filter((e: Event) => e.status === 'confirmed').length,
+        completed: eventList.filter((e: Event) => e.status === 'completed').length,
+        upcoming: eventList.filter((e: Event) => new Date(e.eventDate) > now).length,
+        thisMonth: eventList.filter((e: Event) => {
+          const eventDate = new Date(e.eventDate);
+          return eventDate >= thisMonth && eventDate <= nextMonth;
+        }).length,
+      });
+    } catch (error) {
+      console.error('Error fetching events:', error);
+      onToast('Failed to load events', 'error');
+    } finally {
+      setLoading(false);
+    }
+  }, [onToast]);
+
+  // Fetch client accesses for an event
+  const fetchClientAccesses = useCallback(async (eventId: number) => {
+    try {
+      const res = await fetch(`${API_URL}/client-access?eventId=${eventId}`);
+      const data = await res.json();
+      setClientAccesses(data.accesses || []);
+    } catch (error) {
+      console.error('Error fetching client accesses:', error);
+    }
+  }, []);
+
+  // Initial fetch
+  useEffect(() => {
+    fetchEvents();
+  }, [fetchEvents]);
 
   const generateSlug = (text: string) => {
     return text
@@ -149,12 +185,112 @@ export function EventsView({
       onToast('Please fill in event name and date', 'error');
       return;
     }
-    await onCreateEvent(eventFormData);
-    setShowEventForm(false);
-    setEventFormData(initialFormData);
+
+    try {
+      const res = await fetch(`${API_URL}/events`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: eventFormData.name,
+          eventDate: eventFormData.eventDate,
+          startTime: eventFormData.eventTime,
+          endTime: eventFormData.endTime,
+          eventType: eventFormData.eventType,
+          description: eventFormData.description,
+          venueName: eventFormData.venueName,
+          venueAddress: eventFormData.venueAddress,
+          venueCity: eventFormData.venueCity,
+          template: eventFormData.template,
+          coverImage: eventFormData.coverImage,
+          accentColor: eventFormData.accentColor,
+          expectedAttendance: eventFormData.expectedAttendance ? parseInt(eventFormData.expectedAttendance) : null,
+          dressCode: eventFormData.dressCode,
+          theme: eventFormData.theme,
+          ageRestriction: eventFormData.ageRestriction,
+          rsvpEnabled: eventFormData.rsvpEnabled,
+          showGuestList: eventFormData.showGuestList,
+          showGuestCount: eventFormData.showGuestCount,
+          allowPlusOne: eventFormData.allowPlusOne,
+          maxPlusOne: eventFormData.maxPlusOne,
+          requireApproval: eventFormData.requireApproval,
+          isPublic: eventFormData.isPublic,
+          slug: eventFormData.slug,
+          ticketLink: eventFormData.ticketLink,
+          notes: eventFormData.notes,
+          status: 'planning',
+        }),
+      });
+
+      if (res.ok) {
+        onToast('Event created successfully!', 'success');
+        setShowEventForm(false);
+        setEventFormData(initialFormData);
+        fetchEvents();
+      } else {
+        throw new Error('Failed to create event');
+      }
+    } catch (error) {
+      console.error('Error creating event:', error);
+      onToast('Failed to create event', 'error');
+    }
+  };
+
+  const handleUpdateEventStatus = async (eventId: number, status: string) => {
+    try {
+      const res = await fetch(`${API_URL}/events/${eventId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status }),
+      });
+
+      if (res.ok) {
+        onToast(`Event ${status}!`, 'success');
+        fetchEvents();
+      }
+    } catch (error) {
+      console.error('Error updating event:', error);
+      onToast('Failed to update event', 'error');
+    }
+  };
+
+  const handleDeleteEvent = async (eventId: number, eventName: string) => {
+    if (!confirm(`Delete "${eventName}"? This cannot be undone.`)) return;
+
+    try {
+      const res = await fetch(`${API_URL}/events/${eventId}`, { method: 'DELETE' });
+      if (res.ok) {
+        onToast('Event deleted', 'success');
+        fetchEvents();
+      }
+    } catch (error) {
+      console.error('Error deleting event:', error);
+      onToast('Failed to delete event', 'error');
+    }
+  };
+
+  const handleDeleteAllEvents = async () => {
+    if (!confirm('Delete ALL events? This cannot be undone.')) return;
+
+    try {
+      await Promise.all(events.map(e => fetch(`${API_URL}/events/${e.id}`, { method: 'DELETE' })));
+      onToast('All events deleted', 'success');
+      fetchEvents();
+    } catch (error) {
+      console.error('Error deleting events:', error);
+      onToast('Failed to delete all events', 'error');
+    }
   };
 
   const selectedTemplate = EVENT_TEMPLATES.find(t => t.id === eventFormData.template) || EVENT_TEMPLATES[0];
+
+  if (loading) {
+    return (
+      <div style={{ padding: 60, textAlign: 'center', color: '#666' }}>
+        <div style={{ width: 40, height: 40, border: '3px solid #222', borderTopColor: '#fff', borderRadius: '50%', animation: 'spin 0.8s linear infinite', margin: '0 auto 16px' }} />
+        <p>Loading events...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="page-content" style={{ padding: 32, animation: 'fadeIn 0.3s ease' }}>
@@ -181,7 +317,7 @@ export function EventsView({
         <div style={{ display: 'flex', gap: 12 }}>
           {events.length > 0 && (
             <button
-              onClick={onDeleteAllEvents}
+              onClick={handleDeleteAllEvents}
               className="btn-hover"
               style={{ background: '#ef444420', color: '#ef4444', border: '1px solid #ef444440', padding: '10px 20px', borderRadius: 8, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8 }}
             >
@@ -203,7 +339,6 @@ export function EventsView({
         {events.map(event => (
           <div
             key={event.id}
-            onClick={() => { onSelectEvent(event); onNavigate('budget'); }}
             className="row-hover"
             style={{
               background: '#0a0a0a',
@@ -288,23 +423,16 @@ export function EventsView({
                   onClick={(e) => e.stopPropagation()}
                 >
                   <button
-                    onClick={() => { onUpdateEventStatus(event.id, 'confirmed'); setEventActionMenu(null); }}
+                    onClick={() => { handleUpdateEventStatus(event.id, 'confirmed'); setEventActionMenu(null); }}
                     style={{ width: '100%', padding: '10px 12px', background: 'transparent', border: 'none', borderRadius: 6, color: '#22c55e', fontSize: 13, cursor: 'pointer', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 8 }}
                     className="row-hover"
                   >
                     ✓ Confirm Event
                   </button>
                   <button
-                    onClick={() => { onSelectEvent(event); onNavigate('budget'); setEventActionMenu(null); }}
-                    style={{ width: '100%', padding: '10px 12px', background: 'transparent', border: 'none', borderRadius: 6, color: '#d4af37', fontSize: 13, cursor: 'pointer', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 8 }}
-                    className="row-hover"
-                  >
-                    💰 View Budget
-                  </button>
-                  <button
                     onClick={() => {
                       setSelectedEvent(event);
-                      onFetchClientAccesses(event.id);
+                      fetchClientAccesses(event.id);
                       setShowClientAccessForm(true);
                       setEventActionMenu(null);
                     }}
@@ -324,7 +452,7 @@ export function EventsView({
                   )}
                   <div style={{ height: 1, background: '#333', margin: '4px 0' }} />
                   <button
-                    onClick={() => { onDeleteEvent(event.id, event.name); setEventActionMenu(null); }}
+                    onClick={() => { handleDeleteEvent(event.id, event.name); setEventActionMenu(null); }}
                     style={{ width: '100%', padding: '10px 12px', background: 'transparent', border: 'none', borderRadius: 6, color: '#ef4444', fontSize: 13, cursor: 'pointer', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 8 }}
                     className="row-hover"
                   >

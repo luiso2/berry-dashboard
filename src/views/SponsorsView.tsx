@@ -1,5 +1,5 @@
-// Sponsors View - Sponsor management, tiers, and flyer generator
-import { useState, useRef } from 'react';
+// Sponsors View - Self-contained sponsor management, tiers, and flyer generator
+import { useState, useRef, useEffect, useCallback } from 'react';
 import type { Sponsor } from '../types';
 import { API_URL } from '../constants';
 
@@ -16,13 +16,6 @@ interface GuestStats {
 }
 
 interface SponsorsViewProps {
-  sponsors: Sponsor[];
-  sponsorStats: SponsorStats;
-  guestStats: GuestStats;
-  onUpdateSponsor: (sponsorId: string, updates: Partial<Sponsor>) => void;
-  onDeleteSponsor: (sponsorId: string) => void;
-  onLogoUpload: (sponsorId: string, file: File) => Promise<void>;
-  onSelectSponsor: (sponsor: Sponsor) => void;
   onToast: (message: string, type: 'success' | 'error' | 'info') => void;
 }
 
@@ -34,19 +27,127 @@ const SPONSOR_TIERS = [
   { tier: 'Bronze', color: '#cd7f32' }
 ] as const;
 
-export function SponsorsView({
-  sponsors,
-  sponsorStats,
-  guestStats,
-  onUpdateSponsor,
-  onDeleteSponsor,
-  onLogoUpload,
-  onSelectSponsor,
-  onToast,
-}: SponsorsViewProps) {
-  // Local state
+export function SponsorsView({ onToast }: SponsorsViewProps) {
+  // Self-contained state
+  const [sponsors, setSponsors] = useState<Sponsor[]>([]);
+  const [sponsorStats, setSponsorStats] = useState<SponsorStats>({
+    total: 0,
+    pending: 0,
+    active: 0,
+    revenue: 0,
+  });
+  const [guestStats, setGuestStats] = useState<GuestStats>({
+    total: 0,
+    vip: 0,
+  });
+  const [loading, setLoading] = useState(true);
+  const [selectedSponsor, setSelectedSponsor] = useState<Sponsor | null>(null);
+
+  // Local UI state
   const [showFlyerGenerator, setShowFlyerGenerator] = useState(false);
   const flyerRef = useRef<HTMLDivElement>(null);
+
+  // Fetch sponsors
+  const fetchSponsors = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_URL}/sponsors`);
+      if (res.ok) {
+        const data = await res.json();
+        setSponsors(data.sponsors || []);
+
+        // Calculate stats
+        const sponsors = data.sponsors || [];
+        const total = sponsors.length;
+        const pending = sponsors.filter((s: Sponsor) => s.status === 'pending').length;
+        const active = sponsors.filter((s: Sponsor) => s.status === 'active' || s.status === 'approved').length;
+        const revenue = sponsors.reduce((sum: number, s: Sponsor) => sum + (s.tierPrice || 0), 0);
+        setSponsorStats({ total, pending, active, revenue });
+      }
+    } catch (err) {
+      console.error('Failed to fetch sponsors:', err);
+    }
+  }, []);
+
+  // Fetch guest stats for flyer
+  const fetchGuestStats = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_URL}/guests`);
+      if (res.ok) {
+        const data = await res.json();
+        const guests = data.guests || [];
+        const total = guests.length;
+        const vip = guests.filter((g: { category?: string }) => g.category === 'VIP').length;
+        setGuestStats({ total, vip });
+      }
+    } catch (err) {
+      console.error('Failed to fetch guest stats:', err);
+    }
+  }, []);
+
+  // Load data on mount
+  useEffect(() => {
+    const loadData = async () => {
+      setLoading(true);
+      await Promise.all([fetchSponsors(), fetchGuestStats()]);
+      setLoading(false);
+    };
+    loadData();
+  }, [fetchSponsors, fetchGuestStats]);
+
+  // Update sponsor handler
+  const handleUpdateSponsor = async (sponsorId: string, updates: Partial<Sponsor>) => {
+    try {
+      const res = await fetch(`${API_URL}/sponsors/${sponsorId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updates),
+      });
+      if (res.ok) {
+        setSponsors(prev => prev.map(s => s.id === sponsorId ? { ...s, ...updates } : s));
+        onToast('Sponsor updated', 'success');
+        await fetchSponsors();
+      }
+    } catch (err) {
+      onToast('Failed to update sponsor', 'error');
+    }
+  };
+
+  // Delete sponsor handler
+  const handleDeleteSponsor = async (sponsorId: string) => {
+    if (!confirm('Are you sure you want to delete this sponsor?')) return;
+    try {
+      const res = await fetch(`${API_URL}/sponsors/${sponsorId}`, { method: 'DELETE' });
+      if (res.ok) {
+        setSponsors(prev => prev.filter(s => s.id !== sponsorId));
+        onToast('Sponsor deleted', 'success');
+        await fetchSponsors();
+      }
+    } catch (err) {
+      onToast('Failed to delete sponsor', 'error');
+    }
+  };
+
+  // Logo upload handler
+  const handleLogoUpload = async (sponsorId: string, file: File) => {
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('sponsorId', sponsorId);
+
+      const res = await fetch(`${API_URL}/upload`, {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        await handleUpdateSponsor(sponsorId, { logoUrl: data.url });
+        onToast('Logo uploaded', 'success');
+      }
+    } catch (err) {
+      onToast('Failed to upload logo', 'error');
+    }
+  };
 
   const handleCopyApplicationLink = () => {
     navigator.clipboard.writeText(`${window.location.origin}/sponsor-application`);
@@ -85,7 +186,7 @@ export function SponsorsView({
       link.href = canvas.toDataURL('image/png');
       link.click();
       onToast('Flyer downloaded!', 'success');
-    } catch (error) {
+    } catch {
       onToast('Failed to generate flyer', 'error');
     }
   };
@@ -109,6 +210,17 @@ export function SponsorsView({
     }
     return { bg: '#66666620', color: '#888' };
   };
+
+  if (loading) {
+    return (
+      <div className="page-content" style={{ padding: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 400 }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: 32, marginBottom: 16 }}>⟳</div>
+          <div style={{ color: '#888' }}>Loading sponsors...</div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="page-content" style={{ padding: '32px', animation: 'fadeIn 0.3s ease' }}>
@@ -184,7 +296,7 @@ export function SponsorsView({
           return (
             <div
               key={sponsor.id}
-              onClick={() => onSelectSponsor(sponsor)}
+              onClick={() => setSelectedSponsor(sponsor)}
               className="nav-hover"
               style={{
                 padding: '16px 20px',
@@ -234,7 +346,7 @@ export function SponsorsView({
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
-                      onUpdateSponsor(sponsor.id, { status: 'approved' });
+                      handleUpdateSponsor(sponsor.id, { status: 'approved' });
                     }}
                     style={{
                       background: '#22c55e20',
@@ -273,7 +385,7 @@ export function SponsorsView({
                     style={{ display: 'none' }}
                     onChange={(e) => {
                       const file = e.target.files?.[0];
-                      if (file) onLogoUpload(sponsor.id, file);
+                      if (file) handleLogoUpload(sponsor.id, file);
                     }}
                   />
                 </label>
@@ -311,7 +423,7 @@ export function SponsorsView({
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
-                    onDeleteSponsor(sponsor.id);
+                    handleDeleteSponsor(sponsor.id);
                   }}
                   style={{
                     background: '#ef444420',
@@ -478,6 +590,102 @@ export function SponsorsView({
             >
               Download Flyer (PNG)
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Sponsor Detail Modal */}
+      {selectedSponsor && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,0.8)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+          }}
+          onClick={() => setSelectedSponsor(null)}
+        >
+          <div
+            style={{
+              background: '#0a0a0a',
+              borderRadius: 16,
+              width: 500,
+              maxHeight: '90vh',
+              overflow: 'auto',
+              border: '1px solid #1a1a1a',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ padding: 24, borderBottom: '1px solid #1a1a1a', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                <div style={{
+                  width: 56,
+                  height: 56,
+                  borderRadius: 12,
+                  background: selectedSponsor.logoUrl ? `url(${selectedSponsor.logoUrl}) center/cover` : '#1a1a1a',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: 24,
+                  color: getTierColor(selectedSponsor.tier),
+                }}>
+                  {!selectedSponsor.logoUrl && '◆'}
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: 20, fontWeight: 600 }}>{selectedSponsor.companyName}</h3>
+                  <div style={{ fontSize: 14, color: '#888' }}>{selectedSponsor.contactName}</div>
+                </div>
+              </div>
+              <button onClick={() => setSelectedSponsor(null)} style={{ background: 'none', border: 'none', color: '#888', fontSize: 24, cursor: 'pointer' }}>×</button>
+            </div>
+            <div style={{ padding: 24 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 24 }}>
+                <div>
+                  <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>Email</div>
+                  <div style={{ fontSize: 14 }}>{selectedSponsor.email}</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>Phone</div>
+                  <div style={{ fontSize: 14 }}>{selectedSponsor.phone || 'Not provided'}</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>Tier</div>
+                  <div style={{ fontSize: 14, textTransform: 'capitalize', color: getTierColor(selectedSponsor.tier) }}>
+                    ◆ {selectedSponsor.tier}
+                  </div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>Status</div>
+                  <div style={{ fontSize: 14, textTransform: 'capitalize' }}>{selectedSponsor.status}</div>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
+                {selectedSponsor.status === 'pending' && (
+                  <button
+                    onClick={() => {
+                      handleUpdateSponsor(selectedSponsor.id, { status: 'approved' });
+                      setSelectedSponsor({ ...selectedSponsor, status: 'approved' });
+                    }}
+                    style={{ padding: '12px 24px', background: '#22c55e20', border: '1px solid #22c55e40', borderRadius: 8, color: '#22c55e', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}
+                  >
+                    Approve
+                  </button>
+                )}
+                <button
+                  onClick={() => {
+                    handleDeleteSponsor(selectedSponsor.id);
+                    setSelectedSponsor(null);
+                  }}
+                  style={{ padding: '12px 24px', background: '#ef444420', border: '1px solid #ef444440', borderRadius: 8, color: '#ef4444', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}
+                >
+                  Delete
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

@@ -1,6 +1,7 @@
-// Tickets & Orders View - Ticket management, orders list, and Eventbrite sync
-import { useState } from 'react';
+// Tickets & Orders View - Self-contained ticket management, orders list, and Eventbrite sync
+import { useState, useEffect, useCallback } from 'react';
 import type { Ticket, Order, OrderStats } from '../types';
+import { API_URL } from '../constants';
 
 interface TicketFormData {
   holderName: string;
@@ -11,33 +12,24 @@ interface TicketFormData {
 }
 
 interface TicketsViewProps {
-  tickets: Ticket[];
-  orders: Order[];
-  orderStats: OrderStats;
-  onCreateTicket: (ticketData: TicketFormData) => Promise<void>;
-  onDeleteTicket: (ticketId: string) => void;
-  onDeleteAllTickets: () => void;
-  onSyncEventbrite: () => Promise<void>;
-  onDownloadOrdersCSV: () => void;
-  onDownloadTicketsCSV: () => void;
   onToast: (message: string, type: 'success' | 'error' | 'info') => void;
-  syncingEventbrite: boolean;
 }
 
-export function TicketsView({
-  tickets,
-  orders,
-  orderStats,
-  onCreateTicket,
-  onDeleteTicket,
-  onDeleteAllTickets,
-  onSyncEventbrite,
-  onDownloadOrdersCSV,
-  onDownloadTicketsCSV,
-  onToast,
-  syncingEventbrite,
-}: TicketsViewProps) {
-  // Local state
+export function TicketsView({ onToast }: TicketsViewProps) {
+  // Self-contained state
+  const [tickets, setTickets] = useState<Ticket[]>([]);
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [orderStats, setOrderStats] = useState<OrderStats>({
+    total_orders: 0,
+    total_tickets: 0,
+    total_revenue: 0,
+    active_orders: 0,
+    refunded_orders: 0,
+  });
+  const [loading, setLoading] = useState(true);
+  const [syncingEventbrite, setSyncingEventbrite] = useState(false);
+
+  // Local UI state
   const [ticketView, setTicketView] = useState<'orders' | 'tickets'>('orders');
   const [showTicketForm, setShowTicketForm] = useState(false);
   const [showTicketPreview, setShowTicketPreview] = useState(false);
@@ -49,21 +41,171 @@ export function TicketsView({
     eventId: '',
   });
 
+  // Fetch tickets
+  const fetchTickets = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_URL}/tickets`);
+      if (res.ok) {
+        const data = await res.json();
+        setTickets(data.tickets || []);
+      }
+    } catch (err) {
+      console.error('Failed to fetch tickets:', err);
+    }
+  }, []);
+
+  // Fetch orders
+  const fetchOrders = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_URL}/orders`);
+      if (res.ok) {
+        const data = await res.json();
+        setOrders(data.orders || []);
+        if (data.stats) {
+          setOrderStats(data.stats);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to fetch orders:', err);
+    }
+  }, []);
+
+  // Load data on mount
+  useEffect(() => {
+    const loadData = async () => {
+      setLoading(true);
+      await Promise.all([fetchTickets(), fetchOrders()]);
+      setLoading(false);
+    };
+    loadData();
+  }, [fetchTickets, fetchOrders]);
+
+  // Create ticket handler
   const handleCreateTicket = async () => {
     if (!ticketFormData.holderName || !ticketFormData.holderEmail) {
       onToast('Please fill in holder name and email', 'error');
       return;
     }
-    await onCreateTicket(ticketFormData);
-    setShowTicketForm(false);
-    setShowTicketPreview(false);
-    setTicketFormData({
-      holderName: '',
-      holderEmail: '',
-      ticketType: 'General',
-      price: '0',
-      eventId: '',
-    });
+    try {
+      const res = await fetch(`${API_URL}/tickets`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(ticketFormData),
+      });
+      if (res.ok) {
+        onToast('Ticket created successfully', 'success');
+        await fetchTickets();
+        setShowTicketForm(false);
+        setShowTicketPreview(false);
+        setTicketFormData({
+          holderName: '',
+          holderEmail: '',
+          ticketType: 'General',
+          price: '0',
+          eventId: '',
+        });
+      } else {
+        onToast('Failed to create ticket', 'error');
+      }
+    } catch (err) {
+      onToast('Failed to create ticket', 'error');
+    }
+  };
+
+  // Delete ticket handler
+  const handleDeleteTicket = async (ticketId: string) => {
+    try {
+      const res = await fetch(`${API_URL}/tickets/${ticketId}`, { method: 'DELETE' });
+      if (res.ok) {
+        setTickets(prev => prev.filter(t => t.id !== ticketId));
+        onToast('Ticket deleted', 'success');
+      }
+    } catch (err) {
+      onToast('Failed to delete ticket', 'error');
+    }
+  };
+
+  // Delete all tickets handler
+  const handleDeleteAllTickets = async () => {
+    if (!confirm('Are you sure you want to delete all tickets?')) return;
+    try {
+      await Promise.all(tickets.map(t => fetch(`${API_URL}/tickets/${t.id}`, { method: 'DELETE' })));
+      setTickets([]);
+      onToast('All tickets deleted', 'success');
+    } catch (err) {
+      onToast('Failed to delete tickets', 'error');
+    }
+  };
+
+  // Sync from Eventbrite handler
+  const handleSyncEventbrite = async () => {
+    setSyncingEventbrite(true);
+    try {
+      const userId = localStorage.getItem('eventbrite_user_id') || 'global';
+      const res = await fetch(`${API_URL}/integrations/eventbrite/sync`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-eventbrite-user-id': userId,
+        },
+      });
+      if (res.ok) {
+        onToast('Successfully synced from Eventbrite', 'success');
+        await Promise.all([fetchTickets(), fetchOrders()]);
+      } else {
+        const data = await res.json();
+        onToast(data.error || 'Failed to sync from Eventbrite', 'error');
+      }
+    } catch (err) {
+      onToast('Failed to sync from Eventbrite', 'error');
+    } finally {
+      setSyncingEventbrite(false);
+    }
+  };
+
+  // Download CSV handlers
+  const handleDownloadOrdersCSV = () => {
+    const headers = ['Order ID', 'Buyer', 'Email', 'Event', 'Tickets', 'Amount', 'Status', 'Date'];
+    const rows = orders.map(o => [
+      o.id,
+      o.buyer_name || '',
+      o.buyer_email || '',
+      o.event_name || '',
+      o.ticket_count,
+      o.total_amount,
+      o.order_status,
+      new Date(o.created_at).toLocaleDateString(),
+    ]);
+    const csv = [headers, ...rows].map(row => row.join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `orders-${new Date().toISOString().split('T')[0]}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    onToast('Orders CSV downloaded', 'success');
+  };
+
+  const handleDownloadTicketsCSV = () => {
+    const headers = ['Ticket ID', 'Holder Name', 'Email', 'Type', 'Price', 'Status'];
+    const rows = tickets.map(t => [
+      t.id,
+      t.holderName || '',
+      t.holderEmail || '',
+      t.ticketType || '',
+      t.price || 0,
+      t.status,
+    ]);
+    const csv = [headers, ...rows].map(row => row.join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `tickets-${new Date().toISOString().split('T')[0]}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    onToast('Tickets CSV downloaded', 'success');
   };
 
   const handleShareTicket = (ticketId: string) => {
@@ -71,6 +213,17 @@ export function TicketsView({
     navigator.clipboard.writeText(ticketUrl);
     onToast('Ticket link copied!', 'success');
   };
+
+  if (loading) {
+    return (
+      <div className="page-content" style={{ padding: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 400 }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: 32, marginBottom: 16 }}>⟳</div>
+          <div style={{ color: '#888' }}>Loading tickets...</div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="page-content" style={{ padding: '32px', animation: 'fadeIn 0.3s ease' }}>
@@ -115,7 +268,7 @@ export function TicketsView({
           + Add Ticket
         </button>
         <button
-          onClick={onSyncEventbrite}
+          onClick={handleSyncEventbrite}
           disabled={syncingEventbrite}
           style={{
             background: syncingEventbrite ? '#333' : '#F6682F',
@@ -135,7 +288,7 @@ export function TicketsView({
           {syncingEventbrite ? '⟳ Syncing...' : '🎪 Sync from Eventbrite'}
         </button>
         <button
-          onClick={ticketView === 'orders' ? onDownloadOrdersCSV : onDownloadTicketsCSV}
+          onClick={ticketView === 'orders' ? handleDownloadOrdersCSV : handleDownloadTicketsCSV}
           style={{
             background: '#22c55e',
             border: 'none',
@@ -262,7 +415,7 @@ export function TicketsView({
               <span style={{ fontSize: 14, color: '#666' }}>{tickets.length} tickets</span>
               {tickets.length > 0 && (
                 <button
-                  onClick={onDeleteAllTickets}
+                  onClick={handleDeleteAllTickets}
                   style={{ background: '#ef444420', color: '#ef4444', border: '1px solid #ef444440', padding: '6px 12px', borderRadius: 6, fontSize: 12, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
                 >
                   🗑️ Delete All
@@ -323,7 +476,7 @@ export function TicketsView({
                   🔗
                 </button>
                 <button
-                  onClick={() => onDeleteTicket(ticket.id)}
+                  onClick={() => handleDeleteTicket(ticket.id)}
                   style={{ background: '#ef444420', color: '#ef4444', border: 'none', padding: '6px 10px', borderRadius: 6, fontSize: 14, cursor: 'pointer' }}
                   title="Delete ticket"
                 >

@@ -1,6 +1,7 @@
-// Promoters View - Promoter management, tiers, leaderboard, and commissions
-import { useState } from 'react';
+// Promoters View - Self-contained promoter management, tiers, leaderboard, and commissions
+import { useState, useEffect, useCallback } from 'react';
 import type { Promoter } from '../types';
+import { API_URL } from '../constants';
 
 interface PromoterStats {
   total: number;
@@ -22,12 +23,6 @@ interface PromoterFormData {
 }
 
 interface PromotersViewProps {
-  promoters: Promoter[];
-  promoterStats: PromoterStats;
-  promoterLeaderboard: Promoter[];
-  onCreatePromoter: (formData: PromoterFormData) => Promise<void>;
-  onUpdatePromoter: (promoterId: number, updates: Partial<Promoter>) => void;
-  onDeletePromoter: (promoterId: number) => void;
   onToast: (message: string, type: 'success' | 'error' | 'info') => void;
 }
 
@@ -39,16 +34,19 @@ const PROMOTER_TIERS = [
   { tier: 'Bronze', color: '#cd7f32', icon: '🥉', minSales: '$0+' }
 ] as const;
 
-export function PromotersView({
-  promoters,
-  promoterStats,
-  promoterLeaderboard,
-  onCreatePromoter,
-  onUpdatePromoter,
-  onDeletePromoter,
-  onToast,
-}: PromotersViewProps) {
-  // Local state
+export function PromotersView({ onToast }: PromotersViewProps) {
+  // Self-contained state
+  const [promoters, setPromoters] = useState<Promoter[]>([]);
+  const [promoterLeaderboard, setPromoterLeaderboard] = useState<Promoter[]>([]);
+  const [promoterStats, setPromoterStats] = useState<PromoterStats>({
+    total: 0,
+    active: 0,
+    totalSales: 0,
+    totalCommission: 0,
+  });
+  const [loading, setLoading] = useState(true);
+
+  // Local UI state
   const [showPromoterForm, setShowPromoterForm] = useState(false);
   const [selectedPromoter, setSelectedPromoter] = useState<Promoter | null>(null);
   const [promoterFormData, setPromoterFormData] = useState<PromoterFormData>({
@@ -63,24 +61,111 @@ export function PromotersView({
     socialTwitter: '',
   });
 
+  // Fetch promoters and leaderboard
+  const fetchPromoters = useCallback(async () => {
+    try {
+      const [promotersRes, leaderboardRes] = await Promise.all([
+        fetch(`${API_URL}/promoters`),
+        fetch(`${API_URL}/promoters/leaderboard`),
+      ]);
+
+      if (promotersRes.ok) {
+        const data = await promotersRes.json();
+        const promotersList = data.promoters || [];
+        setPromoters(promotersList);
+
+        // Calculate stats
+        const total = promotersList.length;
+        const active = promotersList.filter((p: Promoter) => p.status === 'active').length;
+        const totalSales = promotersList.reduce((sum: number, p: Promoter) => sum + (p.totalSales || 0), 0);
+        const totalCommission = promotersList.reduce((sum: number, p: Promoter) => sum + (p.totalCommission || 0), 0);
+        setPromoterStats({ total, active, totalSales, totalCommission });
+      }
+
+      if (leaderboardRes.ok) {
+        const leaderboardData = await leaderboardRes.json();
+        setPromoterLeaderboard(leaderboardData.leaderboard || leaderboardData || []);
+      }
+    } catch (err) {
+      console.error('Failed to fetch promoters:', err);
+    }
+  }, []);
+
+  // Load data on mount
+  useEffect(() => {
+    const loadData = async () => {
+      setLoading(true);
+      await fetchPromoters();
+      setLoading(false);
+    };
+    loadData();
+  }, [fetchPromoters]);
+
+  // Create promoter handler
   const handleCreatePromoter = async () => {
     if (!promoterFormData.name || !promoterFormData.email) {
       onToast('Please fill in name and email', 'error');
       return;
     }
-    await onCreatePromoter(promoterFormData);
-    setShowPromoterForm(false);
-    setPromoterFormData({
-      name: '',
-      email: '',
-      phone: '',
-      commissionRate: '10',
-      commissionType: 'percentage',
-      bio: '',
-      socialInstagram: '',
-      socialTiktok: '',
-      socialTwitter: '',
-    });
+    try {
+      const res = await fetch(`${API_URL}/promoters`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(promoterFormData),
+      });
+      if (res.ok) {
+        onToast('Promoter created successfully', 'success');
+        await fetchPromoters();
+        setShowPromoterForm(false);
+        setPromoterFormData({
+          name: '',
+          email: '',
+          phone: '',
+          commissionRate: '10',
+          commissionType: 'percentage',
+          bio: '',
+          socialInstagram: '',
+          socialTiktok: '',
+          socialTwitter: '',
+        });
+      } else {
+        onToast('Failed to create promoter', 'error');
+      }
+    } catch (err) {
+      onToast('Failed to create promoter', 'error');
+    }
+  };
+
+  // Update promoter handler
+  const handleUpdatePromoter = async (promoterId: number, updates: Partial<Promoter>) => {
+    try {
+      const res = await fetch(`${API_URL}/promoters/${promoterId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updates),
+      });
+      if (res.ok) {
+        setPromoters(prev => prev.map(p => p.id === promoterId ? { ...p, ...updates } : p));
+        onToast('Promoter updated', 'success');
+      }
+    } catch (err) {
+      onToast('Failed to update promoter', 'error');
+    }
+  };
+
+  // Delete promoter handler
+  const handleDeletePromoter = async (promoterId: number) => {
+    if (!confirm('Are you sure you want to delete this promoter?')) return;
+    try {
+      const res = await fetch(`${API_URL}/promoters/${promoterId}`, { method: 'DELETE' });
+      if (res.ok) {
+        setPromoters(prev => prev.filter(p => p.id !== promoterId));
+        onToast('Promoter deleted', 'success');
+        await fetchPromoters();
+      }
+    } catch (err) {
+      onToast('Failed to delete promoter', 'error');
+    }
   };
 
   const handleCopyCode = (code: string, e?: React.MouseEvent) => {
@@ -118,6 +203,17 @@ export function PromotersView({
     }
     return { bg: '#66666620', color: '#888' };
   };
+
+  if (loading) {
+    return (
+      <div className="page-content" style={{ padding: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 400 }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: 32, marginBottom: 16 }}>⟳</div>
+          <div style={{ color: '#888' }}>Loading promoters...</div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="page-content" style={{ padding: '32px', animation: 'fadeIn 0.3s ease' }}>
@@ -281,7 +377,7 @@ export function PromotersView({
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
-                      onDeletePromoter(promoter.id);
+                      handleDeletePromoter(promoter.id);
                     }}
                     style={{
                       background: '#ef444420',
@@ -506,7 +602,7 @@ export function PromotersView({
                 {selectedPromoter.status !== 'active' && (
                   <button
                     onClick={() => {
-                      onUpdatePromoter(selectedPromoter.id, { status: 'active' });
+                      handleUpdatePromoter(selectedPromoter.id, { status: 'active' });
                       setSelectedPromoter({ ...selectedPromoter, status: 'active' });
                     }}
                     style={{ padding: '12px 24px', background: '#22c55e20', border: '1px solid #22c55e40', borderRadius: 8, color: '#22c55e', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}
@@ -517,7 +613,7 @@ export function PromotersView({
                 {selectedPromoter.status === 'active' && (
                   <button
                     onClick={() => {
-                      onUpdatePromoter(selectedPromoter.id, { status: 'inactive' });
+                      handleUpdatePromoter(selectedPromoter.id, { status: 'inactive' });
                       setSelectedPromoter({ ...selectedPromoter, status: 'inactive' });
                     }}
                     style={{ padding: '12px 24px', background: '#f59e0b20', border: '1px solid #f59e0b40', borderRadius: 8, color: '#f59e0b', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}
@@ -527,7 +623,7 @@ export function PromotersView({
                 )}
                 <button
                   onClick={() => {
-                    onDeletePromoter(selectedPromoter.id);
+                    handleDeletePromoter(selectedPromoter.id);
                     setSelectedPromoter(null);
                   }}
                   style={{ padding: '12px 24px', background: '#ef444420', border: '1px solid #ef444440', borderRadius: 8, color: '#ef4444', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}
