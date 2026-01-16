@@ -19,7 +19,6 @@ import {
   MonitoringView,
   ChatGPTView,
   IntegrationsView,
-  ClientPortalView,
   EventsView,
   TicketsView,
   SponsorsView,
@@ -47,16 +46,10 @@ import './styles/index.css';
 import type { ViewType, GuestCategory } from './types';
 
 function App() {
-  // Hooks must be called before any conditional returns (React rules of hooks)
+  // Auth and state hooks
   const { user, token } = useAuth();
   const state = useAppState();
   const actions = useAppActions(state, token ?? undefined, user?.id);
-
-  // Check if we're on a client portal URL - must be AFTER hooks
-  const clientMatch = window.location.pathname.match(/^\/client\/([a-zA-Z0-9]+)$/);
-  if (clientMatch) {
-    return <ClientPortalView token={clientMatch[1]} />;
-  }
 
   // Initial data fetch
   useEffect(() => {
