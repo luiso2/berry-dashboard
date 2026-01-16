@@ -1484,6 +1484,41 @@ const initDatabase = async () => {
       console.log('Eventbrite columns migration:', e.message);
     }
 
+    // Migration: Rename 'title' to 'name' in events table (for legacy databases)
+    try {
+      await client.query(`
+        DO $$
+        BEGIN
+          -- Check if 'title' exists but 'name' does not, then rename
+          IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='events' AND column_name='title')
+             AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='events' AND column_name='name') THEN
+            ALTER TABLE events RENAME COLUMN title TO name;
+            RAISE NOTICE 'Renamed events.title to events.name';
+          END IF;
+          -- Add name column if neither exists
+          IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='events' AND column_name='name') THEN
+            ALTER TABLE events ADD COLUMN name VARCHAR(255);
+          END IF;
+        END $$;
+      `);
+      console.log('Events table name column migration completed');
+    } catch (e) {
+      console.log('Events name migration:', e.message);
+    }
+
+    // Migration: Add event_time, end_time, eventbrite_id columns to events table
+    try {
+      await client.query(`
+        ALTER TABLE events ADD COLUMN IF NOT EXISTS event_time TIME;
+        ALTER TABLE events ADD COLUMN IF NOT EXISTS end_time TIME;
+        ALTER TABLE events ADD COLUMN IF NOT EXISTS eventbrite_id VARCHAR(100);
+        ALTER TABLE events ADD COLUMN IF NOT EXISTS user_id INTEGER;
+      `);
+      console.log('Added event timing and ID columns to events table');
+    } catch (e) {
+      console.log('Events timing columns migration:', e.message);
+    }
+
     // ═══════════════════════════════════════════════════════════════════════
     // FEATURE 1: Eventbrite Alerts Table
     // ═══════════════════════════════════════════════════════════════════════
