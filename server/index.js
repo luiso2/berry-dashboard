@@ -15188,9 +15188,17 @@ app.get('/api/v1/integrations/eventbrite/reports/summary', async (req, res) => {
 
 // POST /api/v1/integrations/eventbrite/events - Create event on Eventbrite
 app.post('/api/v1/integrations/eventbrite/events', async (req, res) => {
+  const requestId = `EB-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  console.log(`\n${'═'.repeat(70)}`);
+  console.log(`[${requestId}] 🎫 EVENTBRITE CREATE EVENT - START`);
+  console.log(`${'═'.repeat(70)}`);
+  console.log(`[${requestId}] 📥 Request body:`, JSON.stringify(req.body, null, 2));
+
   try {
     // Use authenticated user from token, fallback to body for backwards compatibility
     const userId = req.user?.id || req.body.userId;
+    console.log(`[${requestId}] 👤 User ID: ${userId} (from ${req.user?.id ? 'token' : 'body'})`);
+
     const {
       name,
       description,
@@ -15205,19 +15213,35 @@ app.post('/api/v1/integrations/eventbrite/events', async (req, res) => {
       listed = true,
       shareable = true,
       category_id,
-      subcategory_id
+      subcategory_id,
+      logo_url  // BUG-06 FIX: Accept image URL from frontend
     } = req.body;
 
+    console.log(`[${requestId}] 📋 Event details:`);
+    console.log(`[${requestId}]    - Name: ${name}`);
+    console.log(`[${requestId}]    - Start: ${start_date}`);
+    console.log(`[${requestId}]    - End: ${end_date}`);
+    console.log(`[${requestId}]    - Timezone: ${timezone}`);
+    console.log(`[${requestId}]    - Online: ${online_event}`);
+    console.log(`[${requestId}]    - Capacity: ${capacity}`);
+    console.log(`[${requestId}]    - Logo URL: ${logo_url ? 'provided' : 'none'}`);
+    console.log(`[${requestId}]    - Venue: ${venue ? JSON.stringify(venue) : 'none'}`);
+
     if (!name || !start_date || !end_date) {
+      console.log(`[${requestId}] ❌ Validation failed: missing required fields`);
       return res.status(400).json({ error: 'name, start_date, and end_date are required' });
     }
 
+    console.log(`[${requestId}] 🔑 Getting Eventbrite API key...`);
     const apiKey = await getEventbriteApiKey(userId);
     if (!apiKey) {
+      console.log(`[${requestId}] ❌ No Eventbrite API key found for user`);
       return res.status(400).json({ error: 'Eventbrite not connected' });
     }
+    console.log(`[${requestId}] ✅ API key retrieved (${apiKey.substring(0, 10)}...)`)
 
     // Get org ID from metadata or extra_config
+    console.log(`[${requestId}] 🏢 Looking up organization ID...`);
     const orgResult = await pool.query(
       `SELECT
         COALESCE(metadata->>'organization_id', extra_config->>'organization_id') as org_id
@@ -15226,33 +15250,44 @@ app.post('/api/v1/integrations/eventbrite/events', async (req, res) => {
       [userId]
     );
     let orgId = orgResult.rows[0]?.org_id;
+    console.log(`[${requestId}]    - From DB: ${orgId || 'not found'}`);
 
     // If no org ID stored, fetch from Eventbrite API
     if (!orgId) {
+      console.log(`[${requestId}] 🔄 Fetching org ID from Eventbrite API...`);
       const orgResponse = await fetch('https://www.eventbriteapi.com/v3/users/me/organizations/', {
         headers: { 'Authorization': `Bearer ${apiKey}` }
       });
+      console.log(`[${requestId}]    - API response status: ${orgResponse.status}`);
       if (orgResponse.ok) {
         const orgData = await orgResponse.json();
         if (orgData.organizations && orgData.organizations.length > 0) {
           orgId = orgData.organizations[0].id;
+          console.log(`[${requestId}]    - Got org ID: ${orgId}`);
           await pool.query(
             `UPDATE user_integrations
              SET metadata = COALESCE(metadata, '{}'::jsonb) || $1::jsonb
              WHERE user_id = $2 AND provider = 'eventbrite'`,
             [JSON.stringify({ organization_id: orgId }), userId]
           );
+          console.log(`[${requestId}]    - Saved org ID to database`);
         }
+      } else {
+        const errText = await orgResponse.text();
+        console.log(`[${requestId}]    - API error: ${errText}`);
       }
     }
 
     if (!orgId) {
+      console.log(`[${requestId}] ❌ No organization found`);
       return res.status(400).json({ error: 'Organization not found. Please reconnect Eventbrite.' });
     }
+    console.log(`[${requestId}] ✅ Organization ID: ${orgId}`);
 
     // Create venue in Eventbrite if venue data is provided (not just venue_id)
     let finalVenueId = venue_id;
     if (!online_event && venue && venue.name && !venue_id) {
+      console.log(`[${requestId}] 📍 Creating venue in Eventbrite...`);
       try {
         const venueData = {
           venue: {
@@ -15266,6 +15301,7 @@ app.post('/api/v1/integrations/eventbrite/events', async (req, res) => {
             }
           }
         };
+        console.log(`[${requestId}]    - Venue payload:`, JSON.stringify(venueData));
 
         const venueResponse = await fetch(`https://www.eventbriteapi.com/v3/organizations/${orgId}/venues/`, {
           method: 'POST',
@@ -15275,31 +15311,140 @@ app.post('/api/v1/integrations/eventbrite/events', async (req, res) => {
           },
           body: JSON.stringify(venueData)
         });
+        console.log(`[${requestId}]    - Venue API status: ${venueResponse.status}`);
 
         if (venueResponse.ok) {
           const createdVenue = await venueResponse.json();
           finalVenueId = createdVenue.id;
-          console.log('Created venue in Eventbrite:', createdVenue.id);
+          console.log(`[${requestId}] ✅ Venue created: ${createdVenue.id}`);
         } else {
-          console.warn('Failed to create venue, continuing without venue:', await venueResponse.text());
+          const venueErr = await venueResponse.text();
+          console.log(`[${requestId}] ⚠️ Venue creation failed: ${venueErr}`);
         }
       } catch (venueError) {
-        console.warn('Error creating venue:', venueError.message);
+        console.log(`[${requestId}] ⚠️ Venue error: ${venueError.message}`);
         // Continue without venue - event can still be created
       }
+    } else {
+      console.log(`[${requestId}] 📍 Venue: ${online_event ? 'online event' : (venue_id ? `existing ID ${venue_id}` : 'none provided')}`);
     }
 
+    // BUG-06 FIX: Upload image to Eventbrite if logo_url is provided
+    let logoId = null;
+    if (logo_url) {
+      console.log(`[${requestId}] 🖼️ Uploading image to Eventbrite...`);
+      console.log(`[${requestId}]    - Source URL: ${logo_url}`);
+      try {
+        // Step 1: Get upload instructions from Eventbrite
+        console.log(`[${requestId}]    - Step 1: Getting upload instructions...`);
+        const uploadInstructionsRes = await fetch(
+          `https://www.eventbriteapi.com/v3/media/upload/?type=image-event-logo`,
+          {
+            method: 'GET',
+            headers: { 'Authorization': `Bearer ${apiKey}` }
+          }
+        );
+        console.log(`[${requestId}]    - Upload instructions status: ${uploadInstructionsRes.status}`);
+
+        if (uploadInstructionsRes.ok) {
+          const uploadInstructions = await uploadInstructionsRes.json();
+          console.log(`[${requestId}]    - Got upload URL: ${uploadInstructions.upload_url?.substring(0, 50)}...`);
+
+          // Step 2: Download image from our Cloudinary URL
+          console.log(`[${requestId}]    - Step 2: Downloading image from Cloudinary...`);
+          const imageResponse = await fetch(logo_url);
+          console.log(`[${requestId}]    - Image download status: ${imageResponse.status}`);
+          if (imageResponse.ok) {
+            const imageBuffer = await imageResponse.buffer();
+            console.log(`[${requestId}]    - Image size: ${imageBuffer.length} bytes`);
+
+            // Step 3: Upload to Eventbrite's S3 bucket using form-data
+            console.log(`[${requestId}]    - Step 3: Uploading to Eventbrite S3...`);
+            const FormData = (await import('form-data')).default;
+            const formData = new FormData();
+
+            // Add all fields from upload_data
+            Object.entries(uploadInstructions.upload_data).forEach(([key, value]) => {
+              formData.append(key, value);
+            });
+
+            // Add the file
+            formData.append('file', imageBuffer, {
+              filename: 'event-logo.jpg',
+              contentType: 'image/jpeg'
+            });
+
+            // Upload to Eventbrite's upload URL
+            const uploadRes = await fetch(uploadInstructions.upload_url, {
+              method: 'POST',
+              body: formData,
+              headers: formData.getHeaders()
+            });
+            console.log(`[${requestId}]    - S3 upload status: ${uploadRes.status}`);
+
+            if (uploadRes.ok) {
+              // Step 4: Notify Eventbrite that upload is complete
+              console.log(`[${requestId}]    - Step 4: Notifying Eventbrite...`);
+              const notifyRes = await fetch(
+                `https://www.eventbriteapi.com/v3/media/upload/?token=${uploadInstructions.upload_token}`,
+                {
+                  method: 'POST',
+                  headers: {
+                    'Authorization': `Bearer ${apiKey}`,
+                    'Content-Type': 'application/json'
+                  },
+                  body: JSON.stringify({
+                    upload_token: uploadInstructions.upload_token,
+                    crop_mask: { top_left: { x: 0, y: 0 }, width: 1920, height: 1080 }
+                  })
+                }
+              );
+              console.log(`[${requestId}]    - Notify status: ${notifyRes.status}`);
+
+              if (notifyRes.ok) {
+                const mediaResult = await notifyRes.json();
+                logoId = mediaResult.id;
+                console.log(`[${requestId}] ✅ Image uploaded, logo_id: ${logoId}`);
+              } else {
+                const notifyErr = await notifyRes.text();
+                console.log(`[${requestId}] ⚠️ Notify failed: ${notifyErr}`);
+              }
+            } else {
+              const uploadErr = await uploadRes.text();
+              console.log(`[${requestId}] ⚠️ S3 upload failed: ${uploadErr}`);
+            }
+          } else {
+            console.log(`[${requestId}] ⚠️ Image download failed`);
+          }
+        } else {
+          const instrErr = await uploadInstructionsRes.text();
+          console.log(`[${requestId}] ⚠️ Upload instructions failed: ${instrErr}`);
+        }
+      } catch (imageError) {
+        console.log(`[${requestId}] ⚠️ Image upload error: ${imageError.message}`);
+        // Continue without image - event can still be created
+      }
+    } else {
+      console.log(`[${requestId}] 🖼️ No image provided`);
+    }
+
+    // BUG-01 FIX: Use split to reliably remove milliseconds instead of fragile .replace()
+    const formatDateForEventbrite = (dateStr) => {
+      return new Date(dateStr).toISOString().split('.')[0] + 'Z';
+    };
+
+    console.log(`[${requestId}] 🎫 Creating event in Eventbrite...`);
     const eventData = {
       event: {
         name: { html: name },
         description: description ? { html: description } : undefined,
         start: {
           timezone: timezone,
-          utc: new Date(start_date).toISOString().replace('.000', '')
+          utc: formatDateForEventbrite(start_date)
         },
         end: {
           timezone: timezone,
-          utc: new Date(end_date).toISOString().replace('.000', '')
+          utc: formatDateForEventbrite(end_date)
         },
         currency: currency,
         online_event: online_event,
@@ -15308,9 +15453,11 @@ app.post('/api/v1/integrations/eventbrite/events', async (req, res) => {
         capacity: capacity,
         venue_id: finalVenueId,
         category_id: category_id,
-        subcategory_id: subcategory_id
+        subcategory_id: subcategory_id,
+        logo_id: logoId  // BUG-06 FIX: Include uploaded logo ID
       }
     };
+    console.log(`[${requestId}]    - Event payload:`, JSON.stringify(eventData, null, 2));
 
     const response = await fetch(`https://www.eventbriteapi.com/v3/organizations/${orgId}/events/`, {
       method: 'POST',
@@ -15320,9 +15467,11 @@ app.post('/api/v1/integrations/eventbrite/events', async (req, res) => {
       },
       body: JSON.stringify(eventData)
     });
+    console.log(`[${requestId}]    - Eventbrite API status: ${response.status}`);
 
     if (!response.ok) {
       const errorData = await response.json();
+      console.log(`[${requestId}] ❌ Event creation failed:`, JSON.stringify(errorData));
       return res.status(response.status).json({
         error: 'Failed to create event on Eventbrite',
         details: errorData
@@ -15330,6 +15479,9 @@ app.post('/api/v1/integrations/eventbrite/events', async (req, res) => {
     }
 
     const ebEvent = await response.json();
+    console.log(`[${requestId}] ✅ Event created in Eventbrite!`);
+    console.log(`[${requestId}]    - Eventbrite ID: ${ebEvent.id}`);
+    console.log(`[${requestId}]    - Eventbrite URL: ${ebEvent.url}`);
 
     // Generate slug from event name
     const generateEventSlug = (eventName) => {
@@ -15342,8 +15494,10 @@ app.post('/api/v1/integrations/eventbrite/events', async (req, res) => {
         + '-' + Date.now().toString(36);
     };
     const slug = generateEventSlug(name);
+    console.log(`[${requestId}]    - Generated slug: ${slug}`);
 
     // Save to local events table with slug
+    console.log(`[${requestId}] 💾 Saving to local database...`);
     const localResult = await pool.query(`
       INSERT INTO events (
         user_id, name, description, event_date, event_time, end_time,
@@ -15360,12 +15514,13 @@ app.post('/api/v1/integrations/eventbrite/events', async (req, res) => {
       category_id, subcategory_id, online_event,
       slug, true  // is_public = true for shareable events
     ]);
+    console.log(`[${requestId}] ✅ Saved to local DB, local ID: ${localResult.rows[0].id}`);
 
     // Build the local portal URL
     const baseUrl = process.env.FRONTEND_URL || 'https://berry.merktop.com';
     const portalUrl = `${baseUrl}/e/${slug}`;
 
-    res.json({
+    const responseData = {
       success: true,
       id: ebEvent.id,  // Frontend expects id at root level
       localId: localResult.rows[0].id,
@@ -15374,10 +15529,21 @@ app.post('/api/v1/integrations/eventbrite/events', async (req, res) => {
       eventbriteUrl: ebEvent.url,  // URL on Eventbrite
       eventbrite_event: ebEvent,
       local_event: localResult.rows[0]
-    });
+    };
+
+    console.log(`[${requestId}] 📤 Sending response to frontend`);
+    console.log(`${'═'.repeat(70)}`);
+    console.log(`[${requestId}] 🎉 EVENTBRITE CREATE EVENT - SUCCESS`);
+    console.log(`${'═'.repeat(70)}\n`);
+
+    res.json(responseData);
   } catch (error) {
-    console.error('Error creating event:', error);
-    res.status(500).json({ error: 'Failed to create event' });
+    console.log(`[${requestId}] ❌ FATAL ERROR:`, error.message);
+    console.log(`[${requestId}]    - Stack:`, error.stack);
+    console.log(`${'═'.repeat(70)}`);
+    console.log(`[${requestId}] 💥 EVENTBRITE CREATE EVENT - FAILED`);
+    console.log(`${'═'.repeat(70)}\n`);
+    res.status(500).json({ error: 'Failed to create event', message: error.message });
   }
 });
 
@@ -15395,18 +15561,23 @@ app.put('/api/v1/integrations/eventbrite/events/:id', async (req, res) => {
 
     const eventData = { event: {} };
 
+    // BUG-01 FIX: Consistent date formatting
+    const formatDateForEventbrite = (dateStr) => {
+      return new Date(dateStr).toISOString().split('.')[0] + 'Z';
+    };
+
     if (updates.name) eventData.event.name = { html: updates.name };
     if (updates.description) eventData.event.description = { html: updates.description };
     if (updates.start_date) {
       eventData.event.start = {
         timezone: updates.timezone || 'America/New_York',
-        utc: new Date(updates.start_date).toISOString().replace('.000', '')
+        utc: formatDateForEventbrite(updates.start_date)
       };
     }
     if (updates.end_date) {
       eventData.event.end = {
         timezone: updates.timezone || 'America/New_York',
-        utc: new Date(updates.end_date).toISOString().replace('.000', '')
+        utc: formatDateForEventbrite(updates.end_date)
       };
     }
     if (updates.capacity !== undefined) eventData.event.capacity = updates.capacity;
@@ -15447,35 +15618,48 @@ app.put('/api/v1/integrations/eventbrite/events/:id', async (req, res) => {
 
 // POST /api/v1/integrations/eventbrite/events/:id/publish - Publish event
 app.post('/api/v1/integrations/eventbrite/events/:id/publish', async (req, res) => {
+  const requestId = `EB-PUB-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+  console.log(`[${requestId}] 📢 PUBLISH EVENT - Event ID: ${req.params.id}`);
+
   try {
     // Use authenticated user from token, fallback to body for backwards compatibility
     const userId = req.user?.id || req.body.userId;
     const { id } = req.params;
+    console.log(`[${requestId}]    - User ID: ${userId}`);
 
     const apiKey = await getEventbriteApiKey(userId);
     if (!apiKey) {
+      console.log(`[${requestId}] ❌ No API key found`);
       return res.status(400).json({ error: 'Eventbrite not connected' });
     }
 
+    console.log(`[${requestId}]    - Calling Eventbrite publish API...`);
     const response = await fetch(`https://www.eventbriteapi.com/v3/events/${id}/publish/`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${apiKey}` }
     });
+    console.log(`[${requestId}]    - API status: ${response.status}`);
 
     if (!response.ok) {
       const errorData = await response.json();
+      console.log(`[${requestId}] ❌ Publish failed:`, JSON.stringify(errorData));
       return res.status(response.status).json({ error: 'Failed to publish event', details: errorData });
     }
 
+    console.log(`[${requestId}] ✅ Event published successfully!`);
     res.json({ success: true, message: 'Event published successfully' });
   } catch (error) {
-    console.error('Error publishing event:', error);
+    console.log(`[${requestId}] ❌ Error:`, error.message);
     res.status(500).json({ error: 'Failed to publish event' });
   }
 });
 
 // POST /api/v1/integrations/eventbrite/events/:id/ticket-classes - Create ticket type
 app.post('/api/v1/integrations/eventbrite/events/:id/ticket-classes', async (req, res) => {
+  const requestId = `EB-TKT-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+  console.log(`[${requestId}] 🎟️ CREATE TICKET - Event ID: ${req.params.id}`);
+  console.log(`[${requestId}]    - Request body:`, JSON.stringify(req.body));
+
   try {
     // Use authenticated user from token, fallback to body for backwards compatibility
     const userId = req.user?.id || req.body.userId;
@@ -15491,12 +15675,16 @@ app.post('/api/v1/integrations/eventbrite/events/:id/ticket-classes', async (req
       sales_end
     } = req.body;
 
+    console.log(`[${requestId}]    - Ticket: "${name}" | Price: ${price} | Free: ${free} | Qty: ${quantity_total}`);
+
     if (!name) {
+      console.log(`[${requestId}] ❌ Validation failed: name required`);
       return res.status(400).json({ error: 'name is required' });
     }
 
     const apiKey = await getEventbriteApiKey(userId);
     if (!apiKey) {
+      console.log(`[${requestId}] ❌ No API key found`);
       return res.status(400).json({ error: 'Eventbrite not connected' });
     }
 
@@ -15510,12 +15698,19 @@ app.post('/api/v1/integrations/eventbrite/events/:id/ticket-classes', async (req
       }
     };
 
+    // BUG-02 FIX: Frontend already sends price in cents, don't multiply again
     if (!free && price > 0) {
-      ticketData.ticket_class.cost = `USD,${Math.round(price * 100)}`;
+      ticketData.ticket_class.cost = `USD,${Math.round(price)}`;
+      console.log(`[${requestId}]    - Paid ticket, cost: USD,${Math.round(price)} (${price/100} USD)`);
+    } else {
+      console.log(`[${requestId}]    - Free ticket`);
     }
 
     if (sales_start) ticketData.ticket_class.sales_start = sales_start;
     if (sales_end) ticketData.ticket_class.sales_end = sales_end;
+
+    console.log(`[${requestId}]    - Ticket payload:`, JSON.stringify(ticketData));
+    console.log(`[${requestId}]    - Calling Eventbrite API...`);
 
     const response = await fetch(`https://www.eventbriteapi.com/v3/events/${id}/ticket_classes/`, {
       method: 'POST',
@@ -15525,16 +15720,32 @@ app.post('/api/v1/integrations/eventbrite/events/:id/ticket-classes', async (req
       },
       body: JSON.stringify(ticketData)
     });
+    console.log(`[${requestId}]    - API status: ${response.status}`);
 
+    // BUG-04 FIX: Handle tax_settings error for paid tickets
     if (!response.ok) {
       const errorData = await response.json();
+      console.log(`[${requestId}] ❌ Ticket creation failed:`, JSON.stringify(errorData));
+
+      // Specific error handling for tax_settings requirement
+      if (errorData.error_description?.includes('tax_settings')) {
+        console.log(`[${requestId}]    - Reason: Tax settings not configured`);
+        return res.status(400).json({
+          error: 'Tax settings required',
+          message: 'You need to configure tax settings in your Eventbrite organization to create paid tickets. Go to Eventbrite Organization Settings > Tax Information.',
+          help_url: 'https://www.eventbrite.com/organizations/settings/tax',
+          details: errorData
+        });
+      }
+
       return res.status(response.status).json({ error: 'Failed to create ticket class', details: errorData });
     }
 
     const ticketClass = await response.json();
+    console.log(`[${requestId}] ✅ Ticket created! ID: ${ticketClass.id}`);
     res.json({ success: true, ticket_class: ticketClass });
   } catch (error) {
-    console.error('Error creating ticket class:', error);
+    console.log(`[${requestId}] ❌ Error:`, error.message);
     res.status(500).json({ error: 'Failed to create ticket class' });
   }
 });

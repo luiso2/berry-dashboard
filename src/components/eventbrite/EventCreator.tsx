@@ -188,6 +188,12 @@ export function EventCreator({ onEventCreated }: EventCreatorProps) {
     setLoading(true);
     setError(null);
 
+    // Generate unique request ID for tracking in logs
+    const requestId = `FE-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+    console.log(`\n${'═'.repeat(60)}`);
+    console.log(`[${requestId}] 🎫 FRONTEND: CREATE EVENT - START`);
+    console.log(`${'═'.repeat(60)}`);
+
     try {
       // Format dates for API
       const startDateTime = `${eventData.start_date}T${eventData.start_time}:00`;
@@ -220,64 +226,150 @@ export function EventCreator({ onEventCreated }: EventCreatorProps) {
         organizer_name: eventData.organizer,
       };
 
+      console.log(`[${requestId}] 📋 Event Details:`);
+      console.log(`[${requestId}]    - Name: ${payload.name}`);
+      console.log(`[${requestId}]    - Start: ${startDateTime}`);
+      console.log(`[${requestId}]    - End: ${endDateTime}`);
+      console.log(`[${requestId}]    - Timezone: ${payload.timezone}`);
+      console.log(`[${requestId}]    - Online: ${payload.online_event}`);
+      console.log(`[${requestId}]    - Capacity: ${payload.capacity}`);
+      console.log(`[${requestId}]    - Logo URL: ${payload.logo_url ? 'provided' : 'none'}`);
+      console.log(`[${requestId}]    - Venue: ${payload.venue ? payload.venue.name : 'N/A'}`);
+      console.log(`[${requestId}] 📤 Full payload:`, JSON.stringify(payload, null, 2));
+
       // Step 1: Create event in Eventbrite
+      console.log(`[${requestId}] 🔄 Step 1: Creating event...`);
       const createRes = await fetch(`${API_URL}/integrations/eventbrite/events`, {
         method: 'POST',
         headers,
         body: JSON.stringify(payload),
       });
+      console.log(`[${requestId}]    - Response status: ${createRes.status}`);
 
       if (!createRes.ok) {
         const err = await createRes.json();
+        console.log(`[${requestId}] ❌ Create failed:`, JSON.stringify(err));
         throw new Error(err.error || 'Failed to create event');
       }
 
       const createData = await createRes.json();
       const eventId = createData.id;
       setCreatedEventId(eventId);
+      console.log(`[${requestId}] ✅ Event created!`);
+      console.log(`[${requestId}]    - Eventbrite ID: ${eventId}`);
+      console.log(`[${requestId}]    - Local ID: ${createData.localId}`);
+      console.log(`[${requestId}]    - Eventbrite URL: ${createData.eventbriteUrl}`);
 
       // Step 2: Add ticket classes
-      for (const ticket of ticketClasses) {
+      // BUG-03 FIX: Track ticket creation errors instead of silently ignoring them
+      // BUG-05 FIX: Remove invalid 'donation' field (not supported by Eventbrite API)
+      console.log(`[${requestId}] 🔄 Step 2: Creating ${ticketClasses.length} ticket(s)...`);
+      const ticketErrors: string[] = [];
+      let ticketsCreated = 0;
+
+      for (let i = 0; i < ticketClasses.length; i++) {
+        const ticket = ticketClasses[i];
+        console.log(`[${requestId}]    - Ticket ${i + 1}/${ticketClasses.length}: "${ticket.name}" (${ticket.free ? 'FREE' : `$${ticket.cost}`})`);
+
         const ticketPayload = {
           userId: user?.id,  // Include userId for backend fallback
           name: ticket.name,
           description: ticket.description,
           quantity_total: ticket.quantity_total,
-          cost: ticket.free ? 0 : ticket.cost * 100,
+          price: ticket.free ? 0 : ticket.cost * 100,  // Renamed to 'price' for clarity, in cents
           free: ticket.free,
-          donation: ticket.type === 'donation',
+          // BUG-05: Removed 'donation' field - not supported by Eventbrite API
         };
+        console.log(`[${requestId}]      Payload:`, JSON.stringify(ticketPayload));
 
-        await fetch(`${API_URL}/integrations/eventbrite/events/${eventId}/ticket-classes`, {
+        const ticketRes = await fetch(`${API_URL}/integrations/eventbrite/events/${eventId}/ticket-classes`, {
           method: 'POST',
           headers,
           body: JSON.stringify(ticketPayload),
         });
+        console.log(`[${requestId}]      Response status: ${ticketRes.status}`);
+
+        if (ticketRes.ok) {
+          ticketsCreated++;
+          console.log(`[${requestId}]      ✅ Ticket created`);
+        } else {
+          const ticketErr = await ticketRes.json();
+          console.log(`[${requestId}]      ❌ Ticket failed:`, JSON.stringify(ticketErr));
+          // Show user-friendly message for tax_settings error
+          if (ticketErr.error === 'Tax settings required') {
+            ticketErrors.push(`"${ticket.name}": Configure tax settings in Eventbrite to create paid tickets`);
+          } else {
+            ticketErrors.push(`"${ticket.name}": ${ticketErr.message || ticketErr.error || 'Failed to create'}`);
+          }
+        }
+      }
+
+      console.log(`[${requestId}]    - Tickets created: ${ticketsCreated}/${ticketClasses.length}`);
+      if (ticketErrors.length > 0) {
+        console.log(`[${requestId}]    - Ticket errors:`, ticketErrors);
+      }
+
+      // If no tickets were created, that's a problem
+      if (ticketsCreated === 0 && ticketClasses.length > 0) {
+        console.log(`[${requestId}] ❌ No tickets created - aborting`);
+        throw new Error(`Could not create any tickets. ${ticketErrors.join('. ')}`);
       }
 
       // Step 3: Publish event
+      console.log(`[${requestId}] 🔄 Step 3: Publishing event...`);
       const publishRes = await fetch(`${API_URL}/integrations/eventbrite/events/${eventId}/publish`, {
         method: 'POST',
         headers,
         body: JSON.stringify({ userId: user?.id }),  // Include userId for backend fallback
       });
+      console.log(`[${requestId}]    - Publish response status: ${publishRes.status}`);
 
       if (publishRes.ok) {
         const publishData = await publishRes.json();
         setPortalUrl(createData.portalUrl || null);
         setEventbriteUrl(publishData.url || createData.eventbriteUrl || createData.eventbrite_event?.url || null);
         setStep(5); // Success step
+
+        console.log(`[${requestId}] ✅ Event published successfully!`);
+        console.log(`${'═'.repeat(60)}`);
+        console.log(`[${requestId}] 🎉 FRONTEND: CREATE EVENT - SUCCESS`);
+        console.log(`${'═'.repeat(60)}\n`);
+
+        // BUG-03 FIX: Show warning if some tickets failed (but event was still published)
+        if (ticketErrors.length > 0) {
+          setError(`Event published, but some tickets could not be created: ${ticketErrors.join('. ')}`);
+        }
+
         onEventCreated?.();
       } else {
         // Event created but not published - still show success with draft status
+        const publishErr = await publishRes.json().catch(() => ({}));
+        console.log(`[${requestId}] ⚠️ Publish failed:`, JSON.stringify(publishErr));
         setPortalUrl(createData.portalUrl || null);
         setEventbriteUrl(createData.eventbriteUrl || createData.eventbrite_event?.url || null);
         setStep(5);
-        setError('Event created but could not be published. It is saved as a draft.');
+
+        // Combine publish error with any ticket errors
+        const errorMessages = ['Event created but could not be published. It is saved as a draft.'];
+        if (publishErr.details?.error_description) {
+          errorMessages.push(`Reason: ${publishErr.details.error_description}`);
+        }
+        if (ticketErrors.length > 0) {
+          errorMessages.push(`Ticket issues: ${ticketErrors.join('. ')}`);
+        }
+        setError(errorMessages.join(' '));
+
+        console.log(`${'═'.repeat(60)}`);
+        console.log(`[${requestId}] ⚠️ FRONTEND: EVENT CREATED AS DRAFT`);
+        console.log(`${'═'.repeat(60)}\n`);
+
         onEventCreated?.();
       }
     } catch (err) {
-      console.error('Error creating event:', err);
+      console.log(`[${requestId}] ❌ FATAL ERROR:`, err);
+      console.log(`${'═'.repeat(60)}`);
+      console.log(`[${requestId}] 💥 FRONTEND: CREATE EVENT - FAILED`);
+      console.log(`${'═'.repeat(60)}\n`);
       setError(err instanceof Error ? err.message : 'Failed to create event');
     } finally {
       setLoading(false);
