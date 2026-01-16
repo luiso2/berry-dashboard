@@ -11105,9 +11105,63 @@ app.get('/api/v1/telnyx/messaging-profiles', async (req, res) => {
 // TELNYX INBOUND SMS WEBHOOK (Multi-tenant + AI Response)
 // ============================================
 
+// Telnyx webhook public key for signature verification
+// Get this from: https://portal.telnyx.com > Account Settings > Public Key
+const TELNYX_PUBLIC_KEY = process.env.TELNYX_PUBLIC_KEY;
+
+// Verify Telnyx webhook signature (ED25519)
+const verifyTelnyxSignature = (payload, signature, timestamp) => {
+  if (!TELNYX_PUBLIC_KEY) {
+    console.warn('⚠️ TELNYX_PUBLIC_KEY not configured - skipping webhook verification');
+    return true; // Allow in development, but log warning
+  }
+
+  if (!signature || !timestamp) {
+    console.error('❌ Missing Telnyx signature or timestamp headers');
+    return false;
+  }
+
+  try {
+    // The signed payload is: timestamp|payload
+    const signedPayload = `${timestamp}|${JSON.stringify(payload)}`;
+
+    // Decode the base64 signature
+    const signatureBuffer = Buffer.from(signature, 'base64');
+
+    // Decode the public key (base64 encoded ED25519 public key)
+    const publicKeyBuffer = Buffer.from(TELNYX_PUBLIC_KEY, 'base64');
+
+    // Verify using Node.js crypto
+    const isValid = crypto.verify(
+      null, // ED25519 doesn't need algorithm specification
+      Buffer.from(signedPayload),
+      {
+        key: publicKeyBuffer,
+        format: 'der',
+        type: 'spki'
+      },
+      signatureBuffer
+    );
+
+    return isValid;
+  } catch (error) {
+    console.error('❌ Telnyx signature verification failed:', error.message);
+    return false;
+  }
+};
+
 // POST /api/webhooks/telnyx/sms - Handle inbound SMS from Telnyx
 app.post('/api/webhooks/telnyx/sms', async (req, res) => {
   try {
+    // Verify webhook signature
+    const signature = req.headers['telnyx-signature-ed25519'];
+    const timestamp = req.headers['telnyx-timestamp'];
+
+    if (TELNYX_PUBLIC_KEY && !verifyTelnyxSignature(req.body, signature, timestamp)) {
+      console.error('❌ Invalid Telnyx webhook signature - request rejected');
+      return res.status(401).json({ error: 'Invalid webhook signature' });
+    }
+
     const event = req.body;
     console.log('📱 Telnyx webhook received:', event.data?.event_type);
 
