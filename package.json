@@ -11,6 +11,7 @@
     "start": "serve dist -s -l 8080"
   },
   "dependencies": {
+    "bcrypt": "^6.0.0",
     "clsx": "^2.1.1",
     "eslint-config-next": "^16.1.2",
     "framer-motion": "^12.26.2",

@@ -14,6 +14,7 @@ import cookieParser from 'cookie-parser';
 import multer from 'multer';
 import * as XLSX from 'xlsx';
 import { parse as csvParse } from 'csv-parse/sync';
+import bcrypt from 'bcrypt';
 
 // API Version - for tracking deployments
 const API_VERSION = '3.15.2-guest-status';
@@ -36,10 +37,10 @@ const pool = new Pool({
 let dbInitStatus = { started: false, completed: false, error: null, modelsFix: null };
 
 // ============================================
-// TELNYX SMS CONFIGURATION (HARDCODED)
+// TELNYX SMS CONFIGURATION
 // ============================================
-const TELNYX_API_KEY = 'KEY019BB55919322AD23E6BB43CF03090E7_cirYjuPOVNFgblLFbdAm7A';
-const TELNYX_PHONE_NUMBER = '+19858539097';
+const TELNYX_API_KEY = process.env.TELNYX_API_KEY;
+const TELNYX_PHONE_NUMBER = process.env.TELNYX_PHONE_NUMBER || '+19858539097';
 
 async function sendSMS(to, message) {
   if (!TELNYX_API_KEY) {
@@ -2033,9 +2034,27 @@ app.use(cookieParser());
 // OAUTH 2.0 ENDPOINTS
 // ============================================
 
-// Simple password hashing (for production use bcrypt)
-const hashPassword = (password) => {
+// Secure password hashing with bcrypt
+const BCRYPT_ROUNDS = 12;
+
+// Hash password with bcrypt
+const hashPassword = async (password) => {
+  return bcrypt.hash(password, BCRYPT_ROUNDS);
+};
+
+// Legacy SHA256 hash (for backwards compatibility during migration)
+const legacyHashPassword = (password) => {
   return crypto.createHash('sha256').update(password + 'berry-salt-2024').digest('hex');
+};
+
+// Compare password - tries bcrypt first, falls back to legacy SHA256
+const comparePassword = async (password, hash) => {
+  // Check if it's a bcrypt hash (starts with $2a$ or $2b$)
+  if (hash.startsWith('$2a$') || hash.startsWith('$2b$')) {
+    return bcrypt.compare(password, hash);
+  }
+  // Legacy SHA256 comparison
+  return hash === legacyHashPassword(password);
 };
 
 // Generate random token
@@ -2304,12 +2323,20 @@ app.post('/oauth/login', async (req, res) => {
 
     const user = userResult.rows[0];
 
-    // Check password
-    if (user.password_hash !== hashPassword(password)) {
+    // Check password with bcrypt (or legacy SHA256 for old accounts)
+    const passwordValid = await comparePassword(password, user.password_hash);
+    if (!passwordValid) {
       if (isFrontend) {
         return res.status(401).json({ error: 'Invalid email or password' });
       }
       return res.send('<html><body><h1>Error</h1><p>Invalid password. <a href="javascript:history.back()">Go back</a></p></body></html>');
+    }
+
+    // Migrate legacy SHA256 passwords to bcrypt on successful login
+    if (!user.password_hash.startsWith('$2a$') && !user.password_hash.startsWith('$2b$')) {
+      const newHash = await hashPassword(password);
+      await pool.query('UPDATE users SET password_hash = $1 WHERE id = $2', [newHash, user.id]);
+      console.log(`✅ Migrated password for user ${user.email} from SHA256 to bcrypt`);
     }
 
     // Generate tokens
@@ -2377,10 +2404,11 @@ app.post('/oauth/register', async (req, res) => {
       return res.send('<html><body><h1>Error</h1><p>Email already registered. <a href="javascript:history.back()">Go back to login</a></p></body></html>');
     }
 
-    // Create user
+    // Create user with bcrypt password hash
+    const passwordHash = await hashPassword(password);
     const userResult = await pool.query(
       'INSERT INTO users (email, password_hash, name, company) VALUES ($1, $2, $3, $4) RETURNING id',
-      [email.toLowerCase(), hashPassword(password), name, company]
+      [email.toLowerCase(), passwordHash, name, company]
     );
 
     const userId = userResult.rows[0].id;
