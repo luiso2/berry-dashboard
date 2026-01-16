@@ -24,7 +24,7 @@ export function RefundManager({ events }: RefundManagerProps) {
 
   const headers = {
     'Content-Type': 'application/json',
-    Authorization: `Bearer ${localStorage.getItem('token')}`,
+    Authorization: `Bearer ${localStorage.getItem('berry_token')}`,
   };
 
   const fetchRefunds = useCallback(async () => {

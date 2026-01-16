@@ -1,6 +1,6 @@
 // API Configuration
 
-const LOCAL_API = 'http://localhost:3001/api/v1';
+const LOCAL_API = 'http://localhost:8080/api/v1';
 
 export const API_URL = import.meta.env.VITE_API_URL || LOCAL_API;
 

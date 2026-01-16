@@ -25,7 +25,7 @@ export function PromoCodesManager({ events }: PromoCodesManagerProps) {
 
   const headers = {
     'Content-Type': 'application/json',
-    Authorization: `Bearer ${localStorage.getItem('token')}`,
+    Authorization: `Bearer ${localStorage.getItem('berry_token')}`,
   };
 
   const fetchPromoCodes = useCallback(async () => {

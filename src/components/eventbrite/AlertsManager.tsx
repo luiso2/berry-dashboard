@@ -44,7 +44,7 @@ export function AlertsManager({ events, onNotificationCount }: AlertsManagerProp
 
   const headers = {
     'Content-Type': 'application/json',
-    Authorization: `Bearer ${localStorage.getItem('token')}`,
+    Authorization: `Bearer ${localStorage.getItem('berry_token')}`,
   };
 
   const fetchAlerts = useCallback(async () => {

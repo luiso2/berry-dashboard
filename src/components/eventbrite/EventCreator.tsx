@@ -129,7 +129,7 @@ export function EventCreator({ onEventCreated }: EventCreatorProps) {
 
   const headers = {
     'Content-Type': 'application/json',
-    Authorization: `Bearer ${localStorage.getItem('token')}`,
+    Authorization: `Bearer ${localStorage.getItem('berry_token')}`,
   };
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -144,7 +144,7 @@ export function EventCreator({ onEventCreated }: EventCreatorProps) {
       const res = await fetch(`${API_URL}/gallery/upload`, {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${localStorage.getItem('token')}`,
+          Authorization: `Bearer ${localStorage.getItem('berry_token')}`,
         },
         body: formData,
       });
