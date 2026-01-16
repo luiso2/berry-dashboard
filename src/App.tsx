@@ -117,6 +117,21 @@ function App() {
     });
   }, [state.guests, state.filters]);
 
+  // State for action menu dropdown (must be before any conditional returns)
+  const [openActionMenu, setOpenActionMenu] = useState<string | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // Close menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setOpenActionMenu(null);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
   // View helpers
   const getViewTitle = (): string => {
     const titles: Record<ViewType, string> = {
@@ -198,21 +213,6 @@ function App() {
       </div>
     );
   }
-
-  // State for action menu dropdown
-  const [openActionMenu, setOpenActionMenu] = useState<string | null>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
-
-  // Close menu when clicking outside
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
-        setOpenActionMenu(null);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
 
   // Inline Tab Button component
   const TabBtn = ({ active, onClick, label }: { active: boolean; onClick: () => void; label: string }) => (
