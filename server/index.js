@@ -4030,7 +4030,7 @@ app.post('/api/v1/guest-lists', async (req, res) => {
 app.patch('/api/v1/guest-lists/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { status, notes } = req.body;
+    const { status, notes, emailSent, emailSentAt } = req.body;
 
     const updates = [];
     const params = [];
@@ -4043,6 +4043,14 @@ app.patch('/api/v1/guest-lists/:id', async (req, res) => {
     if (notes !== undefined) {
       updates.push(`notes = COALESCE(notes, '') || $${paramIndex++}`);
       params.push('\n' + notes);
+    }
+    if (emailSent !== undefined) {
+      updates.push(`email_sent = $${paramIndex++}`);
+      params.push(emailSent);
+    }
+    if (emailSentAt !== undefined) {
+      updates.push(`email_sent_at = $${paramIndex++}`);
+      params.push(emailSentAt);
     }
 
     // Always update updated_at
