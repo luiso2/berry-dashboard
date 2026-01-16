@@ -47,15 +47,16 @@ import './styles/index.css';
 import type { ViewType, GuestCategory } from './types';
 
 function App() {
-  // Check if we're on a client portal URL
+  // Hooks must be called before any conditional returns (React rules of hooks)
+  const { user, token } = useAuth();
+  const state = useAppState();
+  const actions = useAppActions(state, token ?? undefined, user?.id);
+
+  // Check if we're on a client portal URL - must be AFTER hooks
   const clientMatch = window.location.pathname.match(/^\/client\/([a-zA-Z0-9]+)$/);
   if (clientMatch) {
     return <ClientPortalView token={clientMatch[1]} />;
   }
-
-  const { user, token } = useAuth();
-  const state = useAppState();
-  const actions = useAppActions(state, token ?? undefined, user?.id);
 
   // Initial data fetch
   useEffect(() => {
