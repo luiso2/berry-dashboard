@@ -83,7 +83,14 @@ async function sendSMS(to, message) {
 // ============================================
 // ENCRYPTION UTILITIES for API Keys
 // ============================================
-const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || crypto.randomBytes(32).toString('hex').slice(0, 32);
+const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY;
+if (!ENCRYPTION_KEY || ENCRYPTION_KEY.length !== 32) {
+  console.error('═══════════════════════════════════════════════════════════════');
+  console.error('FATAL: ENCRYPTION_KEY must be set and exactly 32 characters');
+  console.error('Generate one with: node -e "console.log(require(\'crypto\').randomBytes(16).toString(\'hex\'))"');
+  console.error('═══════════════════════════════════════════════════════════════');
+  process.exit(1);
+}
 const IV_LENGTH = 16;
 
 function encryptApiKey(text) {
