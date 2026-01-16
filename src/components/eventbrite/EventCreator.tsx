@@ -1,5 +1,6 @@
 import { useState, useRef } from 'react';
 import { API_URL } from '../../constants';
+import { useAuth } from '../../context/AuthContext';
 
 interface EventCreatorProps {
   onEventCreated?: () => void;
@@ -77,6 +78,7 @@ const STEP_TITLES = [
 ];
 
 export function EventCreator({ onEventCreated }: EventCreatorProps) {
+  const { user } = useAuth();
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
@@ -192,6 +194,7 @@ export function EventCreator({ onEventCreated }: EventCreatorProps) {
       const endDateTime = `${eventData.end_date || eventData.start_date}T${eventData.end_time}:00`;
 
       const payload = {
+        userId: user?.id,  // Include userId for backend fallback
         name: eventData.name,
         description: eventData.description || eventData.summary,
         summary: eventData.summary,
@@ -236,6 +239,7 @@ export function EventCreator({ onEventCreated }: EventCreatorProps) {
       // Step 2: Add ticket classes
       for (const ticket of ticketClasses) {
         const ticketPayload = {
+          userId: user?.id,  // Include userId for backend fallback
           name: ticket.name,
           description: ticket.description,
           quantity_total: ticket.quantity_total,
@@ -255,6 +259,7 @@ export function EventCreator({ onEventCreated }: EventCreatorProps) {
       const publishRes = await fetch(`${API_URL}/integrations/eventbrite/events/${eventId}/publish`, {
         method: 'POST',
         headers,
+        body: JSON.stringify({ userId: user?.id }),  // Include userId for backend fallback
       });
 
       if (publishRes.ok) {

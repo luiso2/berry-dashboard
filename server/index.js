@@ -15174,7 +15174,8 @@ app.get('/api/v1/integrations/eventbrite/reports/summary', async (req, res) => {
 // POST /api/v1/integrations/eventbrite/events - Create event on Eventbrite
 app.post('/api/v1/integrations/eventbrite/events', async (req, res) => {
   try {
-    const userId = req.user?.id;
+    // Use authenticated user from token, fallback to body for backwards compatibility
+    const userId = req.user?.id || req.body.userId;
     const {
       name,
       description,
@@ -15432,7 +15433,8 @@ app.put('/api/v1/integrations/eventbrite/events/:id', async (req, res) => {
 // POST /api/v1/integrations/eventbrite/events/:id/publish - Publish event
 app.post('/api/v1/integrations/eventbrite/events/:id/publish', async (req, res) => {
   try {
-    const userId = req.user?.id;
+    // Use authenticated user from token, fallback to body for backwards compatibility
+    const userId = req.user?.id || req.body.userId;
     const { id } = req.params;
 
     const apiKey = await getEventbriteApiKey(userId);
@@ -15460,7 +15462,8 @@ app.post('/api/v1/integrations/eventbrite/events/:id/publish', async (req, res) 
 // POST /api/v1/integrations/eventbrite/events/:id/ticket-classes - Create ticket type
 app.post('/api/v1/integrations/eventbrite/events/:id/ticket-classes', async (req, res) => {
   try {
-    const userId = req.user?.id;
+    // Use authenticated user from token, fallback to body for backwards compatibility
+    const userId = req.user?.id || req.body.userId;
     const { id } = req.params;
     const {
       name,
