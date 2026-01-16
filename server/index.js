@@ -15532,22 +15532,32 @@ app.post('/api/v1/integrations/eventbrite/events', async (req, res) => {
     console.log(`[${requestId}]    - Generated slug: ${slug}`);
 
     // Save to local events table with slug
+    // Note: Using 'date' column (legacy) and providing 'id' since it's VARCHAR not SERIAL
     console.log(`[${requestId}] 💾 Saving to local database...`);
+    const localEventId = `eb-${ebEvent.id}`;  // Use Eventbrite ID as local ID
     const localResult = await pool.query(`
       INSERT INTO events (
-        user_id, name, description, event_date, event_time, end_time,
+        id, user_id, name, description, date, time, event_time, end_time,
         eventbrite_id, eventbrite_url, venue_id, eventbrite_capacity,
         eventbrite_category_id, eventbrite_subcategory_id, eventbrite_online_event,
-        slug, is_public
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+        slug, is_public, status
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+      ON CONFLICT (id) DO UPDATE SET
+        name = EXCLUDED.name,
+        description = EXCLUDED.description,
+        date = EXCLUDED.date,
+        eventbrite_url = EXCLUDED.eventbrite_url,
+        updated_at = NOW()
       RETURNING *
     `, [
-      userId, name, description, start_date.split('T')[0],
-      start_date.split('T')[1]?.substring(0, 5) || '19:00',
+      localEventId, userId, name, description,
+      start_date.split('T')[0],  // date column
+      start_date.split('T')[1]?.substring(0, 5) || '19:00',  // time column (legacy)
+      start_date.split('T')[1]?.substring(0, 5) || '19:00',  // event_time column
       end_date.split('T')[1]?.substring(0, 5) || '23:00',
       ebEvent.id, ebEvent.url, finalVenueId, capacity,
       category_id, subcategory_id, online_event,
-      slug, true  // is_public = true for shareable events
+      slug, true, 'upcoming'  // is_public = true, status = upcoming
     ]);
     console.log(`[${requestId}] ✅ Saved to local DB, local ID: ${localResult.rows[0].id}`);
 
