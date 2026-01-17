@@ -11,3 +11,4 @@ export { SmallBtn } from './SmallBtn';
 export { StatusBadge } from './StatusBadge';
 export { Input } from './Input';
 export { thStyle, tdStyle } from './tableStyles';
+export { ActionMenuPortal, ActionMenuModal, MenuSection, MenuItem, MenuDivider } from './ActionMenuPortal';

@@ -1,7 +1,7 @@
 // App.tsx - Refactored main application component
 // Reduced from ~8500 lines to ~600 lines using hooks and extracted components
 
-import { useEffect, useMemo, useState, useRef } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from './context/AuthContext';
 
 // Hooks
@@ -11,7 +11,7 @@ import { useAppState, useAppActions } from './hooks';
 import { DashboardLayout } from './components/layout';
 import { GuestImportModal } from './components/guests';
 import { AddGuestModal, SMSModal } from './components/modals';
-import { StatCard, MetricCard } from './components/common';
+import { StatCard, MetricCard, ActionMenuModal, MenuSection, MenuItem, MenuDivider } from './components/common';
 
 // Views
 import {
@@ -119,18 +119,6 @@ function App() {
 
   // State for action menu dropdown (must be before any conditional returns)
   const [openActionMenu, setOpenActionMenu] = useState<string | null>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
-
-  // Close menu when clicking outside
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
-        setOpenActionMenu(null);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
 
   // View helpers
   const getViewTitle = (): string => {
@@ -533,137 +521,97 @@ function App() {
                           )}
                         </td>
                         <td style={{ padding: '12px 16px' }}>
-                          <div style={{ position: 'relative' }} ref={openActionMenu === guest.id ? menuRef : null}>
-                            <button
-                              onClick={() => setOpenActionMenu(openActionMenu === guest.id ? null : guest.id)}
-                              style={{
-                                background: openActionMenu === guest.id ? '#1a1a1a' : 'transparent',
-                                border: '1px solid #333',
-                                color: '#888',
-                                padding: '6px 10px',
-                                borderRadius: 6,
-                                cursor: 'pointer',
-                                fontSize: 16,
-                                lineHeight: 1,
-                              }}
-                              title="Actions"
-                            >
-                              ⋮
-                            </button>
-                            {openActionMenu === guest.id && (
-                              <div style={{
-                                position: 'absolute',
-                                right: 0,
-                                top: '100%',
-                                marginTop: 4,
-                                background: '#1a1a1a',
-                                border: '1px solid #333',
-                                borderRadius: 8,
-                                padding: 4,
-                                minWidth: 180,
-                                zIndex: 100,
-                                boxShadow: '0 4px 20px rgba(0,0,0,0.5)',
-                              }}>
-                                {guest.category === 'pending' && (
-                                  <>
-                                    <button
-                                      onClick={() => { actions.approveGuest(guest, 'A', true); setOpenActionMenu(null); }}
-                                      style={{
-                                        display: 'flex', alignItems: 'center', gap: 10, width: '100%',
-                                        background: 'transparent', border: 'none', padding: '10px 12px',
-                                        color: '#fff', fontSize: 13, cursor: 'pointer', borderRadius: 6,
-                                        textAlign: 'left',
-                                      }}
-                                      onMouseEnter={(e) => e.currentTarget.style.background = '#22c55e20'}
-                                      onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-                                    >
-                                      <span style={{ color: '#22c55e' }}>⭐</span> Approve as VIP
-                                    </button>
-                                    <button
-                                      onClick={() => { actions.approveGuest(guest, 'B', true); setOpenActionMenu(null); }}
-                                      style={{
-                                        display: 'flex', alignItems: 'center', gap: 10, width: '100%',
-                                        background: 'transparent', border: 'none', padding: '10px 12px',
-                                        color: '#fff', fontSize: 13, cursor: 'pointer', borderRadius: 6,
-                                        textAlign: 'left',
-                                      }}
-                                      onMouseEnter={(e) => e.currentTarget.style.background = '#3b82f620'}
-                                      onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-                                    >
-                                      <span style={{ color: '#3b82f6' }}>🎯</span> Approve as Priority
-                                    </button>
-                                    <button
-                                      onClick={() => { actions.approveGuest(guest, 'C', true); setOpenActionMenu(null); }}
-                                      style={{
-                                        display: 'flex', alignItems: 'center', gap: 10, width: '100%',
-                                        background: 'transparent', border: 'none', padding: '10px 12px',
-                                        color: '#fff', fontSize: 13, cursor: 'pointer', borderRadius: 6,
-                                        textAlign: 'left',
-                                      }}
-                                      onMouseEnter={(e) => e.currentTarget.style.background = '#6b728020'}
-                                      onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-                                    >
-                                      <span style={{ color: '#6b7280' }}>👤</span> Approve as Standard
-                                    </button>
-                                    <button
-                                      onClick={() => { actions.rejectGuest(guest, false); setOpenActionMenu(null); }}
-                                      style={{
-                                        display: 'flex', alignItems: 'center', gap: 10, width: '100%',
-                                        background: 'transparent', border: 'none', padding: '10px 12px',
-                                        color: '#fff', fontSize: 13, cursor: 'pointer', borderRadius: 6,
-                                        textAlign: 'left',
-                                      }}
-                                      onMouseEnter={(e) => e.currentTarget.style.background = '#ef444420'}
-                                      onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-                                    >
-                                      <span style={{ color: '#ef4444' }}>✗</span> Reject Guest
-                                    </button>
-                                    <div style={{ height: 1, background: '#333', margin: '4px 0' }} />
-                                  </>
-                                )}
-                                <button
-                                  onClick={() => { actions.sendGuestEmail(guest, 'confirmation'); setOpenActionMenu(null); }}
-                                  style={{
-                                    display: 'flex', alignItems: 'center', gap: 10, width: '100%',
-                                    background: 'transparent', border: 'none', padding: '10px 12px',
-                                    color: '#fff', fontSize: 13, cursor: 'pointer', borderRadius: 6,
-                                    textAlign: 'left',
-                                  }}
-                                  onMouseEnter={(e) => e.currentTarget.style.background = '#d4af3720'}
-                                  onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-                                >
-                                  <span style={{ color: '#d4af37' }}>✉</span> Send Email
-                                </button>
-                                <button
-                                  onClick={() => { actions.sendGuestEmail(guest, 'approval'); setOpenActionMenu(null); }}
-                                  style={{
-                                    display: 'flex', alignItems: 'center', gap: 10, width: '100%',
-                                    background: 'transparent', border: 'none', padding: '10px 12px',
-                                    color: '#fff', fontSize: 13, cursor: 'pointer', borderRadius: 6,
-                                    textAlign: 'left',
-                                  }}
-                                  onMouseEnter={(e) => e.currentTarget.style.background = '#8b5cf620'}
-                                  onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-                                >
-                                  <span style={{ color: '#8b5cf6' }}>📧</span> Send Approval Email
-                                </button>
-                                <div style={{ height: 1, background: '#333', margin: '4px 0' }} />
-                                <button
-                                  onClick={() => { actions.removeGuest(guest.id); setOpenActionMenu(null); }}
-                                  style={{
-                                    display: 'flex', alignItems: 'center', gap: 10, width: '100%',
-                                    background: 'transparent', border: 'none', padding: '10px 12px',
-                                    color: '#ef4444', fontSize: 13, cursor: 'pointer', borderRadius: 6,
-                                    textAlign: 'left',
-                                  }}
-                                  onMouseEnter={(e) => e.currentTarget.style.background = '#ef444420'}
-                                  onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-                                >
-                                  <span>🗑</span> Remove Guest
-                                </button>
-                              </div>
+                          <button
+                            onClick={() => setOpenActionMenu(openActionMenu === guest.id ? null : guest.id)}
+                            style={{
+                              background: openActionMenu === guest.id ? '#1a1a1a' : 'transparent',
+                              border: '1px solid #333',
+                              color: '#888',
+                              padding: '6px 10px',
+                              borderRadius: 6,
+                              cursor: 'pointer',
+                              fontSize: 16,
+                              lineHeight: 1,
+                            }}
+                            title="Actions"
+                          >
+                            ⋮
+                          </button>
+                          <ActionMenuModal
+                            isOpen={openActionMenu === guest.id}
+                            onClose={() => setOpenActionMenu(null)}
+                            guestName={guest.name}
+                            guestEmail={guest.email}
+                          >
+                            {guest.category === 'pending' && (
+                              <>
+                                <MenuSection title="Approve Guest">
+                                  <MenuItem
+                                    icon="⭐"
+                                    label="Approve as VIP"
+                                    description="Category A - Top priority"
+                                    variant="success"
+                                    onClick={() => { actions.approveGuest(guest, 'A', true); setOpenActionMenu(null); }}
+                                  />
+                                  <MenuItem
+                                    icon="🎯"
+                                    label="Approve as Priority"
+                                    description="Category B - High priority"
+                                    onClick={() => { actions.approveGuest(guest, 'B', true); setOpenActionMenu(null); }}
+                                  />
+                                  <MenuItem
+                                    icon="👤"
+                                    label="Approve as Standard"
+                                    description="Category C - General admission"
+                                    onClick={() => { actions.approveGuest(guest, 'C', true); setOpenActionMenu(null); }}
+                                  />
+                                  <MenuItem
+                                    icon="✗"
+                                    label="Reject Guest"
+                                    description="Remove from list"
+                                    variant="danger"
+                                    onClick={() => { actions.rejectGuest(guest, false); setOpenActionMenu(null); }}
+                                  />
+                                </MenuSection>
+                                <MenuDivider />
+                              </>
                             )}
-                          </div>
+                            <MenuSection title="Communications">
+                              <MenuItem
+                                icon="✉️"
+                                label="Send Confirmation Email"
+                                description="Event details & confirmation"
+                                onClick={() => { actions.sendGuestEmail(guest, 'confirmation'); setOpenActionMenu(null); }}
+                              />
+                              <MenuItem
+                                icon="📧"
+                                label="Send Approval Email"
+                                description="Notify guest of approval"
+                                onClick={() => { actions.sendGuestEmail(guest, 'approval'); setOpenActionMenu(null); }}
+                              />
+                              {guest.phone && (
+                                <MenuItem
+                                  icon="📱"
+                                  label="Send SMS"
+                                  description={`Message to ${guest.phone}`}
+                                  variant="success"
+                                  onClick={() => {
+                                    state.setSmsFormData({ to: guest.phone!, message: '' });
+                                    state.setShowSmsModal(true);
+                                    setOpenActionMenu(null);
+                                  }}
+                                />
+                              )}
+                            </MenuSection>
+                            <MenuDivider />
+                            <MenuItem
+                              icon="🗑️"
+                              label="Remove Guest"
+                              description="Permanently delete from list"
+                              variant="danger"
+                              onClick={() => { actions.removeGuest(guest.id); setOpenActionMenu(null); }}
+                            />
+                          </ActionMenuModal>
                         </td>
                       </tr>
                     ))}
