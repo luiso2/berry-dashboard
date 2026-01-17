@@ -6051,9 +6051,9 @@ app.post('/api/v1/gpt/events', async (req, res) => {
         const fields = [];
         const values = [];
         let idx = 1;
-        // Map API field names to actual database columns (title, date, venue, category, status)
-        const allowedFields = ['title', 'date', 'category', 'venue', 'status'];
-        const fieldMap = { name: 'title', eventDate: 'date', eventType: 'category', venueName: 'venue', venueCity: 'venue' };
+        // Map API field names to actual database columns (name, date, venue, category, status)
+        const allowedFields = ['name', 'date', 'category', 'venue', 'status'];
+        const fieldMap = { name: 'name', eventDate: 'date', eventType: 'category', venueName: 'venue', venueCity: 'venue' };
 
         for (const [key, value] of Object.entries(data || {})) {
           const dbField = fieldMap[key] || key;
@@ -7754,7 +7754,7 @@ app.get('/api/v1/events/calendar', async (req, res) => {
     res.json({
       events: result.rows.map(row => ({
         id: row.id,
-        name: row.title,
+        name: row.name,
         eventDate: row.date,
         status: row.status,
         venue: row.venue,
@@ -8099,7 +8099,7 @@ app.post('/api/v1/events/:id/duplicate', async (req, res) => {
     }
 
     const event = original.rows[0];
-    const name = newName || `${event.title} (Copy)`;
+    const name = newName || `${event.name} (Copy)`;
 
     // Generate next ID
     const maxIdResult = await pool.query('SELECT COALESCE(MAX(CAST(id AS INTEGER)), 0) + 1 as next_id FROM events');
@@ -8379,9 +8379,9 @@ app.get('/api/v1/events/:eventId/budget', async (req, res) => {
     let budget = await pool.query('SELECT * FROM budgets WHERE event_id = $1', [eventId]);
 
     if (budget.rows.length === 0) {
-      // Get event title for budget
-      const event = await pool.query('SELECT title FROM events WHERE id = $1', [eventId]);
-      const eventName = event.rows[0]?.title || 'Event';
+      // Get event name for budget
+      const event = await pool.query('SELECT name FROM events WHERE id = $1', [eventId]);
+      const eventName = event.rows[0]?.name || 'Event';
 
       budget = await pool.query(
         `INSERT INTO budgets (event_id, name) VALUES ($1, $2) RETURNING *`,
@@ -9245,7 +9245,7 @@ app.post('/api/v1/events/:eventId/client-access', async (req, res) => {
     }
 
     // Get event details for the email
-    const eventResult = await pool.query('SELECT title, date, venue FROM events WHERE id = $1', [eventId]);
+    const eventResult = await pool.query('SELECT name, date, venue FROM events WHERE id = $1', [eventId]);
     const event = eventResult.rows[0];
 
     const accessToken = generateAccessToken();
@@ -9266,7 +9266,7 @@ app.post('/api/v1/events/:eventId/client-access', async (req, res) => {
     let emailSent = false;
     if (sendEmail && process.env.RESEND_API_KEY) {
       try {
-        const eventName = event?.title || 'Event';
+        const eventName = event?.name || 'Event';
         const eventDate = event?.date ? new Date(event.date).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }) : '';
         const venue = event?.venue || '';
 
@@ -12195,11 +12195,11 @@ app.post('/api/v1/integrations/eventbrite/sync', async (req, res) => {
         const eventStatus = event.status === 'live' ? 'upcoming' : (event.status === 'ended' ? 'past' : 'planning');
 
         if (existingEvent.rows.length > 0) {
-          // Update existing event (use berry-bly schema: title, date, time, venue, category)
+          // Update existing event (use name column, not title)
           // IMPORTANT: Also filter by user_id for multi-tenant security
           await pool.query(`
             UPDATE events SET
-              title = $1,
+              name = $1,
               description = $2,
               date = $3,
               time = $4,
