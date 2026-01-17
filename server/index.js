@@ -10728,6 +10728,14 @@ app.post('/api/v1/telnyx/send-sms', async (req, res) => {
       return res.status(400).json({ error: 'Phone number (to) and message are required' });
     }
 
+    // Normalize phone number to E.164 format
+    let normalizedTo = to.replace(/[^\d+]/g, ''); // Remove all non-digit characters except +
+    if (!normalizedTo.startsWith('+')) {
+      // Assume US number if no country code
+      normalizedTo = normalizedTo.startsWith('1') ? `+${normalizedTo}` : `+1${normalizedTo}`;
+    }
+    console.log('SMS: Normalized phone number:', { original: to, normalized: normalizedTo });
+
     let apiKey = null;
     let extraConfig = {};
 
@@ -10776,7 +10784,7 @@ app.post('/api/v1/telnyx/send-sms', async (req, res) => {
 
     const payload = {
       from: fromNumber,
-      to: to,
+      to: normalizedTo,
       text: message
     };
 
