@@ -397,7 +397,7 @@ export function useAppActions(state: AppState, token?: string, userId?: number) 
     try {
       await Promise.all(ids.map(id =>
         fetch(`${API_URL}${ENDPOINTS.guests}/${id}`, {
-          method: 'PATCH',
+          method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ category })
         })
@@ -414,7 +414,7 @@ export function useAppActions(state: AppState, token?: string, userId?: number) 
   const checkInGuest = useCallback(async (guest: Guest) => {
     try {
       const res = await fetch(`${API_URL}${ENDPOINTS.guests}/${guest.id}`, {
-        method: 'PATCH',
+        method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ checkedInAt: new Date().toISOString() })
       });
@@ -554,7 +554,7 @@ export function useAppActions(state: AppState, token?: string, userId?: number) 
     try {
       // Update category
       const res = await fetch(`${API_URL}${ENDPOINTS.guests}/${guest.id}`, {
-        method: 'PATCH',
+        method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ category })
       });
@@ -583,7 +583,7 @@ export function useAppActions(state: AppState, token?: string, userId?: number) 
   const rejectGuest = useCallback(async (guest: Guest, _sendEmail: boolean = false) => {
     try {
       const res = await fetch(`${API_URL}${ENDPOINTS.guests}/${guest.id}`, {
-        method: 'PATCH',
+        method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ category: 'rejected' })
       });
@@ -632,7 +632,7 @@ export function useAppActions(state: AppState, token?: string, userId?: number) 
     try {
       await Promise.all(guestIds.map(id =>
         fetch(`${API_URL}${ENDPOINTS.guests}/${id}`, {
-          method: 'PATCH',
+          method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ category })
         })
