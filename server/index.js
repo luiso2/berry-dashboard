@@ -3928,22 +3928,42 @@ app.get('/api/health', async (req, res) => {
 // ============================================
 
 // Helper to transform guest_lists table row to frontend format
-const transformToGuestList = (row) => ({
-  id: String(row.id),
-  eventId: row.event_id || 'default',
-  name: row.name,
-  email: row.email,
-  phone: row.phone || '',
-  instagram: row.instagram || '',
-  numberOfGuests: row.number_of_guests || 1,
-  vipPreferences: row.vip_preferences || '',
-  status: row.status || 'pending',
-  notes: row.notes || '',
-  emailSent: row.email_sent || false,
-  emailSentAt: row.email_sent_at ? row.email_sent_at.toISOString() : null,
-  createdAt: row.created_at ? row.created_at.toISOString() : new Date().toISOString(),
-  updatedAt: row.updated_at ? row.updated_at.toISOString() : row.created_at ? row.created_at.toISOString() : new Date().toISOString(),
-});
+const transformToGuestList = (row) => {
+  // Map status to category for frontend compatibility
+  const statusToCategoryMap = {
+    'pending': 'pending',
+    'approved': 'A',
+    'rejected': 'rejected',
+  };
+
+  // Check if vip_preferences contains a category (A, B, C, vip, priority, standard)
+  const storedCategory = row.vip_preferences;
+  const categoryFromVip = ['A', 'B', 'C', 'vip', 'priority', 'standard'].includes(storedCategory)
+    ? storedCategory
+    : null;
+
+  // Use stored category if available, otherwise map from status
+  const category = categoryFromVip || statusToCategoryMap[row.status] || 'pending';
+
+  return {
+    id: String(row.id),
+    eventId: row.event_id || 'default',
+    name: row.name,
+    email: row.email,
+    phone: row.phone || '',
+    instagram: row.instagram || '',
+    numberOfGuests: row.number_of_guests || 1,
+    partySize: row.number_of_guests || 1,
+    vipPreferences: categoryFromVip ? '' : (row.vip_preferences || ''),
+    category: category,
+    status: row.status || 'pending',
+    notes: row.notes || '',
+    emailSent: row.email_sent || false,
+    emailSentAt: row.email_sent_at ? row.email_sent_at.toISOString() : null,
+    createdAt: row.created_at ? row.created_at.toISOString() : new Date().toISOString(),
+    updatedAt: row.updated_at ? row.updated_at.toISOString() : row.created_at ? row.created_at.toISOString() : new Date().toISOString(),
+  };
+};
 
 // GET /api/v1/guest-lists - List all guests (LOCAL - reads from guest_lists table)
 app.get('/api/v1/guest-lists', async (req, res) => {
@@ -4069,18 +4089,42 @@ app.post('/api/v1/guest-lists', async (req, res) => {
 });
 
 // PATCH /api/v1/guest-lists/:id - Update guest (LOCAL - updates guest_lists table)
-app.patch('/api/v1/guest-lists/:id', async (req, res) => {
+// Also handles PUT for frontend compatibility
+const updateGuestListHandler = async (req, res) => {
   try {
     const { id } = req.params;
-    const { status, notes, emailSent, emailSentAt } = req.body;
+    // Accept both 'status' and 'category' for frontend compatibility
+    const { status, category, notes, emailSent, emailSentAt } = req.body;
+
+    // Map category to status if provided
+    const categoryToStatusMap = {
+      'A': 'approved',
+      'B': 'approved',
+      'C': 'approved',
+      'pending': 'pending',
+      'rejected': 'rejected',
+      'approved': 'approved',
+      'vip': 'approved',
+      'priority': 'approved',
+      'standard': 'approved'
+    };
+
+    const finalStatus = status || (category ? categoryToStatusMap[category] || 'approved' : null);
+    const finalCategory = category || status;
 
     const updates = [];
     const params = [];
     let paramIndex = 1;
 
-    if (status) {
+    if (finalStatus) {
       updates.push(`status = $${paramIndex++}`);
-      params.push(status);
+      params.push(finalStatus);
+    }
+
+    // Store category in vip_preferences field for now (or notes)
+    if (category && ['A', 'B', 'C', 'vip', 'priority', 'standard'].includes(category)) {
+      updates.push(`vip_preferences = $${paramIndex++}`);
+      params.push(category);
     }
     if (notes !== undefined) {
       updates.push(`notes = COALESCE(notes, '') || $${paramIndex++}`);
@@ -4117,7 +4161,11 @@ app.patch('/api/v1/guest-lists/:id', async (req, res) => {
     console.error('Error updating guest:', error);
     res.status(500).json({ error: 'Failed to update guest' });
   }
-});
+};
+
+// Register both PATCH and PUT for frontend compatibility
+app.patch('/api/v1/guest-lists/:id', updateGuestListHandler);
+app.put('/api/v1/guest-lists/:id', updateGuestListHandler);
 
 // DELETE /api/v1/guest-lists/:id - Delete guest (LOCAL - deletes from guest_lists table)
 app.delete('/api/v1/guest-lists/:id', async (req, res) => {
