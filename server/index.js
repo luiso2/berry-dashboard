@@ -6034,7 +6034,7 @@ app.post('/api/v1/gpt/events', async (req, res) => {
         const maxIdResult = await pool.query('SELECT COALESCE(MAX(CAST(id AS INTEGER)), 0) + 1 as next_id FROM events');
         const nextId = maxIdResult.rows[0].next_id;
         const result = await pool.query(`
-          INSERT INTO events (id, title, date, category, venue, status, user_id)
+          INSERT INTO events (id, name, date, category, venue, status, user_id)
           VALUES ($1, $2, $3, $4, $5, 'planning', $6) RETURNING *
         `, [nextId.toString(), name, eventDate, category, venue, userId]);
         const createdEvent = mapEventRow(result.rows[0]);
@@ -7935,9 +7935,9 @@ app.post('/api/v1/events', async (req, res) => {
     const timestamp = Date.now().toString(36);
     const eventId = `evt_${slug}_${timestamp}`;
 
-    // Use actual database columns: title, date, venue, category, status
+    // Use actual database columns: name, date, venue, category, status
     const result = await pool.query(
-      `INSERT INTO events (id, title, date, venue, category, status)
+      `INSERT INTO events (id, name, date, venue, category, status)
        VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING *`,
       [eventId, name, eventDate, venue, category, status || 'planning']
@@ -8105,9 +8105,9 @@ app.post('/api/v1/events/:id/duplicate', async (req, res) => {
     const maxIdResult = await pool.query('SELECT COALESCE(MAX(CAST(id AS INTEGER)), 0) + 1 as next_id FROM events');
     const nextId = maxIdResult.rows[0].next_id;
 
-    // Use actual database columns: title, date, venue, category, status
+    // Use actual database columns: name, date, venue, category, status
     const result = await pool.query(
-      `INSERT INTO events (id, title, date, venue, category, status)
+      `INSERT INTO events (id, name, date, venue, category, status)
        VALUES ($1, $2, $3, $4, $5, 'planning')
        RETURNING *`,
       [nextId.toString(), name, newDate || event.date, event.venue, event.category]
@@ -12232,7 +12232,7 @@ app.post('/api/v1/integrations/eventbrite/sync', async (req, res) => {
             // Use 'nightlife' as default category (only 'corporate' and 'nightlife' are valid)
             // Include user_id for multi-tenant support
             await pool.query(`
-              INSERT INTO events (id, title, description, date, time, status, category, external_id, external_source, eventbrite_url, user_id)
+              INSERT INTO events (id, name, description, date, time, status, category, external_id, external_source, eventbrite_url, user_id)
               VALUES ($1, $2, $3, $4, $5, $6, 'nightlife', $7, 'eventbrite', $8, $9)
             `, [
               nextId.toString(),
@@ -12249,10 +12249,10 @@ app.post('/api/v1/integrations/eventbrite/sync', async (req, res) => {
           } catch (insertErr) {
             console.error(`❌ Failed to insert event ${event.name?.text}:`, insertErr.message);
             insertErrors.push({ event: event.name?.text, error: insertErr.message });
-            // Try fallback insert with minimal columns (title and date are required)
+            // Try fallback insert with minimal columns (name and date are required)
             try {
               await pool.query(`
-                INSERT INTO events (id, title, date, status, category, user_id)
+                INSERT INTO events (id, name, date, status, category, user_id)
                 VALUES ($1, $2, $3, $4, 'nightlife', $5)
               `, [
                 nextId.toString(),
@@ -13326,7 +13326,7 @@ app.post('/api/v1/integrations/eventbrite/sync-all', async (req, res) => {
               const nextIdResult = await pool.query("SELECT COALESCE(MAX(CAST(id AS INTEGER)), 0) + 1 as next_id FROM events WHERE id ~ '^[0-9]+$'");
               const nextId = nextIdResult.rows[0].next_id;
               await pool.query(`
-                INSERT INTO events (id, title, description, date, time, status, category, external_id, external_source, eventbrite_url, venue_id, eventbrite_category_id, eventbrite_is_free, eventbrite_capacity, user_id)
+                INSERT INTO events (id, name, description, date, time, status, category, external_id, external_source, eventbrite_url, venue_id, eventbrite_category_id, eventbrite_is_free, eventbrite_capacity, user_id)
                 VALUES ($1, $2, $3, $4, $5, $6, 'nightlife', $7, 'eventbrite', $8, $9, $10, $11, $12, $13)
               `, [
                 nextId.toString(), event.name?.text, event.description?.text, eventDate, startTime,
