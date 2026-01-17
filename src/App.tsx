@@ -815,10 +815,17 @@ function App() {
         formData={state.smsFormData}
         onFormChange={state.setSmsFormData}
         onSend={async () => {
+          if (!state.smsFormData.to || !state.smsFormData.message) {
+            actions.addToast('Please enter phone number and message', 'error');
+            return;
+          }
           state.setSmsSending(true);
+          const success = await actions.sendSMS(state.smsFormData.to, state.smsFormData.message);
           state.setSmsSending(false);
-          state.setShowSmsModal(false);
-          actions.addToast('SMS sent!', 'success');
+          if (success) {
+            state.setShowSmsModal(false);
+            state.setSmsFormData({ to: '', message: '' });
+          }
         }}
         sending={state.smsSending}
       />

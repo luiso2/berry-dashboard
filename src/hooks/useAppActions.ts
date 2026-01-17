@@ -478,35 +478,29 @@ export function useAppActions(state: AppState, token?: string, userId?: number) 
     }
   }, [fetchSponsors, addToast]);
 
-  // Send Email to Guest (approval/confirmation)
-  const sendGuestEmail = useCallback(async (guest: Guest, emailType: 'approval' | 'confirmation' | 'custom', _customMessage?: string) => {
+  // Send Email to Guest (approval/confirmation) - Actually sends via backend
+  const sendGuestEmail = useCallback(async (guest: Guest, emailType: 'approval' | 'confirmation' | 'custom', customMessage?: string) => {
     try {
-      // First, update the guest record to mark email as sent
-      const updateRes = await fetch(`${API_URL}${ENDPOINTS.guests}/${guest.id}`, {
-        method: 'PATCH',
+      const res = await fetch(`${API_URL}${ENDPOINTS.guests}/${guest.id}/send-invitation`, {
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          emailSent: true,
-          emailSentAt: new Date().toISOString()
+          category: guest.category || 'pending',
+          customMessage: customMessage || '',
+          emailOnly: true // Don't change category, just send email
         })
       });
 
-      if (updateRes.ok) {
+      const data = await res.json();
+
+      if (res.ok && data.success) {
         setGuests(prev => prev.map(g =>
           g.id === guest.id ? { ...g, emailSent: true, emailSentAt: new Date().toISOString() } : g
         ));
-
-        // Try to send email via Resend MCP (if available)
-        // For now, we mark as sent - actual email sending happens via backend webhook or manual process
-        const emailTypeLabels = {
-          approval: 'approval',
-          confirmation: 'confirmation',
-          custom: 'custom'
-        };
-        addToast(`${emailTypeLabels[emailType]} email marked for ${guest.name}`, 'success');
+        addToast(`${emailType} email sent to ${guest.name}`, 'success');
         return true;
       } else {
-        addToast('Failed to update email status', 'error');
+        addToast(data.error || 'Failed to send email', 'error');
         return false;
       }
     } catch (error) {
@@ -516,37 +510,36 @@ export function useAppActions(state: AppState, token?: string, userId?: number) 
     }
   }, [setGuests, addToast]);
 
-  // Send Bulk Emails to Multiple Guests
+  // Send Bulk Emails to Multiple Guests - Actually sends via backend
   const sendBulkGuestEmails = useCallback(async (
     guestIds: string[],
     emailType: 'approval' | 'confirmation' | 'reminder' | 'custom',
-    _subject?: string,
-    _customMessage?: string
+    subject?: string,
+    customMessage?: string
   ) => {
     try {
-      // Update all guests to mark emails as sent
-      const updatePromises = guestIds.map(id =>
-        fetch(`${API_URL}${ENDPOINTS.guests}/${id}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            emailSent: true,
-            emailSentAt: new Date().toISOString()
-          })
+      const res = await fetch(`${API_URL}${ENDPOINTS.guests}/bulk-send`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          guestIds,
+          category: emailType === 'approval' ? 'A' : undefined,
+          customMessage: customMessage || subject || '',
+          emailOnly: true
         })
-      );
+      });
 
-      const results = await Promise.all(updatePromises);
-      const successCount = results.filter(r => r.ok).length;
+      const data = await res.json();
 
-      if (successCount > 0) {
+      if (res.ok) {
+        const successCount = data.results?.filter((r: any) => r.success).length || guestIds.length;
         setGuests(prev => prev.map(g =>
           guestIds.includes(g.id) ? { ...g, emailSent: true, emailSentAt: new Date().toISOString() } : g
         ));
-        addToast(`${emailType} emails marked for ${successCount} guests`, 'success');
+        addToast(`${emailType} emails sent to ${successCount} guests`, 'success');
         return true;
       } else {
-        addToast('Failed to update email status', 'error');
+        addToast(data.error || 'Failed to send bulk emails', 'error');
         return false;
       }
     } catch (error) {
@@ -609,6 +602,31 @@ export function useAppActions(state: AppState, token?: string, userId?: number) 
     }
   }, [setGuests, addToast]);
 
+  // Send SMS to a phone number - Actually sends via Telnyx backend
+  const sendSMS = useCallback(async (to: string, message: string) => {
+    try {
+      const res = await fetch(`${API_URL}/telnyx/send-sms`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ to, message })
+      });
+
+      const data = await res.json();
+
+      if (res.ok && data.success) {
+        addToast(`SMS sent to ${to}`, 'success');
+        return true;
+      } else {
+        addToast(data.error || 'Failed to send SMS', 'error');
+        return false;
+      }
+    } catch (error) {
+      console.error('Error sending SMS:', error);
+      addToast('Failed to send SMS', 'error');
+      return false;
+    }
+  }, [addToast]);
+
   // Bulk Approve Guests
   const bulkApproveGuests = useCallback(async (guestIds: string[], category: GuestCategory, sendEmails: boolean = true) => {
     try {
@@ -665,6 +683,8 @@ export function useAppActions(state: AppState, token?: string, userId?: number) 
     approveGuest,
     rejectGuest,
     bulkApproveGuests,
+    // SMS
+    sendSMS,
   };
 }
 
