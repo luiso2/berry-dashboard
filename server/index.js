@@ -5425,7 +5425,7 @@ app.get('/api/v1/sponsor-portal/:token', async (req, res) => {
     let events = [];
     if (sponsor.event_id) {
       const eventResult = await pool.query(
-        `SELECT id, title, date, description, status, venue
+        `SELECT id, COALESCE(name, title) as name, COALESCE(date, event_date) as date, description, status, venue
          FROM events WHERE id = $1`,
         [sponsor.event_id]
       );
@@ -5433,8 +5433,8 @@ app.get('/api/v1/sponsor-portal/:token', async (req, res) => {
     } else {
       // Get all events (sponsor may have sponsored multiple)
       const eventResult = await pool.query(
-        `SELECT id, title, date, description, status, venue
-         FROM events ORDER BY date DESC LIMIT 10`
+        `SELECT id, COALESCE(name, title) as name, COALESCE(date, event_date) as date, description, status, venue
+         FROM events ORDER BY COALESCE(date, event_date) DESC LIMIT 10`
       );
       events = eventResult.rows;
     }
@@ -5501,7 +5501,7 @@ app.get('/api/v1/sponsor-portal/:token', async (req, res) => {
       },
       events: events.map(e => ({
         id: e.id,
-        title: e.title,
+        title: e.name,
         date: e.date,
         status: e.status,
         venueName: e.venue || null,
@@ -5638,11 +5638,11 @@ app.post('/api/v1/sponsors/:id/send-portal-link', async (req, res) => {
 // ============================================
 
 // Helper to transform event row
-// Transform event from berry-bly-productions schema
+// Transform event from berry-bly-productions schema (supports both legacy and new column names)
 const transformEvent = (row) => ({
   id: row.id,
-  name: row.title || row.name,
-  title: row.title,
+  name: row.name || row.title,
+  title: row.name || row.title,
   slug: row.slug,
   description: row.description,
   eventType: row.category || row.event_type,
@@ -5652,9 +5652,9 @@ const transformEvent = (row) => ({
   venueId: row.venue_id,
   venueAddress: row.venue_address,
   venueCity: row.venue_city,
-  venueCapacity: row.venue_capacity,
+  venueCapacity: row.venue_capacity || row.eventbrite_capacity,
   eventDate: row.date || row.event_date,
-  date: row.date,
+  date: row.date || row.event_date,
   time: row.time,
   startTime: row.time || row.start_time,
   endTime: row.end_time,
@@ -5673,7 +5673,7 @@ const transformEvent = (row) => ({
   guestListEnabled: row.guest_list_enabled,
   tableMapEnabled: row.table_map_enabled,
   sortOrder: row.sort_order,
-  expectedAttendance: row.expected_attendance,
+  expectedAttendance: row.eventbrite_capacity || row.expected_attendance,
   actualAttendance: row.actual_attendance,
   notes: row.notes,
   createdAt: row.created_at,
@@ -9382,8 +9382,11 @@ app.get('/api/v1/client-portal/:token', async (req, res) => {
 
     // Validate token
     const accessResult = await pool.query(`
-      SELECT ca.*, e.name as event_name, e.date as event_date, e.venue,
-             e.status as event_status
+      SELECT ca.*, e.name as event_name, COALESCE(e.event_date, e.date) as event_date,
+             COALESCE(e.venue, e.venue_name) as venue,
+             e.status as event_status,
+             COALESCE(e.eventbrite_capacity, e.expected_attendance) as capacity,
+             e.category
       FROM client_access ca
       JOIN events e ON ca.event_id = e.id
       WHERE ca.access_token = $1
@@ -9416,12 +9419,10 @@ app.get('/api/v1/client-portal/:token', async (req, res) => {
         id: access.event_id,
         name: access.event_name,
         date: access.event_date,
-        venue: access.venue_name,
-        city: access.venue_city,
+        venue: access.venue,
         status: access.event_status,
-        expectedAttendance: access.expected_attendance,
-        theme: access.theme,
-        dressCode: access.dress_code
+        expectedAttendance: access.capacity,
+        category: access.category
       },
       permissions: access.permissions
     };
@@ -13311,7 +13312,7 @@ app.post('/api/v1/integrations/eventbrite/sync-all', async (req, res) => {
               // Update - also filter by user_id for multi-tenant security
               await pool.query(`
                 UPDATE events SET
-                  title = $1, description = $2, date = $3, time = $4, status = $5,
+                  name = $1, description = $2, date = $3, time = $4, status = $5,
                   eventbrite_url = $6, venue_id = $7, eventbrite_category_id = $8,
                   eventbrite_is_free = $9, eventbrite_capacity = $10, updated_at = NOW()
                 WHERE external_id = $11 AND external_source = 'eventbrite'
@@ -13552,11 +13553,11 @@ app.get('/api/v1/integrations/eventbrite/metrics', async (req, res) => {
       eventsResult = await pool.query(`
         SELECT
           e.id,
-          COALESCE(e.title, e.name) as name,
+          COALESCE(e.name, e.title) as name,
           COALESCE(e.date, e.event_date)::text as "startDate",
           COALESCE(e.venue, e.venue_name, 'TBD') as venue,
           e.status,
-          e.expected_attendance as capacity,
+          COALESCE(e.eventbrite_capacity, e.expected_attendance) as capacity,
           e.eventbrite_url
         FROM events e
         WHERE e.user_id = $1::integer
@@ -17091,11 +17092,11 @@ app.post('/api/v1/ai/query', async (req, res) => {
     switch (query_type) {
       case 'events': {
         const events = await pool.query(`
-          SELECT id, name, event_date, event_type, venue_name, venue_city,
-                 expected_attendance, dress_code, theme, status
+          SELECT id, name, COALESCE(event_date, date) as event_date,
+                 category, venue, eventbrite_capacity, status
           FROM events
           WHERE status != 'cancelled'
-          ORDER BY event_date DESC
+          ORDER BY COALESCE(event_date, date) DESC NULLS LAST
           LIMIT 10
         `);
         result = {
@@ -17105,12 +17106,12 @@ app.post('/api/v1/ai/query', async (req, res) => {
             id: e.id,
             name: e.name,
             date: e.event_date,
-            type: e.event_type,
-            venue: e.venue_name,
-            city: e.venue_city,
-            attendance: e.expected_attendance,
-            dressCode: e.dress_code,
-            theme: e.theme,
+            type: e.category,
+            venue: e.venue,
+            city: null,
+            attendance: e.eventbrite_capacity,
+            dressCode: null,
+            theme: null,
             status: e.status
           }))
         };
@@ -17120,7 +17121,7 @@ app.post('/api/v1/ai/query', async (req, res) => {
       case 'guests': {
         let guestQuery = `
           SELECT g.id, g.name, g.email, g.phone, g.status, g.party_size, g.category,
-                 e.name as event_name, e.event_date
+                 e.name as event_name, COALESCE(e.event_date, e.date) as event_date
           FROM guests g
           LEFT JOIN events e ON g.event_id = e.id
           WHERE 1=1
@@ -17220,7 +17221,7 @@ app.post('/api/v1/ai/query', async (req, res) => {
         let tableQuery = `
           SELECT tr.id, tr.table_name, tr.zone, tr.customer_name, tr.customer_email,
                  tr.customer_phone, tr.party_size, tr.minimum_spend, tr.status,
-                 e.name as event_name, e.event_date
+                 e.name as event_name, COALESCE(e.event_date, e.date) as event_date
           FROM table_reservations tr
           LEFT JOIN events e ON tr.event_id = e.id
           WHERE tr.status != 'cancelled'
@@ -17232,7 +17233,7 @@ app.post('/api/v1/ai/query', async (req, res) => {
           tableQuery += ` AND tr.event_id = $${params.length}`;
         }
 
-        tableQuery += ` ORDER BY e.event_date DESC, tr.created_at DESC LIMIT 20`;
+        tableQuery += ` ORDER BY COALESCE(e.event_date, e.date) DESC, tr.created_at DESC LIMIT 20`;
 
         const tables = await pool.query(tableQuery, params);
         result = {
@@ -17260,7 +17261,7 @@ app.post('/api/v1/ai/query', async (req, res) => {
         let ticketQuery = `
           SELECT t.id, t.ticket_type, t.holder_name, t.holder_email, t.price,
                  t.is_checked_in, t.qr_code,
-                 e.name as event_name, e.event_date
+                 e.name as event_name, COALESCE(e.event_date, e.date) as event_date
           FROM tickets t
           LEFT JOIN events e ON t.event_id = e.id
           WHERE 1=1
@@ -17308,10 +17309,12 @@ app.post('/api/v1/ai/query', async (req, res) => {
 
         // Get upcoming events
         const upcomingEvents = await pool.query(`
-          SELECT name, event_date, venue_name, expected_attendance
+          SELECT name, COALESCE(event_date, date) as event_date,
+                 COALESCE(venue, venue_name) as venue,
+                 COALESCE(eventbrite_capacity, expected_attendance) as capacity
           FROM events
-          WHERE event_date >= CURRENT_DATE AND status != 'cancelled'
-          ORDER BY event_date ASC
+          WHERE COALESCE(event_date, date) >= CURRENT_DATE AND status != 'cancelled'
+          ORDER BY COALESCE(event_date, date) ASC
           LIMIT 3
         `);
 
@@ -17327,8 +17330,8 @@ app.post('/api/v1/ai/query', async (req, res) => {
           upcomingEvents: upcomingEvents.rows.map(e => ({
             name: e.name,
             date: e.event_date,
-            venue: e.venue_name,
-            expectedAttendance: e.expected_attendance
+            venue: e.venue,
+            expectedAttendance: e.capacity
           })),
           companyInfo: {
             name: 'Berry Bly Productions',
