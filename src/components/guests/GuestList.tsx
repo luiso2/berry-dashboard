@@ -129,6 +129,7 @@ export const GuestList = ({
                   {showActions && (
                     <>
                       <SmallBtn onClick={() => openModal([guest], null, true)} label="✉" title="Send Email" color="#22c55e" />
+                      {guest.phone && <SmallBtn onClick={() => openSmsToGuest(guest)} label="📱" title="Send SMS" color="#00C08B" />}
                       <SmallBtn onClick={() => openReminderModal([guest])} label="🔔" title="Send Reminder" color="#f59e0b" />
                       <SmallBtn onClick={() => openModal([guest], 'A')} label="VIP" title="Move to VIP" color="#a78bfa" />
                       <SmallBtn onClick={() => openModal([guest], 'B')} label="Pri" title="Move to Priority" color="#60a5fa" />
@@ -223,6 +224,7 @@ export const GuestList = ({
                 {showActions && (
                   <>
                     <SmallBtn onClick={() => openModal([guest], null, true)} label="✉ Email" title="Send Email" color="#22c55e" />
+                    {guest.phone && <SmallBtn onClick={() => openSmsToGuest(guest)} label="📱 SMS" title="Send SMS" color="#00C08B" />}
                     <SmallBtn onClick={() => openReminderModal([guest])} label="🔔 Reminder" title="Send Reminder" color="#f59e0b" />
                     <SmallBtn onClick={() => openModal([guest], 'A')} label="VIP" title="Move to VIP" color="#a78bfa" />
                     <SmallBtn onClick={() => openModal([guest], 'B')} label="Priority" title="Move to Priority" color="#60a5fa" />
