@@ -10743,7 +10743,7 @@ app.post('/api/v1/telnyx/send-sms', async (req, res) => {
       }
     }
 
-    // Fallback to global integration
+    // Fallback to global integration from database
     if (!apiKey) {
       const result = await pool.query('SELECT * FROM integrations WHERE provider = $1', ['telnyx']);
       const integration = result.rows[0];
@@ -10753,12 +10753,18 @@ app.post('/api/v1/telnyx/send-sms', async (req, res) => {
       }
     }
 
+    // Final fallback to environment variable
+    if (!apiKey && TELNYX_API_KEY) {
+      apiKey = TELNYX_API_KEY;
+      console.log('SMS: Using environment variable TELNYX_API_KEY');
+    }
+
     if (!apiKey) {
       console.log('SMS Error: No API key found for user:', userId);
       return res.status(400).json({ error: 'Telnyx integration not configured. Please connect Telnyx in Integrations.' });
     }
 
-    const fromNumber = from || extraConfig.phone_number;
+    const fromNumber = from || extraConfig.phone_number || TELNYX_PHONE_NUMBER;
     const messagingProfileId = extraConfig.messaging_profile_id;
 
     console.log('SMS Config:', { hasApiKey: !!apiKey, fromNumber, messagingProfileId });
