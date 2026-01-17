@@ -26,3 +26,6 @@ server/.env
 *.njsproj
 *.sln
 *.sw?
+
+# Railway local config
+.railway/
