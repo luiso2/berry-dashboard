@@ -589,19 +589,21 @@ function App() {
                                 description="Notify guest of approval"
                                 onClick={() => { actions.sendGuestEmail(guest, 'approval'); setOpenActionMenu(null); }}
                               />
-                              {guest.phone && (
-                                <MenuItem
-                                  icon="📱"
-                                  label="Send SMS"
-                                  description={`Message to ${guest.phone}`}
-                                  variant="success"
-                                  onClick={() => {
-                                    state.setSmsFormData({ to: guest.phone!, message: '' });
+                              <MenuItem
+                                icon="📱"
+                                label="Send SMS"
+                                description={guest.phone ? `Message to ${guest.phone}` : 'Add phone number first'}
+                                variant="success"
+                                onClick={() => {
+                                  if (guest.phone) {
+                                    state.setSmsFormData({ to: guest.phone, message: '' });
                                     state.setShowSmsModal(true);
-                                    setOpenActionMenu(null);
-                                  }}
-                                />
-                              )}
+                                  } else {
+                                    actions.addToast('This guest has no phone number', 'error');
+                                  }
+                                  setOpenActionMenu(null);
+                                }}
+                              />
                             </MenuSection>
                             <MenuDivider />
                             <MenuItem
