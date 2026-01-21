@@ -15,15 +15,3 @@ export const statusToCategory = (status: string): GuestCategory => {
   }
 };
 
-/**
- * Convert dashboard category to backend status
- */
-export const categoryToStatus = (category: GuestCategory): string => {
-  switch (category) {
-    case 'A': return 'approved';
-    case 'B': return 'approved'; // B also maps to approved
-    case 'C': return 'declined';
-    case 'rejected': return 'rejected';
-    default: return 'pending';
-  }
-};

@@ -5,29 +5,21 @@ import type { Guest } from '../types';
 /**
  * Intelligent follower estimation based on username patterns
  */
-export const estimateFollowers = (instagram: string): number => {
+const estimateFollowers = (instagram: string): number => {
   if (!instagram) return 0;
   const username = instagram.replace('@', '');
 
-  // Username characteristics analysis
   const usernameLength = username.length;
   const hasNumbers = /\d/.test(username);
   const hasUnderscore = username.includes('_');
   const hasDot = username.includes('.');
 
-  // Shorter usernames = older/more established (harder to get)
   let baseEstimate = Math.max(100, 10000 - (usernameLength * 500));
 
-  // Accounts with numbers are typically newer
   if (hasNumbers) baseEstimate *= 0.5;
-
-  // Underscores = often personal/newer accounts
   if (hasUnderscore) baseEstimate *= 0.7;
-
-  // Dots often indicate professional accounts
   if (hasDot) baseEstimate *= 1.2;
 
-  // Add deterministic variation based on username
   const hash = username.split('').reduce((a, b) => a + b.charCodeAt(0), 0);
   const multiplier = 0.5 + (hash % 100) / 100;
 
