@@ -15702,13 +15702,14 @@ app.post('/api/v1/integrations/eventbrite/events', async (req, res) => {
         id, user_id, name, description, date, time, event_time, end_time,
         eventbrite_id, eventbrite_url, venue_id, eventbrite_capacity,
         eventbrite_category_id, eventbrite_subcategory_id, eventbrite_online_event,
-        slug, is_public, status
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+        slug, is_public, status, flyer_url
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
       ON CONFLICT (id) DO UPDATE SET
         name = EXCLUDED.name,
         description = EXCLUDED.description,
         date = EXCLUDED.date,
         eventbrite_url = EXCLUDED.eventbrite_url,
+        flyer_url = EXCLUDED.flyer_url,
         updated_at = NOW()
       RETURNING *
     `, [
@@ -15719,7 +15720,7 @@ app.post('/api/v1/integrations/eventbrite/events', async (req, res) => {
       end_date.split('T')[1]?.substring(0, 5) || '23:00',
       ebEvent.id, ebEvent.url, finalVenueId, capacity,
       category_id, subcategory_id, online_event,
-      slug, true, 'upcoming'  // is_public = true, status = upcoming
+      slug, true, 'upcoming', logo_url  // is_public = true, status = upcoming, flyer_url
     ]);
     console.log(`[${requestId}] ✅ Saved to local DB, local ID: ${localResult.rows[0].id}`);
 
