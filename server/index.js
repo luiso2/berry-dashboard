@@ -15658,25 +15658,34 @@ app.post('/api/v1/integrations/eventbrite/events', async (req, res) => {
 
             // Step 3: Upload to Eventbrite's S3 bucket using form-data
             console.log(`[${requestId}]    - Step 3: Uploading to Eventbrite S3 (${contentType})...`);
+            console.log(`[${requestId}]    - Image buffer size: ${imageBuffer.length} bytes`);
+
             const FormData = (await import('form-data')).default;
+            const { Readable } = await import('stream');
             const formData = new FormData();
 
-            // Add all fields from upload_data
+            // Add all fields from upload_data FIRST (order matters for S3)
             Object.entries(uploadInstructions.upload_data).forEach(([key, value]) => {
-              formData.append(key, value);
+              formData.append(key, String(value));
             });
 
-            // Add the file with correct filename/type
-            formData.append('file', imageBuffer, {
+            // Create a readable stream from the buffer for proper form-data handling
+            const imageStream = Readable.from(imageBuffer);
+
+            // Add the file LAST with correct filename/type using stream
+            formData.append('file', imageStream, {
               filename: `event-logo.${extension}`,
-              contentType: contentType
+              contentType: contentType,
+              knownLength: imageBuffer.length
             });
 
-            // Upload to Eventbrite's upload URL
+            // Upload to Eventbrite's upload URL using node-fetch style
             const uploadRes = await fetch(uploadInstructions.upload_url, {
               method: 'POST',
               body: formData,
-              headers: formData.getHeaders()
+              headers: {
+                ...formData.getHeaders()
+              }
             });
             console.log(`[${requestId}]    - S3 upload status: ${uploadRes.status}`);
             imageUploadDebug.steps.push(`step3_status_${uploadRes.status}`);
