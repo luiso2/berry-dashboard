@@ -23,6 +23,14 @@ import {
   TicketsView,
   SponsorsView,
   PromotersView,
+  TablesView,
+  StaffView,
+  CheckInView,
+  EmailsView,
+  BudgetView,
+  VendorsView,
+  AutomationView,
+  ModelsView,
 } from './views';
 
 // Eventbrite Components
@@ -716,22 +724,29 @@ function App() {
       case 'promoters':
         return <PromotersView onToast={actions.addToast} />;
 
-      // Placeholder views for modules not yet extracted
-      case 'emails':
-      case 'models':
       case 'tables':
+        return <TablesView onToast={actions.addToast} />;
+
       case 'staff':
-      case 'budget':
-      case 'vendors':
-      case 'automation':
+        return <StaffView onToast={actions.addToast} />;
+
       case 'checkin':
-        return (
-          <div style={{ textAlign: 'center', padding: 60, color: '#666' }}>
-            <p style={{ fontSize: 48, marginBottom: 16 }}>🚧</p>
-            <p style={{ fontSize: 18, marginBottom: 8 }}>{getViewTitle()}</p>
-            <p>This view is being refactored. Coming soon!</p>
-          </div>
-        );
+        return <CheckInView onToast={actions.addToast} />;
+
+      case 'emails':
+        return <EmailsView onToast={actions.addToast} />;
+
+      case 'budget':
+        return <BudgetView onToast={actions.addToast} />;
+
+      case 'vendors':
+        return <VendorsView onToast={actions.addToast} />;
+
+      case 'automation':
+        return <AutomationView onToast={actions.addToast} />;
+
+      case 'models':
+        return <ModelsView onToast={actions.addToast} />;
 
       default:
         return (
