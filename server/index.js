@@ -15,6 +15,7 @@ import multer from 'multer';
 import * as XLSX from 'xlsx';
 import { parse as csvParse } from 'csv-parse/sync';
 import bcrypt from 'bcrypt';
+import { v2 as cloudinary } from 'cloudinary';
 
 // API Version - for tracking deployments
 const API_VERSION = '3.15.2-guest-status';
@@ -35,6 +36,20 @@ const pool = new Pool({
 
 // Track initialization status
 let dbInitStatus = { started: false, completed: false, error: null, modelsFix: null };
+
+// ============================================
+// CLOUDINARY CONFIGURATION
+// ============================================
+if (process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && process.env.CLOUDINARY_API_SECRET) {
+  cloudinary.config({
+    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+    api_key: process.env.CLOUDINARY_API_KEY,
+    api_secret: process.env.CLOUDINARY_API_SECRET,
+  });
+  console.log('✅ Cloudinary configured');
+} else {
+  console.log('⚠️ Cloudinary not configured - image uploads will use local storage');
+}
 
 // ============================================
 // TELNYX SMS CONFIGURATION
@@ -169,6 +184,20 @@ const fileFilter = (req, file, cb) => {
 const upload = multer({
   storage,
   fileFilter,
+  limits: { fileSize: 10 * 1024 * 1024 } // 10MB limit
+});
+
+// Memory storage for image uploads (needed for Cloudinary)
+const imageUpload = multer({
+  storage: multer.memoryStorage(),
+  fileFilter: (req, file, cb) => {
+    const allowedMimes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+    if (allowedMimes.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only image files are allowed'), false);
+    }
+  },
   limits: { fileSize: 10 * 1024 * 1024 } // 10MB limit
 });
 
@@ -3647,27 +3676,75 @@ const normalizeContactRow = (row) => {
 };
 
 // POST /api/v1/gallery/upload - Upload image for events/gallery
-app.post('/api/v1/gallery/upload', upload.single('image'), async (req, res) => {
+app.post('/api/v1/gallery/upload', imageUpload.single('image'), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'No image file provided' });
     }
 
-    // Get the base URL from environment or request
-    const baseUrl = process.env.BASE_URL || `${req.protocol}://${req.get('host')}`;
-    const imageUrl = `${baseUrl}/uploads/${req.file.filename}`;
+    // Check if Cloudinary is configured
+    const isCloudinaryConfigured = process.env.CLOUDINARY_CLOUD_NAME &&
+                                    process.env.CLOUDINARY_API_KEY &&
+                                    process.env.CLOUDINARY_API_SECRET;
 
-    res.json({
-      success: true,
-      url: imageUrl,
-      imageUrl: imageUrl,
-      filename: req.file.filename,
-      originalName: req.file.originalname,
-      size: req.file.size
-    });
+    if (isCloudinaryConfigured) {
+      // Upload to Cloudinary for persistent storage
+      console.log('📤 Uploading to Cloudinary...');
+
+      // Convert buffer to base64 data URI for Cloudinary upload
+      const b64 = Buffer.from(req.file.buffer).toString('base64');
+      const dataURI = `data:${req.file.mimetype};base64,${b64}`;
+
+      const result = await cloudinary.uploader.upload(dataURI, {
+        folder: 'berry-events',
+        resource_type: 'image',
+        transformation: [
+          { width: 2160, height: 1080, crop: 'fill', gravity: 'center' }
+        ]
+      });
+
+      console.log('✅ Cloudinary upload successful:', result.secure_url);
+
+      // Clean up local file if it was saved
+      if (req.file.path && fs.existsSync(req.file.path)) {
+        fs.unlinkSync(req.file.path);
+      }
+
+      res.json({
+        success: true,
+        url: result.secure_url,
+        imageUrl: result.secure_url,
+        publicId: result.public_id,
+        filename: req.file.originalname,
+        originalName: req.file.originalname,
+        size: req.file.size,
+        provider: 'cloudinary'
+      });
+    } else {
+      // Fallback to local storage (not recommended for production)
+      console.log('⚠️ Using local storage for image (Cloudinary not configured)');
+
+      // Save buffer to local file since we're using memory storage
+      const filename = `${Date.now()}-${Math.round(Math.random() * 1E9)}-${req.file.originalname}`;
+      const filepath = path.join(uploadDir, filename);
+      fs.writeFileSync(filepath, req.file.buffer);
+
+      const baseUrl = process.env.BASE_URL || `${req.protocol}://${req.get('host')}`;
+      const imageUrl = `${baseUrl}/uploads/${filename}`;
+
+      res.json({
+        success: true,
+        url: imageUrl,
+        imageUrl: imageUrl,
+        filename: filename,
+        originalName: req.file.originalname,
+        size: req.file.size,
+        provider: 'local'
+      });
+    }
   } catch (error) {
     console.error('Error uploading image:', error);
-    res.status(500).json({ error: 'Failed to upload image' });
+    res.status(500).json({ error: 'Failed to upload image', details: error.message });
   }
 });
 
