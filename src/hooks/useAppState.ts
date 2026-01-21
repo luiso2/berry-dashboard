@@ -86,7 +86,7 @@ export function useAppState() {
 
   // Forms
   const [formData, setFormData] = useState({
-    name: '', email: '', phone: '', instagram: '', partySize: 1, eventDate: '', notes: ''
+    name: '', email: '', phone: '', instagram: '', partySize: 1, eventDate: '', notes: '', gender: ''
   });
   const [customMessage, setCustomMessage] = useState('');
   const [reminderData, setReminderData] = useState({

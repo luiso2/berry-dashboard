@@ -9,6 +9,7 @@ interface GuestFormData {
   partySize: number;
   eventDate: string;
   notes: string;
+  gender: string;
 }
 
 interface AddGuestModalProps {
@@ -88,12 +89,40 @@ export function AddGuestModal({ show, onClose, formData, onFormChange, onSubmit 
             type="email"
             required
           />
-          <Input
-            label="Phone"
-            placeholder="+1 (555) 000-0000"
-            value={formData.phone}
-            onChange={(v) => onFormChange({ ...formData, phone: v })}
-          />
+          <div style={{ display: 'flex', gap: 12 }}>
+            <div style={{ flex: 1 }}>
+              <Input
+                label="Phone"
+                placeholder="+1 (555) 000-0000"
+                value={formData.phone}
+                onChange={(v) => onFormChange({ ...formData, phone: v })}
+              />
+            </div>
+            <div style={{ flex: 1 }}>
+              <label style={{ display: 'block', marginBottom: 8, fontSize: 13, color: '#888' }}>Gender</label>
+              <select
+                value={formData.gender}
+                onChange={(e) => onFormChange({ ...formData, gender: e.target.value })}
+                style={{
+                  width: '100%',
+                  padding: '10px 14px',
+                  background: '#111',
+                  border: '1px solid #333',
+                  borderRadius: 8,
+                  color: '#fff',
+                  fontSize: 14,
+                  height: 42,
+                  appearance: 'none',
+                  outline: 'none',
+                }}
+              >
+                <option value="">Select</option>
+                <option value="male">Male</option>
+                <option value="female">Female</option>
+                <option value="other">Other</option>
+              </select>
+            </div>
+          </div>
           <Input
             label="Instagram"
             placeholder="johndoe"

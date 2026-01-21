@@ -47,6 +47,7 @@ export const GuestList = ({
             </th>
             <th style={thStyle}>Name</th>
             <th style={thStyle}>Email</th>
+            <th style={thStyle}>Gender</th>
             <th style={{ ...thStyle }} className="hide-tablet">Instagram</th>
             <th style={{ ...thStyle, width: 120 }}>Phone</th>
             <th style={thStyle}>Status</th>
@@ -97,6 +98,7 @@ export const GuestList = ({
                 </div>
               </td>
               <td style={{ ...tdStyle, color: '#888', fontSize: 14 }}>{guest.email}</td>
+              <td style={{ ...tdStyle, color: '#fff', fontSize: 14, textTransform: 'capitalize' }}>{guest.gender || '—'}</td>
               <td style={tdStyle} className="hide-tablet">
                 {guest.instagram ? (
                   <a href={`https://instagram.com/${guest.instagram.replace('@', '')}`} target="_blank" rel="noopener noreferrer" style={{ color: '#d4af37', fontSize: 14, textDecoration: 'none' }}>@{guest.instagram.replace('@', '')}</a>
@@ -199,6 +201,7 @@ export const GuestList = ({
                 <div style={{ minWidth: 0, flex: 1 }}>
                   <div style={{ fontWeight: 600, fontSize: 16, marginBottom: 2 }}>{guest.name}</div>
                   <div style={{ fontSize: 14, color: '#666' }}>{guest.email}</div>
+                  {guest.gender && <div style={{ fontSize: 12, color: '#888', textTransform: 'capitalize' }}>{guest.gender}</div>}
                 </div>
                 <StatusBadge category={guest.category} />
               </div>

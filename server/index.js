@@ -2657,11 +2657,63 @@ app.post('/oauth/reset-password', async (req, res) => {
 
 // Middleware: Extract user from Bearer token
 const authenticateToken = async (req, res, next) => {
+  // Define public paths that do NOT require authentication
+  // Note: /oauth/token covers login/refresh flows in some OAuth implementations,
+  // but we also whitelist specific endpoints we saw in the code.
+  const PUBLIC_PATHS = [
+    '/oauth/login',
+    '/oauth/register',
+    '/oauth/signup',
+    '/oauth/token',
+    '/oauth/forgot-password',
+    '/oauth/reset-password',
+    '/api/health',
+    '/api/v1/health',
+    '/api/v1/version',
+    '/favicon.ico'
+  ];
+
+  // Check if current path is public
+  // We use startsWith to handle sub-paths (e.g. /api/v1/health/deep)
+  const isPublicPath =
+    req.path.startsWith('/uploads/') ||
+    req.path.startsWith('/admin/') ||
+    PUBLIC_PATHS.some(path => req.path === path || req.path.startsWith(path + '/'));
+
   const authHeader = req.headers.authorization;
 
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    req.user = null;
+  // Case 1: Public Routes - Auth is optional but good to have
+  if (isPublicPath) {
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      const token = authHeader.substring(7);
+      try {
+        const result = await pool.query(
+          `SELECT u.* FROM users u
+           JOIN oauth_tokens t ON u.id = t.user_id
+           WHERE t.access_token = $1 AND t.expires_at > NOW()`,
+          [token]
+        );
+        if (result.rows.length > 0) {
+          req.user = result.rows[0];
+        } else {
+          req.user = null;
+        }
+      } catch (error) {
+        // Ignore auth errors on public routes
+        req.user = null;
+      }
+    } else {
+      req.user = null;
+    }
     return next();
+  }
+
+  // Case 2: Protected Routes - STRICT ENFORCEMENT
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({
+      error: 'Authentication required',
+      code: 'UNAUTHORIZED'
+    });
   }
 
   const token = authHeader.substring(7);
@@ -2676,15 +2728,18 @@ const authenticateToken = async (req, res, next) => {
 
     if (result.rows.length > 0) {
       req.user = result.rows[0];
+      next();
     } else {
-      req.user = null;
+      // Token exists but is invalid/expired
+      return res.status(401).json({
+        error: 'Invalid or expired token',
+        code: 'UNAUTHORIZED'
+      });
     }
   } catch (error) {
     console.error('Auth error:', error);
-    req.user = null;
+    return res.status(500).json({ error: 'Internal server error during authentication' });
   }
-
-  next();
 };
 
 // Apply auth middleware to all routes
@@ -3955,6 +4010,7 @@ const transformToGuestList = (row) => {
     numberOfGuests: row.number_of_guests || 1,
     partySize: row.number_of_guests || 1,
     vipPreferences: categoryFromVip ? '' : (row.vip_preferences || ''),
+    gender: row.gender,
     category: category,
     status: row.status || 'pending',
     notes: row.notes || '',
@@ -4049,20 +4105,29 @@ app.get('/api/v1/guest-lists/:id', async (req, res) => {
 
 // POST /api/v1/guest-lists - Create guest (LOCAL - writes to guest_lists table)
 app.post('/api/v1/guest-lists', async (req, res) => {
-  const { name, email, phone, instagram, numberOfGuests, vipPreferences, eventId } = req.body;
+  const { name, email, phone, instagram, numberOfGuests, vipPreferences, eventId, gender } = req.body;
 
   if (!name || !email) {
     return res.status(400).json({ error: 'Name and email are required' });
   }
 
   try {
+    // Ensure gender column exists
+    await pool.query(`
+      DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='guest_lists' AND column_name='gender') THEN
+          ALTER TABLE guest_lists ADD COLUMN gender VARCHAR(20);
+        END IF;
+      END $$;
+    `);
+
     const id = `gst_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
     const result = await pool.query(
-      `INSERT INTO guest_lists (id, event_id, name, email, phone, instagram, number_of_guests, vip_preferences, status, email_sent, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending', false, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      `INSERT INTO guest_lists (id, event_id, name, email, phone, instagram, number_of_guests, vip_preferences, gender, status, email_sent, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending', false, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
        RETURNING *`,
-      [id, eventId || 'default', name, email, phone || '', instagram || '', numberOfGuests || 1, vipPreferences || '']
+      [id, eventId || 'default', name, email, phone || '', instagram || '', numberOfGuests || 1, vipPreferences || '', gender || '']
     );
 
     const newGuest = transformToGuestList(result.rows[0]);
@@ -10030,13 +10095,20 @@ app.get('/api/v1/health/deep', async (req, res) => {
   // 3. Check table row counts (data integrity)
   if (health.components.database?.status === 'healthy') {
     try {
+      const ALLOWED_HEALTH_TABLES = ['guests', 'events', 'staff', 'vendors', 'sponsors'];
       const counts = {};
-      for (const table of ['guests', 'events', 'staff', 'vendors', 'sponsors']) {
+
+      for (const table of ALLOWED_HEALTH_TABLES) {
+        // Security: Strictly prevent SQL injection by validating against our allowlist
+        if (!ALLOWED_HEALTH_TABLES.includes(table)) continue;
+
         try {
-          const result = await pool.query(`SELECT COUNT(*) FROM ${table}`);
+          // Double quote identifier for safety in PostgreSQL
+          const result = await pool.query(`SELECT COUNT(*) FROM "${table}"`);
           counts[table] = parseInt(result.rows[0].count);
-        } catch {
+        } catch (err) {
           counts[table] = 'error';
+          console.error(`Health check count failed for ${table}:`, err.message);
         }
       }
       health.components.data = {
@@ -15427,6 +15499,7 @@ app.post('/api/v1/integrations/eventbrite/events', async (req, res) => {
       console.log(`[${requestId}] 📍 Venue: ${online_event ? 'online event' : (venue_id ? `existing ID ${venue_id}` : 'none provided')}`);
     }
 
+
     // BUG-06 FIX: Upload image to Eventbrite if logo_url is provided
     let logoId = null;
     if (logo_url) {
@@ -15452,12 +15525,21 @@ app.post('/api/v1/integrations/eventbrite/events', async (req, res) => {
           console.log(`[${requestId}]    - Step 2: Downloading image from Cloudinary...`);
           const imageResponse = await fetch(logo_url);
           console.log(`[${requestId}]    - Image download status: ${imageResponse.status}`);
+
           if (imageResponse.ok) {
-            const imageBuffer = await imageResponse.buffer();
+            // FIX: Use arrayBuffer() and Buffer.from() for compatibility with native fetch and node-fetch
+            const arrayBuffer = await imageResponse.arrayBuffer();
+            const imageBuffer = Buffer.from(arrayBuffer);
+
             console.log(`[${requestId}]    - Image size: ${imageBuffer.length} bytes`);
 
+            // Determine content type from response headers or fallback
+            // Clean content type by removing parameters (e.g. charset)
+            const contentType = (imageResponse.headers.get('content-type') || 'image/jpeg').split(';')[0].trim();
+            const extension = contentType.split('/')[1] || 'jpg';
+
             // Step 3: Upload to Eventbrite's S3 bucket using form-data
-            console.log(`[${requestId}]    - Step 3: Uploading to Eventbrite S3...`);
+            console.log(`[${requestId}]    - Step 3: Uploading to Eventbrite S3 (${contentType})...`);
             const FormData = (await import('form-data')).default;
             const formData = new FormData();
 
@@ -15466,10 +15548,10 @@ app.post('/api/v1/integrations/eventbrite/events', async (req, res) => {
               formData.append(key, value);
             });
 
-            // Add the file
+            // Add the file with correct filename/type
             formData.append('file', imageBuffer, {
-              filename: 'event-logo.jpg',
-              contentType: 'image/jpeg'
+              filename: `event-logo.${extension}`,
+              contentType: contentType
             });
 
             // Upload to Eventbrite's upload URL
@@ -15492,8 +15574,8 @@ app.post('/api/v1/integrations/eventbrite/events', async (req, res) => {
                     'Content-Type': 'application/json'
                   },
                   body: JSON.stringify({
-                    upload_token: uploadInstructions.upload_token,
-                    crop_mask: { top_left: { x: 0, y: 0 }, width: 1920, height: 1080 }
+                    upload_token: uploadInstructions.upload_token
+                    // Removed crop_mask to allow Eventbrite to handle original dimensions
                   })
                 }
               );

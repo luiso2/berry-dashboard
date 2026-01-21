@@ -803,9 +803,21 @@ function App() {
         formData={state.formData}
         onFormChange={state.setFormData}
         onSubmit={async () => {
-          state.setShowForm(false);
-          actions.addToast('Guest added successfully', 'success');
-          actions.fetchGuests();
+          if (!state.formData.name || !state.formData.email) {
+            actions.addToast('Name and Email are required', 'error');
+            return;
+          }
+
+          const success = await actions.addGuest({
+            ...state.formData,
+            numberOfGuests: state.formData.partySize,
+            gender: state.formData.gender, // Ensure gender is passed
+          });
+
+          if (success) {
+            state.setShowForm(false);
+            state.setFormData({ name: '', email: '', phone: '', instagram: '', partySize: 1, eventDate: '', notes: '', gender: '' });
+          }
         }}
       />
 

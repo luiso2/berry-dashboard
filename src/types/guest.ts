@@ -43,6 +43,7 @@ export interface Guest {
   // Featured/Hot classification
   isFeatured?: boolean;
   rating?: number;
+  gender?: string;
 }
 
 export interface QRModal {

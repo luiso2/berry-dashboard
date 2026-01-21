@@ -410,6 +410,32 @@ export function useAppActions(state: AppState, token?: string, userId?: number) 
     }
   }, [fetchGuests, addToast]);
 
+  // Add Guest
+  const addGuest = useCallback(async (guestData: any) => {
+    try {
+      const res = await fetch(`${API_URL}${ENDPOINTS.guests}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(guestData)
+      });
+
+      const data = await res.json();
+
+      if (res.ok) {
+        await fetchGuests();
+        addToast('Guest added successfully', 'success');
+        return true;
+      } else {
+        addToast(data.error || 'Failed to add guest', 'error');
+        return false;
+      }
+    } catch (error) {
+      console.error('Error adding guest:', error);
+      addToast('Failed to add guest', 'error');
+      return false;
+    }
+  }, [fetchGuests, addToast]);
+
   // Check In Guest
   const checkInGuest = useCallback(async (guest: Guest) => {
     try {
@@ -673,6 +699,7 @@ export function useAppActions(state: AppState, token?: string, userId?: number) 
     fetchSmsStats,
     removeGuest,
     updateGuestCategory,
+    addGuest,
     checkInGuest,
     deleteStaff,
     updateSponsor,

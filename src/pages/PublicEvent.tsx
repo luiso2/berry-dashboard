@@ -57,6 +57,7 @@ interface RsvpForm {
   phone: string;
   partySize: number;
   notes: string;
+  gender: string;
 }
 
 export default function PublicEvent() {
@@ -73,6 +74,7 @@ export default function PublicEvent() {
     phone: '',
     partySize: 1,
     notes: '',
+    gender: '',
   });
 
   useEffect(() => {
@@ -150,6 +152,7 @@ export default function PublicEvent() {
           notes: rsvpForm.notes,
           eventId: event.id,
           eventDate: event.eventDate,
+          gender: rsvpForm.gender,
         }),
       });
 
@@ -253,7 +256,7 @@ export default function PublicEvent() {
             position: 'absolute',
             inset: 0,
             background: 'linear-gradient(to bottom, transparent 30%, rgba(0,0,0,0.9) 100%)',
-          }} />
+            }} />
         </div>
       )}
 
@@ -524,21 +527,42 @@ export default function PublicEvent() {
                       fontSize: 16,
                     }}
                   />
-                  <input
-                    type="tel"
-                    placeholder="Phone Number"
-                    value={rsvpForm.phone}
-                    onChange={e => setRsvpForm(p => ({ ...p, phone: e.target.value }))}
-                    style={{
-                      width: '100%',
-                      padding: '14px 16px',
-                      background: 'rgba(255,255,255,0.1)',
-                      border: '1px solid rgba(255,255,255,0.2)',
-                      borderRadius: 8,
-                      color: '#fff',
-                      fontSize: 16,
-                    }}
-                  />
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                    <input
+                      type="tel"
+                      placeholder="Phone Number"
+                      value={rsvpForm.phone}
+                      onChange={e => setRsvpForm(p => ({ ...p, phone: e.target.value }))}
+                      style={{
+                        width: '100%',
+                        padding: '14px 16px',
+                        background: 'rgba(255,255,255,0.1)',
+                        border: '1px solid rgba(255,255,255,0.2)',
+                        borderRadius: 8,
+                        color: '#fff',
+                        fontSize: 16,
+                      }}
+                    />
+                    <select
+                      required
+                      value={rsvpForm.gender}
+                      onChange={e => setRsvpForm(p => ({ ...p, gender: e.target.value }))}
+                      style={{
+                        width: '100%',
+                        padding: '14px 16px',
+                        background: 'rgba(255,255,255,0.1)',
+                        border: '1px solid rgba(255,255,255,0.2)',
+                        borderRadius: 8,
+                        color: '#fff',
+                        fontSize: 16,
+                      }}
+                    >
+                      <option value="" disabled>Select Gender *</option>
+                      <option value="female">Female</option>
+                      <option value="male">Male</option>
+                      <option value="other">Other</option>
+                    </select>
+                  </div>
                   {event.allowPlusOne && (
                     <div>
                       <label style={{ display: 'block', fontSize: 14, marginBottom: 8, opacity: 0.8 }}>
