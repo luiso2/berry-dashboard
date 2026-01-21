@@ -194,13 +194,18 @@ export function EventCreator({ onEventCreated }: EventCreatorProps) {
 
       if (res.ok) {
         const data = await res.json();
+        console.log('Image uploaded successfully:', data);
+        const imageUrl = data.imageUrl || data.url;
+        console.log('Setting cover_image to:', imageUrl);
         setEventData(prev => ({
           ...prev,
-          cover_image: data.imageUrl || data.url,
+          cover_image: imageUrl,
           cover_image_file: file,
         }));
       } else {
-        alert('Failed to upload image');
+        const errData = await res.json().catch(() => ({}));
+        console.error('Image upload failed:', errData);
+        alert('Failed to upload image: ' + (errData.error || res.statusText));
       }
     } catch (err) {
       console.error('Upload error:', err);
@@ -276,7 +281,7 @@ export function EventCreator({ onEventCreated }: EventCreatorProps) {
       console.log(`[${requestId}]    - Timezone: ${payload.timezone}`);
       console.log(`[${requestId}]    - Online: ${payload.online_event}`);
       console.log(`[${requestId}]    - Capacity: ${payload.capacity}`);
-      console.log(`[${requestId}]    - Logo URL: ${payload.logo_url ? 'provided' : 'none'}`);
+      console.log(`[${requestId}]    - Logo URL: ${payload.logo_url || 'NONE - NO IMAGE WILL BE UPLOADED'}`);
       console.log(`[${requestId}]    - Venue: ${payload.venue ? payload.venue.name : 'N/A'}`);
       console.log(`[${requestId}] 📤 Full payload:`, JSON.stringify(payload, null, 2));
 
