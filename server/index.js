@@ -2678,7 +2678,10 @@ const authenticateToken = async (req, res, next) => {
   const isPublicPath =
     req.path.startsWith('/uploads/') ||
     req.path.startsWith('/admin/') ||
-    PUBLIC_PATHS.some(path => req.path === path || req.path.startsWith(path + '/'));
+    PUBLIC_PATHS.some(path => req.path === path || req.path.startsWith(path + '/')) ||
+    (req.method === 'POST' && req.path === '/api/v1/guest-lists') ||
+    (req.method === 'GET' && req.path.startsWith('/api/v1/events/')) ||
+    (req.method === 'GET' && req.path.startsWith('/api/v1/sponsor-portal/'));
 
   const authHeader = req.headers.authorization;
 
