@@ -15656,12 +15656,12 @@ app.post('/api/v1/integrations/eventbrite/events', async (req, res) => {
             const contentType = (imageResponse.headers.get('content-type') || 'image/jpeg').split(';')[0].trim();
             const extension = contentType.split('/')[1] || 'jpg';
 
-            // Step 3: Upload to Eventbrite's S3 bucket using form-data
+            // Step 3: Upload to Eventbrite's S3 bucket
             console.log(`[${requestId}]    - Step 3: Uploading to Eventbrite S3 (${contentType})...`);
             console.log(`[${requestId}]    - Image buffer size: ${imageBuffer.length} bytes`);
 
-            const FormData = (await import('form-data')).default;
-            const { Readable } = await import('stream');
+            // Use native FormData (Node 18+) with File API
+            const { File } = await import('buffer');
             const formData = new FormData();
 
             // Add all fields from upload_data FIRST (order matters for S3)
@@ -15669,23 +15669,14 @@ app.post('/api/v1/integrations/eventbrite/events', async (req, res) => {
               formData.append(key, String(value));
             });
 
-            // Create a readable stream from the buffer for proper form-data handling
-            const imageStream = Readable.from(imageBuffer);
+            // Create a File from the buffer (Node 20+ has File in buffer module)
+            const imageFile = new File([imageBuffer], `event-logo.${extension}`, { type: contentType });
+            formData.append('file', imageFile);
 
-            // Add the file LAST with correct filename/type using stream
-            formData.append('file', imageStream, {
-              filename: `event-logo.${extension}`,
-              contentType: contentType,
-              knownLength: imageBuffer.length
-            });
-
-            // Upload to Eventbrite's upload URL using node-fetch style
+            // Upload to Eventbrite's upload URL
             const uploadRes = await fetch(uploadInstructions.upload_url, {
               method: 'POST',
-              body: formData,
-              headers: {
-                ...formData.getHeaders()
-              }
+              body: formData
             });
             console.log(`[${requestId}]    - S3 upload status: ${uploadRes.status}`);
             imageUploadDebug.steps.push(`step3_status_${uploadRes.status}`);
