@@ -12102,6 +12102,122 @@ app.get('/api/v1/auth/eventbrite/callback', async (req, res) => {
     // Clear the state cookie
     res.clearCookie('eventbrite_oauth_state');
 
+    // Auto-setup webhook for real-time order notifications
+    if (organizationId) {
+      try {
+        const webhookUrl = `${process.env.BACKEND_URL || 'https://berry-dashboard-api-production.up.railway.app'}/api/webhooks/eventbrite`;
+
+        // Check if webhook already exists
+        const existingWebhooks = await fetch(`https://www.eventbriteapi.com/v3/organizations/${organizationId}/webhooks/`, {
+          headers: { 'Authorization': `Bearer ${accessToken}` }
+        });
+
+        const webhooksData = existingWebhooks.ok ? await existingWebhooks.json() : { webhooks: [] };
+        const hasOurWebhook = webhooksData.webhooks?.some(w => w.endpoint_url === webhookUrl);
+
+        if (!hasOurWebhook) {
+          // Create webhook for order events
+          const webhookRes = await fetch(`https://www.eventbriteapi.com/v3/organizations/${organizationId}/webhooks/`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${accessToken}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              endpoint_url: webhookUrl,
+              actions: 'order.placed,order.updated,order.refunded,attendee.updated,attendee.checked_in,event.published,event.updated'
+            })
+          });
+
+          if (webhookRes.ok) {
+            console.log('Webhook auto-configured for organization:', organizationId);
+          } else {
+            console.log('Failed to auto-configure webhook:', await webhookRes.text());
+          }
+        } else {
+          console.log('Webhook already exists for organization:', organizationId);
+        }
+      } catch (webhookErr) {
+        console.log('Could not auto-setup webhook:', webhookErr.message);
+      }
+    }
+
+    // Sync initial data (events, orders, attendees) in background
+    if (organizationId && userId && userId !== 'global') {
+      // Fire and forget - don't wait for this
+      (async () => {
+        try {
+          // Sync events
+          const eventsRes = await fetch(`https://www.eventbriteapi.com/v3/organizations/${organizationId}/events/?status=live,draft,started,ended&expand=venue,ticket_classes`, {
+            headers: { 'Authorization': `Bearer ${accessToken}` }
+          });
+
+          if (eventsRes.ok) {
+            const eventsData = await eventsRes.json();
+            console.log(`Found ${eventsData.events?.length || 0} events to sync for user ${userId}`);
+
+            for (const event of eventsData.events || []) {
+              // Upsert event
+              await pool.query(`
+                INSERT INTO events (id, name, description, date, time, venue, flyer_url, eventbrite_url, status, user_id, eventbrite_id, eventbrite_capacity, is_public)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+                ON CONFLICT (id) DO UPDATE SET
+                  name = $2, description = $3, date = $4, venue = $6, eventbrite_url = $8, status = $9, eventbrite_capacity = $12, updated_at = NOW()
+              `, [
+                'eb-' + event.id,
+                event.name?.text || event.name,
+                event.description?.text || '',
+                event.start?.local ? new Date(event.start.local) : null,
+                event.start?.local?.split('T')[1]?.substring(0,5) || '19:00',
+                event.venue?.name || null,
+                event.logo?.url || null,
+                event.url,
+                event.status === 'live' ? 'upcoming' : event.status,
+                userId,
+                event.id,
+                event.capacity || 100,
+                event.listed !== false
+              ]);
+
+              // Sync orders for this event
+              const ordersRes = await fetch(`https://www.eventbriteapi.com/v3/events/${event.id}/orders/?expand=attendees`, {
+                headers: { 'Authorization': `Bearer ${accessToken}` }
+              });
+
+              if (ordersRes.ok) {
+                const ordersData = await ordersRes.json();
+                for (const order of ordersData.orders || []) {
+                  const totalAmount = order.costs?.gross?.value ? (order.costs.gross.value / 100) : 0;
+
+                  await pool.query(`
+                    INSERT INTO eventbrite_orders (eventbrite_order_id, user_id, event_id, buyer_name, buyer_email, status, gross_amount, ticket_count, order_date, attendees)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                    ON CONFLICT (eventbrite_order_id) DO UPDATE SET
+                      status = $6, gross_amount = $7, ticket_count = $8, updated_at = NOW()
+                  `, [
+                    order.id,
+                    userId,
+                    event.id,
+                    order.name || '',
+                    order.email || '',
+                    order.status || 'placed',
+                    totalAmount,
+                    order.attendees?.length || 1,
+                    order.created ? new Date(order.created) : new Date(),
+                    JSON.stringify(order.attendees || [])
+                  ]);
+                }
+                console.log(`Synced ${ordersData.orders?.length || 0} orders for event ${event.name?.text}`);
+              }
+            }
+          }
+          console.log('Initial Eventbrite sync completed for user', userId);
+        } catch (syncErr) {
+          console.error('Background sync error:', syncErr.message);
+        }
+      })();
+    }
+
     // Generate a temporary auto-login token for the user
     let autoLoginToken = null;
     if (userId && userId !== 'global') {
