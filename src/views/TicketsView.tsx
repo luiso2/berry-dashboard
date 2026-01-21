@@ -15,6 +15,19 @@ interface TicketsViewProps {
   onToast: (message: string, type: 'success' | 'error' | 'info') => void;
 }
 
+// Helper to get auth headers
+const getAuthHeaders = (contentType?: string) => {
+  const headers: HeadersInit = {};
+  const token = localStorage.getItem('berry_token');
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  if (contentType) {
+    headers['Content-Type'] = contentType;
+  }
+  return headers;
+};
+
 export function TicketsView({ onToast }: TicketsViewProps) {
   // Self-contained state
   const [tickets, setTickets] = useState<Ticket[]>([]);
@@ -44,7 +57,9 @@ export function TicketsView({ onToast }: TicketsViewProps) {
   // Fetch tickets
   const fetchTickets = useCallback(async () => {
     try {
-      const res = await fetch(`${API_URL}/tickets`);
+      const res = await fetch(`${API_URL}/tickets`, {
+        headers: getAuthHeaders()
+      });
       if (res.ok) {
         const data = await res.json();
         setTickets(data.tickets || []);
@@ -57,7 +72,9 @@ export function TicketsView({ onToast }: TicketsViewProps) {
   // Fetch orders
   const fetchOrders = useCallback(async () => {
     try {
-      const res = await fetch(`${API_URL}/orders`);
+      const res = await fetch(`${API_URL}/orders`, {
+        headers: getAuthHeaders()
+      });
       if (res.ok) {
         const data = await res.json();
         setOrders(data.orders || []);
@@ -89,7 +106,7 @@ export function TicketsView({ onToast }: TicketsViewProps) {
     try {
       const res = await fetch(`${API_URL}/tickets`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders('application/json'),
         body: JSON.stringify(ticketFormData),
       });
       if (res.ok) {
@@ -115,7 +132,10 @@ export function TicketsView({ onToast }: TicketsViewProps) {
   // Delete ticket handler
   const handleDeleteTicket = async (ticketId: string) => {
     try {
-      const res = await fetch(`${API_URL}/tickets/${ticketId}`, { method: 'DELETE' });
+      const res = await fetch(`${API_URL}/tickets/${ticketId}`, {
+        method: 'DELETE',
+        headers: getAuthHeaders()
+      });
       if (res.ok) {
         setTickets(prev => prev.filter(t => t.id !== ticketId));
         onToast('Ticket deleted', 'success');
@@ -129,7 +149,10 @@ export function TicketsView({ onToast }: TicketsViewProps) {
   const handleDeleteAllTickets = async () => {
     if (!confirm('Are you sure you want to delete all tickets?')) return;
     try {
-      await Promise.all(tickets.map(t => fetch(`${API_URL}/tickets/${t.id}`, { method: 'DELETE' })));
+      await Promise.all(tickets.map(t => fetch(`${API_URL}/tickets/${t.id}`, {
+        method: 'DELETE',
+        headers: getAuthHeaders()
+      })));
       setTickets([]);
       onToast('All tickets deleted', 'success');
     } catch (err) {
@@ -142,11 +165,13 @@ export function TicketsView({ onToast }: TicketsViewProps) {
     setSyncingEventbrite(true);
     try {
       const userId = localStorage.getItem('eventbrite_user_id') || 'global';
+      const token = localStorage.getItem('berry_token');
       const res = await fetch(`${API_URL}/integrations/eventbrite/sync`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'x-eventbrite-user-id': userId,
+          ...(token && { 'Authorization': `Bearer ${token}` }),
         },
       });
       if (res.ok) {
