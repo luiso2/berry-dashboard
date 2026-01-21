@@ -20,13 +20,25 @@ interface MailchimpAudience {
 
 interface UseIntegrationsOptions {
   userId?: string;
+  token?: string;
   onToast: (message: string, type: 'success' | 'error' | 'info') => void;
   onRefreshTickets?: () => void;
   onRefreshEvents?: () => void;
 }
 
 export function useIntegrations(options: UseIntegrationsOptions) {
-  const { userId, onToast, onRefreshTickets, onRefreshEvents } = options;
+  const { userId, token, onToast, onRefreshTickets, onRefreshEvents } = options;
+
+  const getHeaders = useCallback((contentType?: string) => {
+    const headers: HeadersInit = {};
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+    if (contentType) {
+      headers['Content-Type'] = contentType;
+    }
+    return headers;
+  }, [token]);
 
   const [integrations, setIntegrations] = useState<Integration[]>([]);
   const [selectedIntegration, setSelectedIntegration] = useState<Integration | null>(null);
@@ -42,14 +54,14 @@ export function useIntegrations(options: UseIntegrationsOptions) {
 
   const fetchIntegrations = useCallback(async () => {
     try {
-      const res = await fetch(`${API_URL}/integrations`);
+      const res = await fetch(`${API_URL}/integrations`, { headers: getHeaders() });
       const data = await res.json();
       let integrationsList = data.integrations || [];
 
       // Check per-user Eventbrite status
       if (userId) {
         try {
-          const ebRes = await fetch(`${API_URL}/auth/eventbrite/status?userId=${userId}`);
+          const ebRes = await fetch(`${API_URL}/auth/eventbrite/status?userId=${userId}`, { headers: getHeaders() });
           const ebData = await ebRes.json();
           if (ebData.connected) {
             integrationsList = integrationsList.map((int: Integration) => {
@@ -73,7 +85,7 @@ export function useIntegrations(options: UseIntegrationsOptions) {
     } catch (error) {
       console.error('Error fetching integrations:', error);
     }
-  }, [userId]);
+  }, [setIntegrations, userId, getHeaders]);
 
   const saveIntegrationConfig = useCallback(async (provider: string) => {
     setIntegrationLoading(provider);
@@ -93,7 +105,7 @@ export function useIntegrations(options: UseIntegrationsOptions) {
 
       const res = await fetch(`${API_URL}/integrations/${provider}/config`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getHeaders('application/json'),
         body: JSON.stringify({
           apiKey: integrationFormData.apiKey,
           apiSecret: integrationFormData.apiSecret || undefined,
@@ -120,13 +132,14 @@ export function useIntegrations(options: UseIntegrationsOptions) {
     } finally {
       setIntegrationLoading(null);
     }
-  }, [integrationFormData, fetchIntegrations, onToast]);
+  }, [integrationFormData, fetchIntegrations, onToast, getHeaders]);
 
   const testIntegration = useCallback(async (provider: string) => {
     setIntegrationLoading(provider);
     try {
       const res = await fetch(`${API_URL}/integrations/${provider}/test`, {
         method: 'POST',
+        headers: getHeaders()
       });
       const data = await res.json();
       if (data.success) {
@@ -140,7 +153,7 @@ export function useIntegrations(options: UseIntegrationsOptions) {
     } finally {
       setIntegrationLoading(null);
     }
-  }, [fetchIntegrations, onToast]);
+  }, [fetchIntegrations, onToast, getHeaders]);
 
   const syncIntegration = useCallback(async (provider: string, syncOptions?: Record<string, string>) => {
     setIntegrationLoading(provider);
@@ -152,7 +165,7 @@ export function useIntegrations(options: UseIntegrationsOptions) {
 
       const res = await fetch(`${API_URL}/integrations/${provider}/sync`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getHeaders('application/json'),
         body: JSON.stringify(options),
       });
       const data = await res.json();
@@ -171,7 +184,7 @@ export function useIntegrations(options: UseIntegrationsOptions) {
     } finally {
       setIntegrationLoading(null);
     }
-  }, [userId, onToast, onRefreshTickets, onRefreshEvents]);
+  }, [userId, onToast, onRefreshTickets, onRefreshEvents, getHeaders]);
 
   const disconnectIntegration = useCallback(async (provider: string) => {
     if (!confirm(`Are you sure you want to disconnect ${provider}?`)) return;
@@ -182,12 +195,13 @@ export function useIntegrations(options: UseIntegrationsOptions) {
       if (provider === 'eventbrite') {
         res = await fetch(`${API_URL}/auth/eventbrite/disconnect`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: getHeaders('application/json'),
           body: JSON.stringify({ userId }),
         });
       } else {
         res = await fetch(`${API_URL}/integrations/${provider}`, {
           method: 'DELETE',
+          headers: getHeaders()
         });
       }
       const data = await res.json();
@@ -203,17 +217,17 @@ export function useIntegrations(options: UseIntegrationsOptions) {
     } finally {
       setIntegrationLoading(null);
     }
-  }, [userId, fetchIntegrations, onToast]);
+  }, [userId, fetchIntegrations, onToast, getHeaders]);
 
   const fetchMailchimpAudiences = useCallback(async () => {
     try {
-      const res = await fetch(`${API_URL}/integrations/mailchimp/audiences`);
+      const res = await fetch(`${API_URL}/integrations/mailchimp/audiences`, { headers: getHeaders() });
       const data = await res.json();
       setMailchimpAudiences(data.audiences || []);
     } catch (error) {
       console.error('Error fetching audiences:', error);
     }
-  }, []);
+  }, [getHeaders]);
 
   const resetFormData = useCallback(() => {
     setIntegrationFormData({

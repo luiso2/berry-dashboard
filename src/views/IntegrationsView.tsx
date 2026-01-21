@@ -6,6 +6,7 @@ import { API_URL } from '../constants';
 
 interface IntegrationsViewProps {
   userId?: string;
+  token?: string;
   onToast: (message: string, type: 'success' | 'error' | 'info') => void;
   onOpenSmsModal: () => void;
   onRefreshTickets?: () => void;
@@ -14,6 +15,7 @@ interface IntegrationsViewProps {
 
 export function IntegrationsView({
   userId,
+  token,
   onToast,
   onOpenSmsModal,
   onRefreshTickets,
@@ -35,6 +37,7 @@ export function IntegrationsView({
     setIntegrationFormData,
   } = useIntegrations({
     userId,
+    token,
     onToast,
     onRefreshTickets,
     onRefreshEvents,

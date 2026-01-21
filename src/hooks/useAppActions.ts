@@ -24,6 +24,17 @@ export function useAppActions(state: AppState, token?: string, userId?: number) 
     integrations,
   } = state;
 
+  const getHeaders = useCallback((contentType?: string) => {
+    const headers: HeadersInit = {};
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+    if (contentType) {
+      headers['Content-Type'] = contentType;
+    }
+    return headers;
+  }, [token]);
+
   // Toast notifications
   const addToast = useCallback((message: string, type: 'success' | 'error' | 'info' = 'success') => {
     const id = Date.now().toString();
@@ -34,7 +45,9 @@ export function useAppActions(state: AppState, token?: string, userId?: number) 
   // Fetch Guests
   const fetchGuests = useCallback(async () => {
     try {
-      const res = await fetch(`${API_URL}${ENDPOINTS.guests}`);
+      const res = await fetch(`${API_URL}${ENDPOINTS.guests}`, {
+        headers: getHeaders()
+      });
       const responseData = await res.json();
       const data = responseData.entries || responseData.data || responseData;
 
@@ -67,14 +80,14 @@ export function useAppActions(state: AppState, token?: string, userId?: number) 
     } finally {
       setLoading(false);
     }
-  }, [setGuests, setLoading, addToast]);
+  }, [setGuests, setLoading, addToast, getHeaders]);
 
   // Fetch Models
   const fetchModels = useCallback(async () => {
     try {
       const [modelsRes, statsRes] = await Promise.all([
-        fetch(`${API_URL}/models`),
-        fetch(`${API_URL}/models/stats`)
+        fetch(`${API_URL}/models`, { headers: getHeaders() }),
+        fetch(`${API_URL}/models/stats`, { headers: getHeaders() })
       ]);
       const modelsData = await modelsRes.json();
       const statsData = await statsRes.json();
@@ -83,12 +96,12 @@ export function useAppActions(state: AppState, token?: string, userId?: number) 
     } catch (error) {
       console.error('Error fetching models:', error);
     }
-  }, [setModels, setModelStats]);
+  }, [setModels, setModelStats, getHeaders]);
 
   // Fetch Tables
   const fetchTables = useCallback(async () => {
     try {
-      const res = await fetch(`${API_URL}/table-reservations`);
+      const res = await fetch(`${API_URL}/table-reservations`, { headers: getHeaders() });
       const data = await res.json();
       const rawReservations = data.reservations || data;
       const reservations = (Array.isArray(rawReservations) ? rawReservations : []).map((r: any) => ({
@@ -106,12 +119,12 @@ export function useAppActions(state: AppState, token?: string, userId?: number) 
     } catch (error) {
       console.error('Error fetching tables:', error);
     }
-  }, [setTables, setTableStats]);
+  }, [setTables, setTableStats, getHeaders]);
 
   // Fetch Tickets
   const fetchTickets = useCallback(async () => {
     try {
-      const res = await fetch(`${API_URL}/tickets`);
+      const res = await fetch(`${API_URL}/tickets`, { headers: getHeaders() });
       const data = await res.json();
       const rawTickets = data.tickets || data;
       const ticketList = Array.isArray(rawTickets) ? rawTickets : [];
@@ -125,12 +138,12 @@ export function useAppActions(state: AppState, token?: string, userId?: number) 
     } catch (error) {
       console.error('Error fetching tickets:', error);
     }
-  }, [setTickets, setTicketStats]);
+  }, [setTickets, setTicketStats, getHeaders]);
 
   // Fetch Orders
   const fetchOrders = useCallback(async () => {
     try {
-      const res = await fetch(`${API_URL}/orders`);
+      const res = await fetch(`${API_URL}/orders`, { headers: getHeaders() });
       const data = await res.json();
       setOrders(data.orders || []);
       if (data.stats) {
@@ -145,12 +158,12 @@ export function useAppActions(state: AppState, token?: string, userId?: number) 
     } catch (error) {
       console.error('Error fetching orders:', error);
     }
-  }, [setOrders, setOrderStats]);
+  }, [setOrders, setOrderStats, getHeaders]);
 
   // Fetch Sponsors
   const fetchSponsors = useCallback(async () => {
     try {
-      const res = await fetch(`${API_URL}/sponsors`);
+      const res = await fetch(`${API_URL}/sponsors`, { headers: getHeaders() });
       const data = await res.json();
       const rawSponsors = data.submissions || data;
       const sponsorList = Array.isArray(rawSponsors) ? rawSponsors : [];
@@ -164,14 +177,14 @@ export function useAppActions(state: AppState, token?: string, userId?: number) 
     } catch (error) {
       console.error('Error fetching sponsors:', error);
     }
-  }, [setSponsors, setSponsorStats]);
+  }, [setSponsors, setSponsorStats, getHeaders]);
 
   // Fetch Promoters
   const fetchPromoters = useCallback(async () => {
     try {
       const [promotersRes, leaderboardRes] = await Promise.all([
-        fetch(`${API_URL}/promoters`),
-        fetch(`${API_URL}/promoters/leaderboard`)
+        fetch(`${API_URL}/promoters`, { headers: getHeaders() }),
+        fetch(`${API_URL}/promoters/leaderboard`, { headers: getHeaders() })
       ]);
       const promotersData = await promotersRes.json();
       const leaderboardData = await leaderboardRes.json();
@@ -188,12 +201,12 @@ export function useAppActions(state: AppState, token?: string, userId?: number) 
     } catch (error) {
       console.error('Error fetching promoters:', error);
     }
-  }, [setPromoters, setPromoterStats, setPromoterLeaderboard]);
+  }, [setPromoters, setPromoterStats, setPromoterLeaderboard, getHeaders]);
 
   // Fetch Events
   const fetchEvents = useCallback(async () => {
     try {
-      const res = await fetch(`${API_URL}/events`);
+      const res = await fetch(`${API_URL}/events`, { headers: getHeaders() });
       const data = await res.json();
       const eventList = data.events || [];
       setEvents(eventList);
@@ -216,15 +229,15 @@ export function useAppActions(state: AppState, token?: string, userId?: number) 
     } catch (error) {
       console.error('Error fetching events:', error);
     }
-  }, [setEvents, setEventStats]);
+  }, [setEvents, setEventStats, getHeaders]);
 
   // Fetch Budget
   const fetchBudget = useCallback(async (eventId?: number) => {
     try {
       const [categoriesRes, itemsRes, summaryRes] = await Promise.all([
-        fetch(`${API_URL}/budget/categories`),
-        fetch(`${API_URL}/budget/items${eventId ? `?eventId=${eventId}` : ''}`),
-        fetch(`${API_URL}/budget/summary${eventId ? `?eventId=${eventId}` : ''}`)
+        fetch(`${API_URL}/budget/categories`, { headers: getHeaders() }),
+        fetch(`${API_URL}/budget/items${eventId ? `?eventId=${eventId}` : ''}`, { headers: getHeaders() }),
+        fetch(`${API_URL}/budget/summary${eventId ? `?eventId=${eventId}` : ''}`, { headers: getHeaders() })
       ]);
 
       const categoriesData = await categoriesRes.json();
@@ -237,23 +250,23 @@ export function useAppActions(state: AppState, token?: string, userId?: number) 
     } catch (error) {
       console.error('Error fetching budget:', error);
     }
-  }, [setBudgetCategories, setBudgetItems, setBudgetSummary]);
+  }, [setBudgetCategories, setBudgetItems, setBudgetSummary, getHeaders]);
 
   // Fetch Vendors
   const fetchVendors = useCallback(async () => {
     try {
-      const res = await fetch(`${API_URL}/vendors`);
+      const res = await fetch(`${API_URL}/vendors`, { headers: getHeaders() });
       const data = await res.json();
       setVendors(data.vendors || []);
     } catch (error) {
       console.error('Error fetching vendors:', error);
     }
-  }, [setVendors]);
+  }, [setVendors, getHeaders]);
 
   // Fetch Staff
   const fetchStaff = useCallback(async () => {
     try {
-      const res = await fetch(`${API_URL}/staff`);
+      const res = await fetch(`${API_URL}/staff`, { headers: getHeaders() });
       const data = await res.json();
       const staffList = data.staff || [];
       setStaffMembers(staffList);
@@ -268,18 +281,18 @@ export function useAppActions(state: AppState, token?: string, userId?: number) 
     } catch (error) {
       console.error('Error fetching staff:', error);
     }
-  }, [setStaffMembers, setStaffStats]);
+  }, [setStaffMembers, setStaffStats, getHeaders]);
 
   // Fetch Integrations
   const fetchIntegrations = useCallback(async () => {
     try {
-      const res = await fetch(`${API_URL}/integrations`);
+      const res = await fetch(`${API_URL}/integrations`, { headers: getHeaders() });
       const data = await res.json();
       let integrationsList = data.integrations || [];
 
       if (userId) {
         try {
-          const eventbriteRes = await fetch(`${API_URL}/auth/eventbrite/status?userId=${userId}`);
+          const eventbriteRes = await fetch(`${API_URL}/auth/eventbrite/status?userId=${userId}`, { headers: getHeaders() });
           const eventbriteData = await eventbriteRes.json();
 
           integrationsList = integrationsList.map((int: any) => {
@@ -302,7 +315,7 @@ export function useAppActions(state: AppState, token?: string, userId?: number) 
     } catch (error) {
       console.error('Error fetching integrations:', error);
     }
-  }, [setIntegrations, userId]);
+  }, [setIntegrations, userId, getHeaders]);
 
   // Fetch Eventbrite Metrics
   const fetchEventbriteMetrics = useCallback(async () => {
@@ -314,8 +327,7 @@ export function useAppActions(state: AppState, token?: string, userId?: number) 
 
     setLoadingEventbriteMetrics(true);
     try {
-      const headers: HeadersInit = token ? { 'Authorization': `Bearer ${token}` } : {};
-      const res = await fetch(`${API_URL}/integrations/eventbrite/metrics`, { headers });
+      const res = await fetch(`${API_URL}/integrations/eventbrite/metrics`, { headers: getHeaders() });
 
       if (res.ok) {
         const data = await res.json();
@@ -370,18 +382,21 @@ export function useAppActions(state: AppState, token?: string, userId?: number) 
   // Fetch SMS Stats
   const fetchSmsStats = useCallback(async () => {
     try {
-      const res = await fetch(`${API_URL}/sms/stats`);
+      const res = await fetch(`${API_URL}/sms/stats`, { headers: getHeaders() });
       const data = await res.json();
       setSmsStats(data);
     } catch (error) {
       console.error('Error fetching SMS stats:', error);
     }
-  }, [setSmsStats]);
+  }, [setSmsStats, getHeaders]);
 
   // Remove Guest
   const removeGuest = useCallback(async (id: string) => {
     try {
-      const res = await fetch(`${API_URL}${ENDPOINTS.guests}/${id}`, { method: 'DELETE' });
+      const res = await fetch(`${API_URL}${ENDPOINTS.guests}/${id}`, {
+        method: 'DELETE',
+        headers: getHeaders()
+      });
       if (res.ok) {
         setGuests(prev => prev.filter(g => g.id !== id));
         addToast('Guest removed successfully', 'success');
@@ -390,7 +405,7 @@ export function useAppActions(state: AppState, token?: string, userId?: number) 
       console.error('Error removing guest:', error);
       addToast('Failed to remove guest', 'error');
     }
-  }, [setGuests, addToast]);
+  }, [setGuests, addToast, getHeaders]);
 
   // Update Guest Category
   const updateGuestCategory = useCallback(async (ids: string[], category: GuestCategory) => {
@@ -408,14 +423,14 @@ export function useAppActions(state: AppState, token?: string, userId?: number) 
       console.error('Error updating guests:', error);
       addToast('Failed to update guests', 'error');
     }
-  }, [fetchGuests, addToast]);
+  }, [fetchGuests, addToast, getHeaders]);
 
   // Add Guest
   const addGuest = useCallback(async (guestData: any) => {
     try {
       const res = await fetch(`${API_URL}${ENDPOINTS.guests}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getHeaders('application/json'),
         body: JSON.stringify(guestData)
       });
 
@@ -434,14 +449,14 @@ export function useAppActions(state: AppState, token?: string, userId?: number) 
       addToast('Failed to add guest', 'error');
       return false;
     }
-  }, [fetchGuests, addToast]);
+  }, [fetchGuests, addToast, getHeaders]);
 
   // Check In Guest
   const checkInGuest = useCallback(async (guest: Guest) => {
     try {
       const res = await fetch(`${API_URL}${ENDPOINTS.guests}/${guest.id}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getHeaders('application/json'),
         body: JSON.stringify({ checkedInAt: new Date().toISOString() })
       });
       if (res.ok) {
@@ -454,13 +469,16 @@ export function useAppActions(state: AppState, token?: string, userId?: number) 
       console.error('Error checking in guest:', error);
       addToast('Failed to check in guest', 'error');
     }
-  }, [setGuests, addToast]);
+  }, [setGuests, addToast, getHeaders]);
 
   // Delete Staff
   const deleteStaff = useCallback(async (id: number) => {
     if (!confirm('Are you sure you want to delete this staff member?')) return;
     try {
-      const res = await fetch(`${API_URL}/staff/${id}`, { method: 'DELETE' });
+      const res = await fetch(`${API_URL}/staff/${id}`, {
+        method: 'DELETE',
+        headers: getHeaders()
+      });
       if (res.ok) {
         fetchStaff();
         addToast('Staff member deleted', 'success');
@@ -469,14 +487,14 @@ export function useAppActions(state: AppState, token?: string, userId?: number) 
       console.error('Error deleting staff:', error);
       addToast('Failed to delete staff', 'error');
     }
-  }, [fetchStaff, addToast]);
+  }, [fetchStaff, addToast, getHeaders]);
 
   // Update Sponsor
   const updateSponsor = useCallback(async (id: string, updates: { status?: string; logoUrl?: string; notes?: string }) => {
     try {
       const res = await fetch(`${API_URL}/sponsors/${id}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getHeaders('application/json'),
         body: JSON.stringify(updates),
       });
       if (res.ok) {
@@ -487,13 +505,16 @@ export function useAppActions(state: AppState, token?: string, userId?: number) 
       console.error('Error updating sponsor:', error);
       addToast('Failed to update sponsor', 'error');
     }
-  }, [fetchSponsors, addToast]);
+  }, [fetchSponsors, addToast, getHeaders]);
 
   // Delete Sponsor
   const deleteSponsor = useCallback(async (id: string) => {
     if (!confirm('Are you sure you want to delete this sponsor?')) return;
     try {
-      const res = await fetch(`${API_URL}/sponsors/${id}`, { method: 'DELETE' });
+      const res = await fetch(`${API_URL}/sponsors/${id}`, {
+        method: 'DELETE',
+        headers: getHeaders()
+      });
       if (res.ok) {
         fetchSponsors();
         addToast('Sponsor deleted', 'success');
@@ -502,14 +523,14 @@ export function useAppActions(state: AppState, token?: string, userId?: number) 
       console.error('Error deleting sponsor:', error);
       addToast('Failed to delete sponsor', 'error');
     }
-  }, [fetchSponsors, addToast]);
+  }, [fetchSponsors, addToast, getHeaders]);
 
   // Send Email to Guest (approval/confirmation) - Actually sends via backend
   const sendGuestEmail = useCallback(async (guest: Guest, emailType: 'approval' | 'confirmation' | 'custom', customMessage?: string) => {
     try {
       const res = await fetch(`${API_URL}${ENDPOINTS.guests}/${guest.id}/send-invitation`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getHeaders('application/json'),
         body: JSON.stringify({
           category: guest.category || 'pending',
           customMessage: customMessage || '',
@@ -534,7 +555,7 @@ export function useAppActions(state: AppState, token?: string, userId?: number) 
       addToast('Failed to send email', 'error');
       return false;
     }
-  }, [setGuests, addToast]);
+  }, [setGuests, addToast, getHeaders]);
 
   // Send Bulk Emails to Multiple Guests - Actually sends via backend
   const sendBulkGuestEmails = useCallback(async (
@@ -546,7 +567,7 @@ export function useAppActions(state: AppState, token?: string, userId?: number) 
     try {
       const res = await fetch(`${API_URL}${ENDPOINTS.guests}/bulk-send`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getHeaders('application/json'),
         body: JSON.stringify({
           guestIds,
           category: emailType === 'approval' ? 'A' : undefined,
@@ -573,7 +594,7 @@ export function useAppActions(state: AppState, token?: string, userId?: number) 
       addToast('Failed to send emails', 'error');
       return false;
     }
-  }, [setGuests, addToast]);
+  }, [setGuests, addToast, getHeaders]);
 
   // Approve Guest (move to category and optionally send email)
   const approveGuest = useCallback(async (guest: Guest, category: GuestCategory, sendEmail: boolean = true) => {
@@ -581,7 +602,7 @@ export function useAppActions(state: AppState, token?: string, userId?: number) 
       // Update category
       const res = await fetch(`${API_URL}${ENDPOINTS.guests}/${guest.id}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getHeaders('application/json'),
         body: JSON.stringify({ category })
       });
       if (res.ok) {
@@ -603,14 +624,14 @@ export function useAppActions(state: AppState, token?: string, userId?: number) 
       addToast('Failed to approve guest', 'error');
       return false;
     }
-  }, [setGuests, sendGuestEmail, addToast]);
+  }, [setGuests, sendGuestEmail, addToast, getHeaders]);
 
   // Reject Guest
   const rejectGuest = useCallback(async (guest: Guest, _sendEmail: boolean = false) => {
     try {
       const res = await fetch(`${API_URL}${ENDPOINTS.guests}/${guest.id}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getHeaders('application/json'),
         body: JSON.stringify({ category: 'rejected' })
       });
       if (res.ok) {
@@ -626,14 +647,14 @@ export function useAppActions(state: AppState, token?: string, userId?: number) 
       addToast('Failed to reject guest', 'error');
       return false;
     }
-  }, [setGuests, addToast]);
+  }, [setGuests, addToast, getHeaders]);
 
   // Send SMS to a phone number - Actually sends via Telnyx backend
   const sendSMS = useCallback(async (to: string, message: string) => {
     try {
       const res = await fetch(`${API_URL}/telnyx/send-sms`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getHeaders('application/json'),
         body: JSON.stringify({ to, message })
       });
 
@@ -651,7 +672,7 @@ export function useAppActions(state: AppState, token?: string, userId?: number) 
       addToast('Failed to send SMS', 'error');
       return false;
     }
-  }, [addToast]);
+  }, [addToast, getHeaders]);
 
   // Bulk Approve Guests
   const bulkApproveGuests = useCallback(async (guestIds: string[], category: GuestCategory, sendEmails: boolean = true) => {
@@ -659,7 +680,7 @@ export function useAppActions(state: AppState, token?: string, userId?: number) 
       await Promise.all(guestIds.map(id =>
         fetch(`${API_URL}${ENDPOINTS.guests}/${id}`, {
           method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
+          headers: getHeaders('application/json'),
           body: JSON.stringify({ category })
         })
       ));

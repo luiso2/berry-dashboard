@@ -52,18 +52,23 @@ function App() {
   const actions = useAppActions(state, token ?? undefined, user?.id);
 
   // Initial data fetch
+  // Initial data fetch
   useEffect(() => {
-    actions.fetchGuests();
-    actions.fetchIntegrations();
-    actions.fetchEvents();
+    if (token) {
+      actions.fetchGuests();
+      actions.fetchIntegrations();
+      actions.fetchEvents();
+    }
 
     const interval = setInterval(() => {
-      actions.fetchGuests();
-      state.setLastRefresh(new Date());
+      if (token) {
+        actions.fetchGuests();
+        state.setLastRefresh(new Date());
+      }
     }, 30000);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [token]);
 
   // Calculate stats
   const stats = useMemo(() => {
@@ -644,6 +649,7 @@ function App() {
         return (
           <IntegrationsView
             userId={user?.id?.toString()}
+            token={token ?? undefined}
             onToast={actions.addToast}
             onOpenSmsModal={() => state.setShowSmsModal(true)}
             onRefreshTickets={actions.fetchTickets}
