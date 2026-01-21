@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(then)",
+      "Bash(echo:*)",
+      "Bash(break)",
+      "Bash(fi)",
+      "Bash(# Verificar el HTML actual en producción para ver qué bundle usa curl -s https://berryblyproduction.com/)"
+    ]
+  }
+}

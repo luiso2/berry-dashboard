@@ -22,7 +22,20 @@
       "Bash(for i in 3 4 5 6 7 8 9 10)",
       "Bash(do echo -n \"User $i: \")",
       "Bash(done)",
-      "Bash(for i in 11 12 13 14 15 16 17 18 19 20)"
+      "Bash(for i in 11 12 13 14 15 16 17 18 19 20)",
+      "Bash(pnpm add:*)",
+      "Bash(find:*)",
+      "mcp__railway__set-variables",
+      "mcp__railway__list-projects",
+      "Bash(railway link:*)",
+      "Bash(lsof:*)",
+      "Bash(curl:*)",
+      "Bash(# Buscar la URL del backend en Railway cd \"\"/Users/josemichaelhernandezvargas/Desktop/berry dashboard\"\" && grep -r \"\"railway\\\\|api.*url\\\\|BACKEND\\\\|API_URL\"\" .env* server/.env*)",
+      "Bash(railway variables:*)",
+      "Bash(# Probar descargar una imagen desde Cloudinary \\(la que ya usan en el sitio\\) curl -s -I \"\"https://res.cloudinary.com/dm30xngjj/image/upload/q_auto,f_auto,w_1200/v1768108238/berrybly/hero/luxury_venue_gold_hd.jpg\"\")",
+      "Bash(pnpm build:*)",
+      "Bash(pnpm tsc:*)",
+      "Bash(git push:*)"
     ]
   }
 }
