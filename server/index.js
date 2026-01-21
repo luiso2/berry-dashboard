@@ -2674,8 +2674,11 @@ const authenticateToken = async (req, res, next) => {
   ];
 
   // Check if current path is public
-  // We use startsWith to handle sub-paths (e.g. /api/v1/health/deep)
+  // We explicitly allow all frontend routes (not starting with /api or /oauth)
+  const isFrontendRoute = !req.path.startsWith('/api/') && !req.path.startsWith('/oauth/');
+
   const isPublicPath =
+    isFrontendRoute ||
     req.path.startsWith('/uploads/') ||
     req.path.startsWith('/admin/') ||
     PUBLIC_PATHS.some(path => req.path === path || req.path.startsWith(path + '/')) ||
