@@ -2720,7 +2720,10 @@ const authenticateToken = async (req, res, next) => {
     '/favicon.ico',
     '/api/webhooks/telnyx',
     '/api/webhooks/resend',
-    '/api/webhooks/eventbrite'
+    '/api/webhooks/eventbrite',
+    '/api/v1/auth/eventbrite',
+    '/api/v1/auth/eventbrite/callback',
+    '/api/v1/auth/eventbrite/status'
   ];
 
   // Check if current path is public
