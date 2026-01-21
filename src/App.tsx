@@ -384,6 +384,19 @@ function App() {
                   <button
                     onClick={async () => {
                       const ids = Array.from(state.selectedGuests);
+                      const message = prompt('Enter SMS message to send to selected guests:');
+                      if (message) {
+                        await actions.sendBulkSMS(ids, message, state.guests);
+                        state.setSelectedGuests(new Set());
+                      }
+                    }}
+                    style={{ background: '#8b5cf6', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: 6, fontWeight: 600, cursor: 'pointer', fontSize: 13 }}
+                  >
+                    📱 Send Bulk SMS
+                  </button>
+                  <button
+                    onClick={async () => {
+                      const ids = Array.from(state.selectedGuests);
                       for (const id of ids) {
                         const guest = state.guests.find(g => g.id === id);
                         if (guest) await actions.rejectGuest(guest, false);

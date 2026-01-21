@@ -674,6 +674,42 @@ export function useAppActions(state: AppState, token?: string, userId?: number) 
     }
   }, [addToast, getHeaders]);
 
+  // Send Bulk SMS to multiple guests
+  const sendBulkSMS = useCallback(async (guestIds: string[], message: string, guestList: Guest[]) => {
+    try {
+      // Get phone numbers from guest IDs
+      const recipients = guestIds
+        .map(id => guestList.find(g => g.id === id)?.phone)
+        .filter((phone): phone is string => !!phone && phone.length > 0);
+
+      if (recipients.length === 0) {
+        addToast('No guests with phone numbers selected', 'error');
+        return false;
+      }
+
+      const res = await fetch(`${API_URL}/telnyx/send-bulk-sms`, {
+        method: 'POST',
+        headers: getHeaders('application/json'),
+        body: JSON.stringify({ recipients, message })
+      });
+
+      const data = await res.json();
+
+      if (res.ok && data.success) {
+        const successCount = data.results?.filter((r: { success: boolean }) => r.success).length || recipients.length;
+        addToast(`SMS sent to ${successCount} guests`, 'success');
+        return true;
+      } else {
+        addToast(data.error || 'Failed to send bulk SMS', 'error');
+        return false;
+      }
+    } catch (error) {
+      console.error('Error sending bulk SMS:', error);
+      addToast('Failed to send bulk SMS', 'error');
+      return false;
+    }
+  }, [addToast, getHeaders]);
+
   // Bulk Approve Guests
   const bulkApproveGuests = useCallback(async (guestIds: string[], category: GuestCategory, sendEmails: boolean = true) => {
     try {
@@ -733,6 +769,7 @@ export function useAppActions(state: AppState, token?: string, userId?: number) 
     bulkApproveGuests,
     // SMS
     sendSMS,
+    sendBulkSMS,
   };
 }
 
