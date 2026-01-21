@@ -2723,7 +2723,8 @@ const authenticateToken = async (req, res, next) => {
     '/api/webhooks/eventbrite',
     '/api/v1/auth/eventbrite',
     '/api/v1/auth/eventbrite/callback',
-    '/api/v1/auth/eventbrite/status'
+    '/api/v1/auth/eventbrite/status',
+    '/api/v1/auth/auto-login'
   ];
 
   // Check if current path is public
