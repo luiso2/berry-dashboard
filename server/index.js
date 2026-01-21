@@ -15605,9 +15605,11 @@ app.post('/api/v1/integrations/eventbrite/events', async (req, res) => {
 
     // BUG-06 FIX: Upload image to Eventbrite if logo_url is provided
     let logoId = null;
+    let imageUploadDebug = { steps: [], error: null };
     if (logo_url) {
       console.log(`[${requestId}] 🖼️ Uploading image to Eventbrite...`);
       console.log(`[${requestId}]    - Source URL: ${logo_url}`);
+      imageUploadDebug.steps.push('started');
       try {
         // Step 1: Get upload instructions from Eventbrite
         console.log(`[${requestId}]    - Step 1: Getting upload instructions...`);
@@ -15619,10 +15621,12 @@ app.post('/api/v1/integrations/eventbrite/events', async (req, res) => {
           }
         );
         console.log(`[${requestId}]    - Upload instructions status: ${uploadInstructionsRes.status}`);
+        imageUploadDebug.steps.push(`step1_status_${uploadInstructionsRes.status}`);
 
         if (uploadInstructionsRes.ok) {
           const uploadInstructions = await uploadInstructionsRes.json();
           console.log(`[${requestId}]    - Got upload URL: ${uploadInstructions.upload_url?.substring(0, 50)}...`);
+          imageUploadDebug.steps.push('step1_ok');
 
           // Step 2: Download image (with 2:1 transformation if Cloudinary to ensure Eventbrite compatibility)
           console.log(`[${requestId}]    - Step 2: Downloading image...`);
@@ -15638,6 +15642,7 @@ app.post('/api/v1/integrations/eventbrite/events', async (req, res) => {
 
           const imageResponse = await fetch(downloadUrl);
           console.log(`[${requestId}]    - Image download status: ${imageResponse.status}`);
+          imageUploadDebug.steps.push(`step2_status_${imageResponse.status}`);
 
           if (imageResponse.ok) {
             // FIX: Use arrayBuffer() and Buffer.from() for compatibility with native fetch and node-fetch
@@ -15674,8 +15679,10 @@ app.post('/api/v1/integrations/eventbrite/events', async (req, res) => {
               headers: formData.getHeaders()
             });
             console.log(`[${requestId}]    - S3 upload status: ${uploadRes.status}`);
+            imageUploadDebug.steps.push(`step3_status_${uploadRes.status}`);
 
             if (uploadRes.ok) {
+              imageUploadDebug.steps.push('step3_ok');
               // Step 4: Notify Eventbrite that upload is complete
               console.log(`[${requestId}]    - Step 4: Notifying Eventbrite...`);
               const notifyRes = await fetch(
@@ -15694,27 +15701,34 @@ app.post('/api/v1/integrations/eventbrite/events', async (req, res) => {
                 }
               );
               console.log(`[${requestId}]    - Notify status: ${notifyRes.status}`);
+              imageUploadDebug.steps.push(`step4_status_${notifyRes.status}`);
 
               if (notifyRes.ok) {
                 const mediaResult = await notifyRes.json();
                 logoId = mediaResult.id;
+                imageUploadDebug.steps.push(`step4_ok_logo_${logoId}`);
                 console.log(`[${requestId}] ✅ Image uploaded, logo_id: ${logoId}`);
               } else {
                 const notifyErr = await notifyRes.text();
+                imageUploadDebug.error = `step4_notify_failed: ${notifyErr}`;
                 console.log(`[${requestId}] ⚠️ Notify failed: ${notifyErr}`);
               }
             } else {
               const uploadErr = await uploadRes.text();
+              imageUploadDebug.error = `step3_s3_failed: ${uploadErr}`;
               console.log(`[${requestId}] ⚠️ S3 upload failed: ${uploadErr}`);
             }
           } else {
+            imageUploadDebug.error = 'step2_download_failed';
             console.log(`[${requestId}] ⚠️ Image download failed`);
           }
         } else {
           const instrErr = await uploadInstructionsRes.text();
+          imageUploadDebug.error = `step1_instructions_failed: ${instrErr}`;
           console.log(`[${requestId}] ⚠️ Upload instructions failed: ${instrErr}`);
         }
       } catch (imageError) {
+        imageUploadDebug.error = `exception: ${imageError.message}`;
         console.log(`[${requestId}] ⚠️ Image upload error: ${imageError.message}`);
         // Continue without image - event can still be created
       }
@@ -15833,7 +15847,8 @@ app.post('/api/v1/integrations/eventbrite/events', async (req, res) => {
       portalUrl: portalUrl,  // URL to share on local portal
       eventbriteUrl: ebEvent.url,  // URL on Eventbrite
       eventbrite_event: ebEvent,
-      local_event: localResult.rows[0]
+      local_event: localResult.rows[0],
+      imageUploadDebug: imageUploadDebug  // Debug info for image upload process
     };
 
     console.log(`[${requestId}] 📤 Sending response to frontend`);
