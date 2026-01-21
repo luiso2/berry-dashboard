@@ -6,13 +6,14 @@ import { API_URL, ENDPOINTS } from '../constants';
 import { calculateAIScore, statusToCategory } from '../utils';
 
 interface UseGuestsOptions {
+  token?: string;
   autoRefresh?: boolean;
   refreshInterval?: number;
   onError?: (error: string) => void;
 }
 
 export function useGuests(options: UseGuestsOptions = {}) {
-  const { autoRefresh = true, refreshInterval = 10000, onError } = options;
+  const { token, autoRefresh = true, refreshInterval = 10000, onError } = options;
 
   const [guests, setGuests] = useState<Guest[]>([]);
   const [loading, setLoading] = useState(true);
@@ -28,9 +29,20 @@ export function useGuests(options: UseGuestsOptions = {}) {
     scoreMax: 100,
   });
 
+  const getHeaders = useCallback((contentType?: string) => {
+    const headers: HeadersInit = {};
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+    if (contentType) {
+      headers['Content-Type'] = contentType;
+    }
+    return headers;
+  }, [token]);
+
   const fetchGuests = useCallback(async () => {
     try {
-      const res = await fetch(`${API_URL}${ENDPOINTS.guests}`);
+      const res = await fetch(`${API_URL}${ENDPOINTS.guests}`, { headers: getHeaders() });
       const responseData = await res.json();
 
       // Handle berry-bly API response format: { entries: [...], total, limit, offset }
@@ -68,7 +80,7 @@ export function useGuests(options: UseGuestsOptions = {}) {
     } finally {
       setLoading(false);
     }
-  }, [onError]);
+  }, [onError, getHeaders]);
 
   // Auto-refresh
   useEffect(() => {
@@ -149,7 +161,7 @@ export function useGuests(options: UseGuestsOptions = {}) {
     try {
       const res = await fetch(`${API_URL}${ENDPOINTS.guests}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getHeaders('application/json'),
         body: JSON.stringify(guestData),
       });
       if (!res.ok) throw new Error('Failed to add guest');
@@ -159,12 +171,13 @@ export function useGuests(options: UseGuestsOptions = {}) {
       onError?.('Error adding guest');
       return false;
     }
-  }, [fetchGuests, onError]);
+  }, [fetchGuests, onError, getHeaders]);
 
   const removeGuest = useCallback(async (id: string) => {
     try {
       const res = await fetch(`${API_URL}${ENDPOINTS.guests}/${id}`, {
         method: 'DELETE',
+        headers: getHeaders(),
       });
       if (!res.ok) throw new Error('Failed to remove guest');
       setGuests((prev) => prev.filter((g) => g.id !== id));
@@ -178,14 +191,14 @@ export function useGuests(options: UseGuestsOptions = {}) {
       onError?.('Error removing guest');
       return false;
     }
-  }, [onError]);
+  }, [onError, getHeaders]);
 
   const updateGuestCategory = useCallback(async (ids: string[], category: GuestCategory) => {
     try {
       await Promise.all(ids.map((id) =>
         fetch(`${API_URL}${ENDPOINTS.guests}/${id}`, {
           method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
+          headers: getHeaders('application/json'),
           body: JSON.stringify({ category }),
         })
       ));
@@ -195,7 +208,7 @@ export function useGuests(options: UseGuestsOptions = {}) {
       onError?.('Error updating guest category');
       return false;
     }
-  }, [fetchGuests, onError]);
+  }, [fetchGuests, onError, getHeaders]);
 
   return {
     // Data

@@ -413,7 +413,7 @@ export function useAppActions(state: AppState, token?: string, userId?: number) 
       await Promise.all(ids.map(id =>
         fetch(`${API_URL}${ENDPOINTS.guests}/${id}`, {
           method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
+          headers: getHeaders('application/json'),
           body: JSON.stringify({ category })
         })
       ));

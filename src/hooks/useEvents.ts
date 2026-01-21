@@ -14,21 +14,33 @@ interface EventStats {
 }
 
 interface UseEventsOptions {
+  token?: string;
   onError?: (error: string) => void;
   onSuccess?: (message: string) => void;
 }
 
 export function useEvents(options: UseEventsOptions = {}) {
-  const { onError, onSuccess } = options;
+  const { token, onError, onSuccess } = options;
 
   const [events, setEvents] = useState<Event[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
 
+  const getHeaders = useCallback((contentType?: string) => {
+    const headers: HeadersInit = {};
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+    if (contentType) {
+      headers['Content-Type'] = contentType;
+    }
+    return headers;
+  }, [token]);
+
   const fetchEvents = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${API_URL}/events`);
+      const res = await fetch(`${API_URL}/events`, { headers: getHeaders() });
       if (!res.ok) throw new Error('Failed to fetch events');
       const data = await res.json();
       setEvents(data.events || data || []);
@@ -38,7 +50,7 @@ export function useEvents(options: UseEventsOptions = {}) {
     } finally {
       setLoading(false);
     }
-  }, [onError]);
+  }, [onError, getHeaders]);
 
   const stats = useMemo((): EventStats => {
     const now = new Date();
@@ -58,7 +70,7 @@ export function useEvents(options: UseEventsOptions = {}) {
     try {
       const res = await fetch(`${API_URL}/events`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getHeaders('application/json'),
         body: JSON.stringify(eventData),
       });
       if (!res.ok) throw new Error('Failed to create event');
@@ -71,13 +83,13 @@ export function useEvents(options: UseEventsOptions = {}) {
       onError?.('Error creating event');
       return null;
     }
-  }, [fetchEvents, onError, onSuccess]);
+  }, [fetchEvents, onError, onSuccess, getHeaders]);
 
   const updateEvent = useCallback(async (id: number, eventData: Partial<Event>) => {
     try {
       const res = await fetch(`${API_URL}/events/${id}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getHeaders('application/json'),
         body: JSON.stringify(eventData),
       });
       if (!res.ok) throw new Error('Failed to update event');
@@ -89,12 +101,13 @@ export function useEvents(options: UseEventsOptions = {}) {
       onError?.('Error updating event');
       return false;
     }
-  }, [fetchEvents, onError, onSuccess]);
+  }, [fetchEvents, onError, onSuccess, getHeaders]);
 
   const deleteEvent = useCallback(async (id: number) => {
     try {
       const res = await fetch(`${API_URL}/events/${id}`, {
         method: 'DELETE',
+        headers: getHeaders(),
       });
       if (!res.ok) throw new Error('Failed to delete event');
       setEvents((prev) => prev.filter((e) => e.id !== id));
@@ -108,7 +121,7 @@ export function useEvents(options: UseEventsOptions = {}) {
       onError?.('Error deleting event');
       return false;
     }
-  }, [selectedEvent, onError, onSuccess]);
+  }, [selectedEvent, onError, onSuccess, getHeaders]);
 
   const duplicateEvent = useCallback(async (event: Event) => {
     const newEvent = {
