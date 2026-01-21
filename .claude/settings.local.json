@@ -35,7 +35,8 @@
       "Bash(# Probar descargar una imagen desde Cloudinary \\(la que ya usan en el sitio\\) curl -s -I \"\"https://res.cloudinary.com/dm30xngjj/image/upload/q_auto,f_auto,w_1200/v1768108238/berrybly/hero/luxury_venue_gold_hd.jpg\"\")",
       "Bash(pnpm build:*)",
       "Bash(pnpm tsc:*)",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Bash(python3:*)"
     ]
   }
 }

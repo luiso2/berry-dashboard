@@ -15660,21 +15660,21 @@ app.post('/api/v1/integrations/eventbrite/events', async (req, res) => {
             console.log(`[${requestId}]    - Step 3: Uploading to Eventbrite S3 (${contentType})...`);
             console.log(`[${requestId}]    - Image buffer size: ${imageBuffer.length} bytes`);
 
-            // Use native FormData (Node 18+) with File API
-            const { File } = await import('buffer');
-            const formData = new FormData();
+            // Use undici for reliable FormData + File handling
+            const { FormData: UndiciFormData, File: UndiciFile, fetch: undiciFetch } = await import('undici');
+            const formData = new UndiciFormData();
 
             // Add all fields from upload_data FIRST (order matters for S3)
             Object.entries(uploadInstructions.upload_data).forEach(([key, value]) => {
               formData.append(key, String(value));
             });
 
-            // Create a File from the buffer (Node 20+ has File in buffer module)
-            const imageFile = new File([imageBuffer], `event-logo.${extension}`, { type: contentType });
+            // Create a File from the buffer using undici's File
+            const imageFile = new UndiciFile([imageBuffer], `event-logo.${extension}`, { type: contentType });
             formData.append('file', imageFile);
 
-            // Upload to Eventbrite's upload URL
-            const uploadRes = await fetch(uploadInstructions.upload_url, {
+            // Upload to Eventbrite's upload URL using undici fetch
+            const uploadRes = await undiciFetch(uploadInstructions.upload_url, {
               method: 'POST',
               body: formData
             });
