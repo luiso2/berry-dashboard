@@ -2090,7 +2090,7 @@ app.use((req, res, next) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
   }
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, X-Eventbrite-User-Id');
   res.setHeader('Access-Control-Allow-Credentials', 'true');
   res.setHeader('Access-Control-Max-Age', '86400');
 
@@ -2105,7 +2105,7 @@ app.use((req, res, next) => {
 app.use(cors({
   origin: true, // Allow all origins
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-Eventbrite-User-Id'],
   credentials: true
 }));
 app.use(express.json());
@@ -15660,8 +15660,8 @@ app.post('/api/v1/integrations/eventbrite/events', async (req, res) => {
             console.log(`[${requestId}]    - Step 3: Uploading to Eventbrite S3 (${contentType})...`);
             console.log(`[${requestId}]    - Image buffer size: ${imageBuffer.length} bytes`);
 
-            // Use undici for reliable FormData + File handling
-            const { FormData: UndiciFormData, File: UndiciFile, fetch: undiciFetch } = await import('undici');
+            // Use undici for reliable FormData handling with Blob
+            const { FormData: UndiciFormData, fetch: undiciFetch } = await import('undici');
             const formData = new UndiciFormData();
 
             // Add all fields from upload_data FIRST (order matters for S3)
@@ -15669,9 +15669,9 @@ app.post('/api/v1/integrations/eventbrite/events', async (req, res) => {
               formData.append(key, String(value));
             });
 
-            // Create a File from the buffer using undici's File
-            const imageFile = new UndiciFile([imageBuffer], `event-logo.${extension}`, { type: contentType });
-            formData.append('file', imageFile);
+            // Create a Blob from the buffer and append as file
+            const imageBlob = new Blob([imageBuffer], { type: contentType });
+            formData.append('file', imageBlob, `event-logo.${extension}`);
 
             // Upload to Eventbrite's upload URL using undici fetch
             const uploadRes = await undiciFetch(uploadInstructions.upload_url, {
