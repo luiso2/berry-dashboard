@@ -15521,9 +15521,19 @@ app.post('/api/v1/integrations/eventbrite/events', async (req, res) => {
           const uploadInstructions = await uploadInstructionsRes.json();
           console.log(`[${requestId}]    - Got upload URL: ${uploadInstructions.upload_url?.substring(0, 50)}...`);
 
-          // Step 2: Download image from our Cloudinary URL
-          console.log(`[${requestId}]    - Step 2: Downloading image from Cloudinary...`);
-          const imageResponse = await fetch(logo_url);
+          // Step 2: Download image (with 2:1 transformation if Cloudinary to ensure Eventbrite compatibility)
+          console.log(`[${requestId}]    - Step 2: Downloading image...`);
+
+          let downloadUrl = logo_url;
+          // Force 2:1 aspect ratio (1200x600) via Cloudinary transformation if applicable
+          if (logo_url.includes('cloudinary.com') && logo_url.includes('/upload/')) {
+             const parts = logo_url.split('/upload/');
+             // Inject crop and resize parameters: c_fill (crop to aspect ratio), w_1200, h_600
+             downloadUrl = `${parts[0]}/upload/c_fill,w_1200,h_600/${parts[1]}`;
+             console.log(`[${requestId}]    - Applied Cloudinary transformation: 1200x600 (2:1)`);
+          }
+
+          const imageResponse = await fetch(downloadUrl);
           console.log(`[${requestId}]    - Image download status: ${imageResponse.status}`);
 
           if (imageResponse.ok) {
@@ -15574,8 +15584,9 @@ app.post('/api/v1/integrations/eventbrite/events', async (req, res) => {
                     'Content-Type': 'application/json'
                   },
                   body: JSON.stringify({
-                    upload_token: uploadInstructions.upload_token
-                    // Removed crop_mask to allow Eventbrite to handle original dimensions
+                    upload_token: uploadInstructions.upload_token,
+                    // Restore crop_mask with known dimensions (matching our Cloudinary transform)
+                    crop_mask: { top_left: { x: 0, y: 0 }, width: 1200, height: 600 }
                   })
                 }
               );

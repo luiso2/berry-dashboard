@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 
-const API_URL = import.meta.env.VITE_API_URL || 'https://berry-dashboard-api-production.up.railway.app/api/v1';
+const API_URL = import.meta.env.VITE_API_URL || (import.meta.env.PROD ? '/api/v1' : 'http://localhost:8080/api/v1');
 
 interface SponsorData {
   companyName: string;

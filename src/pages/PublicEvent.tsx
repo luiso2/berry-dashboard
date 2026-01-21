@@ -3,8 +3,10 @@ import { useParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 
 // API Configuration
-const LOCAL_API = 'http://localhost:3001/api/v1';
-const API_URL = import.meta.env.VITE_API_URL || LOCAL_API;
+// API Configuration
+const LOCAL_API = 'http://localhost:8080/api/v1';
+// Use relative path in production to avoid CORS and mixed content issues
+const API_URL = import.meta.env.VITE_API_URL || (import.meta.env.PROD ? '/api/v1' : LOCAL_API);
 
 // Event Design Templates
 const EVENT_TEMPLATES = [
