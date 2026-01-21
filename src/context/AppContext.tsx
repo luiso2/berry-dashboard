@@ -19,8 +19,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const state = useAppState();
   const actions = useAppActions(state, token ?? undefined, user?.id);
 
-  // Initialize data on mount
+  // Initialize data on mount - wait for token to be available
   useEffect(() => {
+    if (!token) return; // Don't fetch until authenticated
+
     actions.fetchGuests();
     actions.fetchEvents();
     actions.fetchIntegrations();
@@ -32,10 +34,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }, 10000);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [token]);
 
   // Fetch module data when view changes
   useEffect(() => {
+    if (!token) return; // Don't fetch until authenticated
+
     const view = state.activeView;
 
     if (view === 'events') actions.fetchEvents();
@@ -51,7 +55,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (view === 'promoters') actions.fetchPromoters();
     if (view === 'eventbrite') actions.fetchEventbriteMetrics();
     if (view === 'sms') actions.fetchSmsStats();
-  }, [state.activeView]);
+  }, [state.activeView, token]);
 
   // Keyboard shortcuts
   useEffect(() => {
