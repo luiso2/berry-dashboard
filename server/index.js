@@ -2504,11 +2504,28 @@ app.post('/oauth/register', async (req, res) => {
 app.delete('/admin/users/:email', async (req, res) => {
   try {
     const { email } = req.params;
-    const adminKey = req.headers['x-admin-key'];
+    const adminKeyHeader = req.headers['x-admin-key'];
+    const adminKey = process.env.ADMIN_API_KEY;
 
-    // Simple admin key check
-    if (adminKey !== 'berry-admin-2025') {
+    // Require admin API key configured and provided
+    if (!adminKey || adminKeyHeader !== adminKey) {
       return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    // Require a valid bearer token as an extra safeguard
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+    const token = authHeader.substring(7);
+    const tokenResult = await pool.query(
+      `SELECT u.* FROM users u
+       JOIN oauth_tokens t ON u.id = t.user_id
+       WHERE t.access_token = $1 AND t.expires_at > NOW()`,
+      [token]
+    );
+    if (tokenResult.rows.length === 0) {
+      return res.status(401).json({ error: 'Invalid or expired token' });
     }
 
     // Delete oauth tokens first
@@ -2589,7 +2606,7 @@ app.post('/oauth/forgot-password', async (req, res) => {
     const user = userResult.rows[0];
 
     // Generate reset token
-    const resetToken = require('crypto').randomBytes(32).toString('hex');
+    const resetToken = crypto.randomBytes(32).toString('hex');
     const resetExpires = new Date(Date.now() + 3600000); // 1 hour from now
 
     // Store reset token in database
@@ -2639,8 +2656,7 @@ app.post('/oauth/reset-password', async (req, res) => {
     const user = userResult.rows[0];
 
     // Hash new password
-    const bcrypt = require('bcryptjs');
-    const hashedPassword = await bcrypt.hash(password, 10);
+    const hashedPassword = await bcrypt.hash(password, BCRYPT_ROUNDS);
 
     // Update password and clear reset token
     await pool.query(
@@ -2677,14 +2693,16 @@ const authenticateToken = async (req, res, next) => {
   // We explicitly allow all frontend routes (not starting with /api or /oauth)
   const isFrontendRoute = !req.path.startsWith('/api/') && !req.path.startsWith('/oauth/');
 
+  const isPublicEventDetail = req.method === 'GET' && /^\/api\/v1\/events\/[^/]+$/.test(req.path);
+  const isSponsorPortalPath = req.method === 'GET' && req.path.startsWith('/api/v1/sponsor-portal/');
+
   const isPublicPath =
     isFrontendRoute ||
     req.path.startsWith('/uploads/') ||
-    req.path.startsWith('/admin/') ||
     PUBLIC_PATHS.some(path => req.path === path || req.path.startsWith(path + '/')) ||
     (req.method === 'POST' && req.path === '/api/v1/guest-lists') ||
-    (req.method === 'GET' && req.path.startsWith('/api/v1/events/')) ||
-    (req.method === 'GET' && req.path.startsWith('/api/v1/sponsor-portal/'));
+    isPublicEventDetail ||
+    isSponsorPortalPath;
 
   const authHeader = req.headers.authorization;
 
