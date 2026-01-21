@@ -39,7 +39,13 @@
       "Bash(python3:*)",
       "Bash(__NEW_LINE_7235da9452bab92a__ TOKEN=\"70725e8fc5ea923313468dfab182aa39f9e72ef0e97b0138a869f06e1510c736\")",
       "Bash(IMAGE_URL=\"https://res.cloudinary.com/dm30xngjj/image/upload/v1768968259/berry-events/qza0gckjmp9gioyrk8op.png\":*)",
-      "Bash(wc:*)"
+      "Bash(wc:*)",
+      "mcp__railway__deploy",
+      "Bash(railway up:*)",
+      "mcp__telnyx__list_phone_numbers",
+      "mcp__telnyx__send_message",
+      "mcp__telnyx__update_phone_number_messaging_settings",
+      "mcp__railway__get-logs"
     ]
   }
 }

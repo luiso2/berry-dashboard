@@ -2717,7 +2717,10 @@ const authenticateToken = async (req, res, next) => {
     '/api/health',
     '/api/v1/health',
     '/api/v1/version',
-    '/favicon.ico'
+    '/favicon.ico',
+    '/api/webhooks/telnyx',
+    '/api/webhooks/resend',
+    '/api/webhooks/eventbrite'
   ];
 
   // Check if current path is public
