@@ -15456,6 +15456,87 @@ app.get('/api/v1/integrations/eventbrite/reports/summary', async (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// AI EVENT DESCRIPTION GENERATOR
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// POST /api/v1/ai/generate-event - Generate event description with AI
+app.post('/api/v1/ai/generate-event', async (req, res) => {
+  try {
+    const { name, type, date, venue, additionalInfo } = req.body;
+
+    if (!name) {
+      return res.status(400).json({ error: 'Event name is required' });
+    }
+
+    const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+    if (!OPENAI_API_KEY) {
+      return res.status(500).json({ error: 'OpenAI API key not configured' });
+    }
+
+    const prompt = `You are an expert event marketing copywriter for Berry Bly Productions, a luxury events company in Los Angeles/Miami.
+
+Generate compelling event content for:
+- Event Name: ${name}
+- Event Type: ${type || 'Luxury Party'}
+- Date: ${date || 'TBD'}
+- Venue: ${venue || 'TBD'}
+${additionalInfo ? `- Additional Info: ${additionalInfo}` : ''}
+
+Respond in JSON format with these fields:
+{
+  "description": "A compelling 2-3 paragraph description that creates excitement and urgency. Highlight the exclusive nature, VIP experience, and what makes this event unmissable. Use elegant, sophisticated language.",
+  "shortSummary": "A 1-2 sentence teaser for social media (max 150 chars)",
+  "suggestedTags": ["tag1", "tag2", "tag3"],
+  "dressCode": "Suggested dress code",
+  "highlights": ["highlight1", "highlight2", "highlight3"]
+}
+
+Make it luxurious, exclusive, and enticing. This is a premium event.`;
+
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${OPENAI_API_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0.8,
+        max_tokens: 1000
+      })
+    });
+
+    if (!response.ok) {
+      const err = await response.text();
+      console.error('OpenAI error:', err);
+      return res.status(500).json({ error: 'Failed to generate content' });
+    }
+
+    const data = await response.json();
+    const content = data.choices[0]?.message?.content;
+
+    // Parse JSON from response
+    try {
+      const jsonMatch = content.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const parsed = JSON.parse(jsonMatch[0]);
+        return res.json({ success: true, ...parsed });
+      }
+    } catch (parseErr) {
+      console.error('Failed to parse AI response:', parseErr);
+    }
+
+    // Fallback: return raw content
+    res.json({ success: true, description: content });
+
+  } catch (error) {
+    console.error('AI generation error:', error);
+    res.status(500).json({ error: 'Failed to generate event content' });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // FEATURE 5: CREATE EVENTS ON EVENTBRITE
 // ═══════════════════════════════════════════════════════════════════════════════
 

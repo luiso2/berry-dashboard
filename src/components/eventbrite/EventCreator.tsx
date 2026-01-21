@@ -126,6 +126,49 @@ export function EventCreator({ onEventCreated }: EventCreatorProps) {
   ]);
 
   const [tagInput, setTagInput] = useState('');
+  const [generatingAI, setGeneratingAI] = useState(false);
+
+  // Generate event description with AI
+  const generateWithAI = async () => {
+    if (!eventData.name) {
+      setError('Please enter an event name first');
+      return;
+    }
+
+    setGeneratingAI(true);
+    setError(null);
+
+    try {
+      const response = await fetch(`${API_URL}/ai/generate-event`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: eventData.name,
+          type: eventData.category,
+          date: eventData.start_date,
+          venue: eventData.online_event ? 'Online Event' : eventData.venue_name,
+          additionalInfo: eventData.summary
+        })
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        setEventData(prev => ({
+          ...prev,
+          description: data.description || prev.description,
+          summary: data.shortSummary || prev.summary,
+          tags: data.suggestedTags || prev.tags
+        }));
+      } else {
+        setError(data.error || 'Failed to generate content');
+      }
+    } catch (err) {
+      setError('Failed to connect to AI service');
+    } finally {
+      setGeneratingAI(false);
+    }
+  };
 
   const headers = {
     'Content-Type': 'application/json',
@@ -854,11 +897,33 @@ export function EventCreator({ onEventCreated }: EventCreatorProps) {
 
           {/* Full Description */}
           <div className="bg-white/5 rounded-xl p-6 border border-white/10">
-            <h3 className="text-white font-semibold text-lg mb-4 flex items-center gap-2">
-              <span className="text-2xl">📖</span> Description
-            </h3>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-white font-semibold text-lg flex items-center gap-2">
+                <span className="text-2xl">📖</span> Description
+              </h3>
+              <button
+                type="button"
+                onClick={generateWithAI}
+                disabled={generatingAI || !eventData.name}
+                className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-all"
+              >
+                {generatingAI ? (
+                  <>
+                    <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                    </svg>
+                    Generating...
+                  </>
+                ) : (
+                  <>
+                    <span>✨</span> Generate with AI
+                  </>
+                )}
+              </button>
+            </div>
             <p className="text-white/60 text-sm mb-4">
-              Tell people everything they need to know about your event.
+              Tell people everything they need to know about your event, or click "Generate with AI" to create a compelling description automatically.
             </p>
             <textarea
               value={eventData.description}
