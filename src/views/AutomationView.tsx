@@ -44,7 +44,7 @@ const TRIGGER_TYPES = [
   { value: 'webhook', label: 'Webhook', icon: '🔗', description: 'Run when external webhook is triggered' },
 ];
 
-const ACTION_TYPES = [
+const ACTION_TYPES: { value: AutomationAction['type']; label: string; icon: string }[] = [
   { value: 'send_email', label: 'Send Email', icon: '✉️' },
   { value: 'send_sms', label: 'Send SMS', icon: '📱' },
   { value: 'update_guest', label: 'Update Guest', icon: '👤' },
@@ -75,7 +75,7 @@ export function AutomationView({ onToast }: AutomationViewProps) {
     triggerEvent: 'guest_added',
     scheduleInterval: '1h',
     isActive: true,
-    actions: [] as { type: string; config: Record<string, unknown> }[],
+    actions: [] as { type: AutomationAction['type']; config: Record<string, unknown> }[],
   });
 
   // Fetch automations
@@ -219,10 +219,10 @@ export function AutomationView({ onToast }: AutomationViewProps) {
   };
 
   // Add action to form
-  const handleAddAction = (type: string) => {
+  const handleAddAction = (type: AutomationAction['type']) => {
     setFormData(prev => ({
       ...prev,
-      actions: [...prev.actions, { type, config: {} }],
+      actions: [...prev.actions, { type, config: {} as Record<string, unknown> }],
     }));
   };
 
