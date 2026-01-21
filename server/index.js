@@ -11529,7 +11529,7 @@ app.post('/api/webhooks/telnyx/sms', async (req, res) => {
 ABOUT US:
 - We organize exclusive luxury events, VIP parties, fashion shows, and high-profile networking experiences
 - Locations: Miami, FL - venues include LIV Miami, E11EVEN, Faena Hotel, Setai
-- Website: berry.merktop.com | Email: concierge@berrybly.com
+- Website: berryblyproduction.com | Email: concierge@berrybly.com
 
 COMMON ANSWERS:
 - Dress Code: Upscale/cocktail attire. Gentlemen: dress shoes required, no athletic wear. Ladies: elegant attire.
@@ -15822,7 +15822,7 @@ app.post('/api/v1/integrations/eventbrite/events', async (req, res) => {
     console.log(`[${requestId}] ✅ Saved to local DB, local ID: ${localResult.rows[0].id}`);
 
     // Build the local portal URL
-    const baseUrl = process.env.FRONTEND_URL || 'https://berry.merktop.com';
+    const baseUrl = process.env.FRONTEND_URL || 'https://berryblyproduction.com';
     const portalUrl = `${baseUrl}/e/${slug}`;
 
     const responseData = {
@@ -17597,7 +17597,7 @@ app.post('/api/v1/ai/query', async (req, res) => {
             specialty: 'Luxury Events & VIP Experiences',
             location: 'Miami, FL',
             contact: 'concierge@berrybly.com',
-            website: 'berry.merktop.com'
+            website: 'berryblyproduction.com'
           }
         };
         break;
