@@ -100,7 +100,7 @@ export default function PublicEvent() {
             venueAddress: data.venueAddress,
             venueCity: data.venueCity,
             template: data.template || 'elegant-dark',
-            coverImage: data.flyerUrl || data.coverImage || data.flyer_url,
+            coverImage: data.cover_image || data.flyerUrl || data.coverImage || data.flyer_url,
             accentColor: data.accentColor || '#d4af37',
             expectedAttendance: data.expectedAttendance,
             dressCode: data.dressCode,
