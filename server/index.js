@@ -1989,6 +1989,8 @@ const allowedOrigins = [
   'https://berry.merktop.com',
   'https://berrybly.com',
   'https://www.berrybly.com',
+  'https://berryblyproduction.com',
+  'https://www.berryblyproduction.com',
   'https://berry-bly-productions.up.railway.app',
   'http://localhost:5173',
   'http://localhost:3000',
