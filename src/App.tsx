@@ -1,7 +1,7 @@
 // App.tsx - Refactored main application component
 // Reduced from ~8500 lines to ~600 lines using hooks and extracted components
 
-import { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useAuth } from './context/AuthContext';
 
 // Hooks
@@ -132,6 +132,8 @@ function App() {
 
   // State for action menu dropdown (must be before any conditional returns)
   const [openActionMenu, setOpenActionMenu] = useState<string | null>(null);
+  // State for expanded guest row (to show Instagram)
+  const [expandedGuest, setExpandedGuest] = useState<string | null>(null);
 
   // View helpers
   const getViewTitle = (): string => {
@@ -495,8 +497,14 @@ function App() {
                     {filteredGuests
                       .filter(g => state.guestTab === 'all' || g.category === 'pending')
                       .map((guest) => (
-                      <tr key={guest.id} style={{ borderBottom: '1px solid #111' }}>
-                        <td style={{ padding: '12px 16px' }}>
+                      <React.Fragment key={guest.id}>
+                      <tr
+                        onClick={() => setExpandedGuest(expandedGuest === guest.id ? null : guest.id)}
+                        style={{ borderBottom: expandedGuest === guest.id ? 'none' : '1px solid #111', cursor: 'pointer', transition: 'background 0.2s' }}
+                        onMouseEnter={(e) => e.currentTarget.style.background = '#0a0a0a'}
+                        onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                      >
+                        <td style={{ padding: '12px 16px' }} onClick={(e) => e.stopPropagation()}>
                           <input
                             type="checkbox"
                             checked={state.selectedGuests.has(guest.id)}
@@ -522,7 +530,10 @@ function App() {
                             }}>
                               {guest.name.charAt(0).toUpperCase()}
                             </div>
-                            <span>{guest.name}</span>
+                            <div>
+                              <span>{guest.name}</span>
+                              {guest.instagram && <span style={{ color: '#d4af37', fontSize: 11, marginLeft: 8 }}>📸</span>}
+                            </div>
                           </div>
                         </td>
                         <td style={{ padding: '12px 16px', color: '#888' }}>{guest.email}</td>
@@ -642,6 +653,43 @@ function App() {
                           </ActionMenuModal>
                         </td>
                       </tr>
+                      {expandedGuest === guest.id && (
+                        <tr style={{ background: '#0a0a0a', borderBottom: '1px solid #111' }}>
+                          <td colSpan={8} style={{ padding: '16px 16px 16px 58px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 24 }}>
+                              {guest.instagram ? (
+                                <a
+                                  href={`https://instagram.com/${guest.instagram.replace('@', '')}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: 8,
+                                    color: '#d4af37',
+                                    textDecoration: 'none',
+                                    padding: '8px 16px',
+                                    background: 'rgba(212, 175, 55, 0.1)',
+                                    borderRadius: 8,
+                                    border: '1px solid rgba(212, 175, 55, 0.2)',
+                                    fontSize: 14,
+                                    fontWeight: 500,
+                                  }}
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  📸 @{guest.instagram.replace('@', '')}
+                                </a>
+                              ) : (
+                                <span style={{ color: '#666', fontSize: 13 }}>No Instagram</span>
+                              )}
+                              {guest.notes && (
+                                <span style={{ color: '#888', fontSize: 13 }}>📝 {guest.notes}</span>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                      </React.Fragment>
                     ))}
                   </tbody>
                 </table>
