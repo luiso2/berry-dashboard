@@ -52,6 +52,7 @@ const initialFilters: Filters = {
   search: '',
   category: 'all',
   emailStatus: 'all',
+  gender: 'all',
   dateFrom: '',
   dateTo: '',
   scoreMin: 0,

@@ -23,6 +23,7 @@ export function useGuests(options: UseGuestsOptions = {}) {
     search: '',
     category: 'all',
     emailStatus: 'all',
+    gender: 'all',
     dateFrom: '',
     dateTo: '',
     scoreMin: 0,

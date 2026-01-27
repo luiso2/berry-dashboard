@@ -71,6 +71,7 @@ export interface Filters {
   search: string;
   category: GuestCategory | 'all';
   emailStatus: 'all' | 'sent' | 'not_sent';
+  gender: 'all' | 'female' | 'male' | 'other';
   dateFrom: string;
   dateTo: string;
   scoreMin: number;
