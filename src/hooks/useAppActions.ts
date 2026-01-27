@@ -426,6 +426,29 @@ export function useAppActions(state: AppState, token?: string, userId?: number) 
     }
   }, [fetchGuests, addToast, getHeaders]);
 
+  // Update Guest Gender
+  const updateGuestGender = useCallback(async (id: string, gender: string) => {
+    try {
+      const res = await fetch(`${API_URL}${ENDPOINTS.guests}/${id}`, {
+        method: 'PUT',
+        headers: getHeaders('application/json'),
+        body: JSON.stringify({ gender })
+      });
+      if (res.ok) {
+        setGuests(prev => prev.map(g =>
+          g.id === id ? { ...g, gender } : g
+        ));
+        addToast(`Gender updated to ${gender}`, 'success');
+        return true;
+      }
+      return false;
+    } catch (error) {
+      console.error('Error updating gender:', error);
+      addToast('Failed to update gender', 'error');
+      return false;
+    }
+  }, [setGuests, addToast, getHeaders]);
+
   // Add Guest
   const addGuest = useCallback(async (guestData: any) => {
     try {
@@ -757,6 +780,7 @@ export function useAppActions(state: AppState, token?: string, userId?: number) 
     fetchSmsStats,
     removeGuest,
     updateGuestCategory,
+    updateGuestGender,
     addGuest,
     checkInGuest,
     deleteStaff,

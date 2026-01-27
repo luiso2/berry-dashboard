@@ -705,6 +705,41 @@ function App() {
                               {guest.notes && (
                                 <span style={{ color: '#888', fontSize: 13 }}>📝 {guest.notes}</span>
                               )}
+
+                              {/* Gender Selector */}
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginLeft: 'auto' }} onClick={(e) => e.stopPropagation()}>
+                                <span style={{ color: '#666', fontSize: 12 }}>Gender:</span>
+                                <button
+                                  onClick={() => actions.updateGuestGender(guest.id, 'female')}
+                                  style={{
+                                    background: guest.gender?.toLowerCase() === 'female' ? '#ec4899' : '#1a1a1a',
+                                    border: `1px solid ${guest.gender?.toLowerCase() === 'female' ? '#ec4899' : '#333'}`,
+                                    color: guest.gender?.toLowerCase() === 'female' ? '#fff' : '#888',
+                                    padding: '4px 12px',
+                                    borderRadius: 6,
+                                    fontSize: 12,
+                                    cursor: 'pointer',
+                                    fontWeight: guest.gender?.toLowerCase() === 'female' ? 600 : 400,
+                                  }}
+                                >
+                                  👩 Female
+                                </button>
+                                <button
+                                  onClick={() => actions.updateGuestGender(guest.id, 'male')}
+                                  style={{
+                                    background: guest.gender?.toLowerCase() === 'male' ? '#3b82f6' : '#1a1a1a',
+                                    border: `1px solid ${guest.gender?.toLowerCase() === 'male' ? '#3b82f6' : '#333'}`,
+                                    color: guest.gender?.toLowerCase() === 'male' ? '#fff' : '#888',
+                                    padding: '4px 12px',
+                                    borderRadius: 6,
+                                    fontSize: 12,
+                                    cursor: 'pointer',
+                                    fontWeight: guest.gender?.toLowerCase() === 'male' ? 600 : 400,
+                                  }}
+                                >
+                                  👨 Male
+                                </button>
+                              </div>
                             </div>
                           </td>
                         </tr>

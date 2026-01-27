@@ -4320,7 +4320,7 @@ const updateGuestListHandler = async (req, res) => {
   try {
     const { id } = req.params;
     // Accept both 'status' and 'category' for frontend compatibility
-    const { status, category, notes, emailSent, emailSentAt } = req.body;
+    const { status, category, notes, emailSent, emailSentAt, gender } = req.body;
 
     // Map category to status if provided
     const categoryToStatusMap = {
@@ -4363,6 +4363,10 @@ const updateGuestListHandler = async (req, res) => {
     if (emailSentAt !== undefined) {
       updates.push(`email_sent_at = $${paramIndex++}`);
       params.push(emailSentAt);
+    }
+    if (gender !== undefined) {
+      updates.push(`gender = $${paramIndex++}`);
+      params.push(gender);
     }
 
     // Always update updated_at
