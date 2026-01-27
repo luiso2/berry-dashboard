@@ -57,6 +57,7 @@ interface RsvpForm {
   name: string;
   email: string;
   phone: string;
+  instagram: string;
   partySize: number;
   notes: string;
   gender: string;
@@ -74,6 +75,7 @@ export default function PublicEvent() {
     name: '',
     email: '',
     phone: '',
+    instagram: '',
     partySize: 1,
     notes: '',
     gender: '',
@@ -150,6 +152,7 @@ export default function PublicEvent() {
           name: rsvpForm.name,
           email: rsvpForm.email,
           phone: rsvpForm.phone,
+          instagram: rsvpForm.instagram,
           partySize: rsvpForm.partySize,
           notes: rsvpForm.notes,
           eventId: event.id,
@@ -565,6 +568,21 @@ export default function PublicEvent() {
                       <option value="other">Other</option>
                     </select>
                   </div>
+                  <input
+                    type="text"
+                    placeholder="Instagram @username"
+                    value={rsvpForm.instagram}
+                    onChange={e => setRsvpForm(p => ({ ...p, instagram: e.target.value }))}
+                    style={{
+                      width: '100%',
+                      padding: '14px 16px',
+                      background: 'rgba(255,255,255,0.1)',
+                      border: '1px solid rgba(255,255,255,0.2)',
+                      borderRadius: 8,
+                      color: '#fff',
+                      fontSize: 16,
+                    }}
+                  />
                   {event.allowPlusOne && (
                     <div>
                       <label style={{ display: 'block', fontSize: 14, marginBottom: 8, opacity: 0.8 }}>
