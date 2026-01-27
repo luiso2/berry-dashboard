@@ -67,6 +67,7 @@ export function useAppActions(state: AppState, token?: string, userId?: number) 
         createdAt: g.createdAt || g.created_at || new Date().toISOString(),
         checkedInAt: g.checkedInAt || g.checked_in_at,
         eventId: g.eventId || g.event_id,
+        gender: g.gender || '',
       })) : [];
 
       const guestsWithScores = transformedData.map((g: Guest) => ({
