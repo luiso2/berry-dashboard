@@ -119,7 +119,7 @@ function App() {
       if (category !== 'all' && guest.category !== category) return false;
       if (emailStatus === 'sent' && !guest.emailSent) return false;
       if (emailStatus === 'not_sent' && guest.emailSent) return false;
-      if (gender !== 'all' && guest.gender !== gender) return false;
+      if (gender !== 'all' && guest.gender?.toLowerCase() !== gender) return false;
 
       if (dateFrom && guest.eventDate && new Date(guest.eventDate) < new Date(dateFrom)) return false;
       if (dateTo && guest.eventDate && new Date(guest.eventDate) > new Date(dateTo)) return false;
@@ -474,12 +474,12 @@ function App() {
               <TabBtn
                 active={state.filters.gender === 'female'}
                 onClick={() => state.setFilters({ ...state.filters, gender: 'female' })}
-                label={`👩 Women (${state.guests.filter(g => g.gender === 'female').length})`}
+                label={`👩 Women (${state.guests.filter(g => g.gender?.toLowerCase() === 'female').length})`}
               />
               <TabBtn
                 active={state.filters.gender === 'male'}
                 onClick={() => state.setFilters({ ...state.filters, gender: 'male' })}
-                label={`👨 Men (${state.guests.filter(g => g.gender === 'male').length})`}
+                label={`👨 Men (${state.guests.filter(g => g.gender?.toLowerCase() === 'male').length})`}
               />
             </div>
 
