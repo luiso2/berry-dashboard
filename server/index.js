@@ -1852,6 +1852,45 @@ const initDatabase = async () => {
     `);
     console.log('Eventbrite refunds table initialized');
 
+    // ============================================
+    // GUEST_LISTS TABLE MIGRATIONS
+    // ============================================
+
+    // Create guest_lists table if not exists (may have been created externally)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS guest_lists (
+        id VARCHAR(50) PRIMARY KEY,
+        event_id VARCHAR(100),
+        name VARCHAR(255) NOT NULL,
+        email VARCHAR(255) NOT NULL,
+        phone VARCHAR(100) DEFAULT '',
+        instagram VARCHAR(255) DEFAULT '',
+        number_of_guests INTEGER DEFAULT 1,
+        vip_preferences TEXT DEFAULT '',
+        gender VARCHAR(20) DEFAULT '',
+        status VARCHAR(50) DEFAULT 'pending',
+        notes TEXT,
+        email_sent BOOLEAN DEFAULT false,
+        email_sent_at TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    // Ensure instagram column exists (for tables created without it)
+    await client.query(`
+      DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='guest_lists' AND column_name='instagram') THEN
+          ALTER TABLE guest_lists ADD COLUMN instagram VARCHAR(255) DEFAULT '';
+        END IF;
+      END $$;
+    `);
+
+    // Update existing records with NULL instagram to empty string
+    await client.query(`UPDATE guest_lists SET instagram = '' WHERE instagram IS NULL`);
+
+    console.log('guest_lists table initialized with instagram column');
+
     dbInitStatus.completed = true;
     console.log('Database tables initialized successfully (guests, email_events, tickets, activity_log, sponsors, events, budgets, vendors, staff, contracts, client_access, integrations, promoters, file_uploads)');
   } catch (error) {
@@ -4230,6 +4269,18 @@ app.post('/api/v1/guest-lists', async (req, res) => {
         END IF;
       END $$;
     `);
+
+    // Ensure instagram column exists
+    await pool.query(`
+      DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='guest_lists' AND column_name='instagram') THEN
+          ALTER TABLE guest_lists ADD COLUMN instagram VARCHAR(255) DEFAULT '';
+        END IF;
+      END $$;
+    `);
+
+    // Update existing records that have NULL instagram to empty string
+    await pool.query(`UPDATE guest_lists SET instagram = '' WHERE instagram IS NULL`);
 
     const id = `gst_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
