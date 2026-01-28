@@ -719,6 +719,58 @@ function App() {
                                 <MenuDivider />
                               </>
                             )}
+{/* Change Status Section - visible for all guests */}
+                            {guest.category !== 'pending' && (
+                              <>
+                                <MenuSection title="Change Status">
+                                  {guest.category !== 'A' && (
+                                    <MenuItem
+                                      icon="⭐"
+                                      label="Set as VIP"
+                                      description="Category A - Top priority"
+                                      variant="success"
+                                      onClick={async () => {
+                                        await actions.updateGuestCategory([guest.id], 'A');
+                                        setOpenActionMenu(null);
+                                      }}
+                                    />
+                                  )}
+                                  {guest.category !== 'B' && (
+                                    <MenuItem
+                                      icon="🎯"
+                                      label="Set as Priority"
+                                      description="Category B - High priority"
+                                      onClick={async () => {
+                                        await actions.updateGuestCategory([guest.id], 'B');
+                                        setOpenActionMenu(null);
+                                      }}
+                                    />
+                                  )}
+                                  {guest.category !== 'C' && (
+                                    <MenuItem
+                                      icon="👤"
+                                      label="Set as Standard"
+                                      description="Category C - General admission"
+                                      onClick={async () => {
+                                        await actions.updateGuestCategory([guest.id], 'C');
+                                        setOpenActionMenu(null);
+                                      }}
+                                    />
+                                  )}
+                                  <MenuItem
+                                    icon="⏳"
+                                    label="Set as Pending"
+                                    description="Move back to pending review"
+                                    variant="warning"
+                                    onClick={async () => {
+                                      await actions.updateGuestCategory([guest.id], 'pending');
+                                      setOpenActionMenu(null);
+                                    }}
+                                  />
+                                </MenuSection>
+                                <MenuDivider />
+                              </>
+                            )}
                             <MenuSection title="Communications">
                               <MenuItem
                                 icon="✉️"
