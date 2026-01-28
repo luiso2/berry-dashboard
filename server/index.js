@@ -4157,6 +4157,121 @@ app.get('/api/health', async (req, res) => {
 // No longer depends on monorepo - uses local guests table
 // ============================================
 
+// Helper to detect gender from first name
+const detectGenderFromName = (fullName) => {
+  if (!fullName) return '';
+
+  const firstName = fullName.trim().split(' ')[0].toLowerCase();
+
+  // Common female names
+  const femaleNames = [
+    'abby', 'abigail', 'ada', 'adele', 'adriana', 'agnes', 'aileen', 'aimee', 'alana', 'alejandra',
+    'alessandra', 'alexa', 'alexandra', 'alexis', 'alice', 'alicia', 'alina', 'alison', 'allison', 'alma',
+    'amanda', 'amber', 'amelia', 'amy', 'ana', 'anastasia', 'andrea', 'angela', 'angelica', 'angelina',
+    'angie', 'anita', 'ann', 'anna', 'anne', 'annette', 'annie', 'april', 'ariana', 'ariel',
+    'arlene', 'ashley', 'athena', 'audra', 'audrey', 'aurora', 'ava', 'barbara', 'barbie', 'beatrice',
+    'becky', 'bella', 'bernadette', 'bertha', 'beth', 'bethany', 'betty', 'beverly', 'bianca', 'bienne',
+    'bonnie', 'brenda', 'brianna', 'bridget', 'brittany', 'brooke', 'camila', 'candace', 'carla', 'carmen',
+    'carol', 'carolina', 'caroline', 'carrie', 'cassandra', 'catherine', 'cecilia', 'celeste', 'charlene', 'charlotte',
+    'chelsea', 'cheryl', 'chloe', 'christina', 'christine', 'cindy', 'claire', 'clara', 'claudia', 'colleen',
+    'connie', 'constance', 'cora', 'courtney', 'cristina', 'crystal', 'cynthia', 'daisy', 'dana', 'daniela',
+    'danielle', 'daphne', 'darlene', 'dawn', 'debbie', 'deborah', 'debra', 'delia', 'denise', 'diana',
+    'diane', 'dolores', 'dominique', 'donna', 'dora', 'doris', 'dorothy', 'edith', 'edna', 'eileen',
+    'elaine', 'elena', 'elisa', 'elisabeth', 'eliza', 'elizabeth', 'ella', 'ellen', 'eloise', 'elsa',
+    'elsie', 'emilia', 'emily', 'emma', 'erica', 'erika', 'erin', 'esmeralda', 'estela', 'esther',
+    'eva', 'evelyn', 'faith', 'farah', 'fatima', 'faye', 'felicia', 'fernanda', 'fiona', 'florence',
+    'frances', 'francesca', 'gabriela', 'gabriella', 'gabrielle', 'gail', 'gemma', 'genevieve', 'georgia', 'geraldine',
+    'gina', 'giselle', 'gladys', 'glenda', 'gloria', 'grace', 'gracie', 'greta', 'gwendolyn', 'haley',
+    'hanna', 'hannah', 'harriet', 'hayley', 'heather', 'heidi', 'helen', 'helena', 'henrietta', 'hilary',
+    'hilda', 'holly', 'hope', 'ida', 'iliana', 'imani', 'ines', 'ingrid', 'irene', 'iris',
+    'irma', 'isabel', 'isabella', 'isabelle', 'ivy', 'jackie', 'jacqueline', 'jade', 'jaime', 'jamie',
+    'jan', 'jane', 'janet', 'janice', 'jasmine', 'jean', 'jeanette', 'jeanne', 'jenna', 'jennifer',
+    'jenny', 'jessica', 'jessie', 'jill', 'jillian', 'joanna', 'joanne', 'jocelyn', 'jodi', 'jodie',
+    'johanna', 'jolene', 'jordan', 'josephine', 'joy', 'joyce', 'juanita', 'judith', 'judy', 'julia',
+    'juliana', 'julianna', 'julie', 'juliet', 'julieta', 'june', 'justine', 'kaitlyn', 'kara', 'karen',
+    'karina', 'karla', 'kate', 'katelyn', 'katherine', 'kathleen', 'kathryn', 'kathy', 'katie', 'katrina',
+    'kay', 'kayla', 'kaylee', 'keisha', 'kelly', 'kelsey', 'kendra', 'kennedy', 'kerry', 'kim',
+    'kimberly', 'kirsten', 'kitty', 'krista', 'kristen', 'kristin', 'kristina', 'kristine', 'krystal', 'lacey',
+    'lana', 'larissa', 'latasha', 'latoya', 'laura', 'lauren', 'laurie', 'lea', 'leah', 'leigh',
+    'lena', 'leslie', 'leticia', 'lila', 'lili', 'lilian', 'lillian', 'lily', 'linda', 'lindsay',
+    'lindsey', 'lisa', 'liz', 'liza', 'lizzie', 'logan', 'lois', 'lonee', 'lorena', 'loretta',
+    'lori', 'lorraine', 'louise', 'lucia', 'luciana', 'lucille', 'lucy', 'luisa', 'lupe', 'luz',
+    'lydia', 'lynn', 'mabel', 'mackenzie', 'madeleine', 'madeline', 'madison', 'mae', 'maggie', 'mandy',
+    'marcia', 'margaret', 'margarita', 'maria', 'mariah', 'marian', 'mariana', 'marianne', 'marie', 'marilyn',
+    'marina', 'marisa', 'marissa', 'marjorie', 'marlene', 'marsha', 'martha', 'mary', 'maryann', 'matilda',
+    'maureen', 'maxine', 'maya', 'megan', 'melanie', 'melinda', 'melissa', 'melody', 'mercedes', 'meredith',
+    'mia', 'michaela', 'michele', 'michelle', 'mikayla', 'mildred', 'millie', 'mindy', 'miranda', 'miriam',
+    'misty', 'molly', 'monica', 'monique', 'morgan', 'muriel', 'myra', 'myrna', 'myrtle', 'nadia',
+    'nancy', 'naomi', 'natalia', 'natalie', 'natasha', 'nellie', 'nettie', 'nicole', 'nina', 'noel',
+    'noelle', 'noor', 'nora', 'norma', 'olga', 'olivia', 'opal', 'paige', 'pamela', 'paola',
+    'patricia', 'patsy', 'patty', 'paula', 'pauline', 'pearl', 'peggy', 'penelope', 'penny', 'petra',
+    'phyllis', 'polly', 'priscilla', 'rachel', 'ramona', 'raquel', 'rebecca', 'regina', 'renee', 'rhonda',
+    'rita', 'roberta', 'robin', 'rochelle', 'rosa', 'rosalie', 'rose', 'rosemary', 'rosie', 'roxanne',
+    'ruby', 'ruth', 'sabrina', 'sadie', 'sally', 'samantha', 'sandra', 'sandy', 'sara', 'sarah',
+    'savannah', 'scarlett', 'selena', 'serena', 'shannon', 'shari', 'sharon', 'sheila', 'shelby', 'shelly',
+    'sheri', 'sherri', 'sherry', 'shirley', 'silvia', 'simone', 'skyla', 'sofi', 'sofia', 'sona',
+    'sonia', 'sonja', 'sonya', 'sophia', 'sophie', 'stacey', 'stacy', 'stella', 'stephanie', 'sue',
+    'summer', 'susan', 'susana', 'susanne', 'susie', 'suzanne', 'sylvia', 'tabitha', 'tamara', 'tammy',
+    'tania', 'tanya', 'tara', 'tatiana', 'taylor', 'teresa', 'terri', 'terry', 'tessa', 'thelma',
+    'theresa', 'tiffany', 'tina', 'toni', 'tonya', 'tracey', 'tracy', 'tricia', 'trudy', 'ursula',
+    'valentina', 'valerie', 'vanessa', 'vera', 'veronica', 'vicki', 'vicky', 'victoria', 'violet', 'virginia',
+    'vivian', 'wanda', 'wendy', 'whitney', 'wilma', 'winifred', 'ximena', 'yolanda', 'yvette', 'yvonne',
+    'zara', 'zeliha', 'zoe', 'zoey', 'abisola', 'arshia', 'athena', 'audra', 'jumoke', 'kris', 'yulia', 'yuliia'
+  ];
+
+  // Common male names
+  const maleNames = [
+    'aaron', 'adam', 'adrian', 'aiden', 'alan', 'albert', 'alec', 'alejandro', 'alex', 'alexander',
+    'alexis', 'alfred', 'allen', 'alvin', 'andre', 'andrew', 'andy', 'angelo', 'anthony', 'antonio',
+    'armando', 'arnold', 'arthur', 'austin', 'barry', 'ben', 'benjamin', 'bernard', 'bill', 'billy',
+    'blake', 'bob', 'bobby', 'brad', 'bradley', 'brandon', 'brendan', 'brent', 'brett', 'brian',
+    'bruce', 'bryan', 'byron', 'caleb', 'calvin', 'cameron', 'carl', 'carlos', 'casey', 'chad',
+    'charles', 'charlie', 'chase', 'chester', 'chris', 'christian', 'christopher', 'clarence', 'clark', 'claude',
+    'clayton', 'clifford', 'clint', 'clyde', 'cody', 'colin', 'connor', 'corey', 'cornelius', 'craig',
+    'curtis', 'dale', 'damian', 'damon', 'dan', 'daniel', 'danny', 'darrell', 'darren', 'darryl',
+    'dave', 'david', 'dean', 'dennis', 'derek', 'derrick', 'devin', 'diego', 'dillon', 'dominic',
+    'don', 'donald', 'douglas', 'drew', 'duane', 'dustin', 'dwight', 'dylan', 'earl', 'eddie',
+    'edgar', 'edmund', 'eduardo', 'edward', 'edwin', 'eli', 'elias', 'elijah', 'elliot', 'elliott',
+    'ellis', 'elmer', 'emanuel', 'emilio', 'emmanuel', 'enrique', 'eric', 'erik', 'ernest', 'ethan',
+    'eugene', 'evan', 'everett', 'ezra', 'felix', 'fernando', 'floyd', 'francis', 'francisco', 'frank',
+    'franklin', 'fred', 'frederick', 'gabriel', 'garrett', 'gary', 'gavin', 'gene', 'geoffrey', 'george',
+    'gerald', 'gerardo', 'gilbert', 'giovanni', 'glen', 'glenn', 'gordon', 'graham', 'grant', 'greg',
+    'gregory', 'guillermo', 'gustavo', 'guy', 'harold', 'harry', 'harvey', 'hector', 'henry', 'herbert',
+    'herman', 'homer', 'howard', 'hubert', 'hugh', 'hugo', 'hunter', 'ian', 'isaac', 'isaiah',
+    'ismael', 'ivan', 'jack', 'jackson', 'jacob', 'jaime', 'jake', 'james', 'jamie', 'jared',
+    'jason', 'javier', 'jay', 'jeff', 'jefferson', 'jeffrey', 'jeremiah', 'jeremy', 'jerome', 'jerry',
+    'jesse', 'jesus', 'jim', 'jimmy', 'joe', 'joel', 'john', 'johnny', 'jon', 'jonathan',
+    'jordan', 'jorge', 'jose', 'joseph', 'josh', 'joshua', 'juan', 'julian', 'julio', 'justin',
+    'karl', 'keith', 'kelly', 'ken', 'kenneth', 'kenny', 'kevin', 'kirk', 'kurt', 'kyle',
+    'lance', 'larry', 'lawrence', 'lee', 'leo', 'leon', 'leonard', 'leroy', 'leslie', 'lester',
+    'levi', 'lewis', 'lloyd', 'logan', 'lonnie', 'louis', 'lucas', 'luis', 'luke', 'luther',
+    'malcolm', 'manuel', 'marc', 'marcus', 'mario', 'mark', 'marshall', 'martin', 'marvin', 'mason',
+    'mathew', 'matt', 'matthew', 'maurice', 'max', 'maxwell', 'melvin', 'michael', 'micheal', 'miguel',
+    'mike', 'miles', 'milton', 'mitchell', 'morris', 'nathan', 'nathaniel', 'neal', 'neil', 'nelson',
+    'nicholas', 'nick', 'nicolas', 'noah', 'noel', 'norman', 'oliver', 'omar', 'orlando', 'oscar',
+    'owen', 'pablo', 'patrick', 'paul', 'pedro', 'percy', 'perry', 'peter', 'philip', 'phillip',
+    'pierre', 'preston', 'quentin', 'rafael', 'ralph', 'ramon', 'randall', 'randy', 'raul', 'ray',
+    'raymond', 'reginald', 'rene', 'ricardo', 'richard', 'rick', 'ricky', 'robert', 'roberto', 'roderick',
+    'rodney', 'roger', 'roland', 'roman', 'ron', 'ronald', 'ronnie', 'ross', 'roy', 'ruben',
+    'russell', 'ryan', 'salvador', 'sam', 'sammy', 'samuel', 'santiago', 'scott', 'sean', 'sebastian',
+    'sergio', 'seth', 'shane', 'shaun', 'shawn', 'sheldon', 'sidney', 'simon', 'spencer', 'stanley',
+    'stephen', 'steve', 'steven', 'stewart', 'stuart', 'ted', 'terrance', 'terrence', 'terry', 'theodore',
+    'thomas', 'tim', 'timothy', 'todd', 'tom', 'tommy', 'tony', 'tracy', 'travis', 'trent',
+    'trevor', 'troy', 'tyler', 'tyrone', 'vernon', 'victor', 'vince', 'vincent', 'virgil', 'wade',
+    'wallace', 'walter', 'warren', 'wayne', 'wesley', 'wilbur', 'willard', 'william', 'willie', 'willis',
+    'wilson', 'winston', 'xavier', 'zachary', 'zane'
+  ];
+
+  if (femaleNames.includes(firstName)) {
+    return 'female';
+  } else if (maleNames.includes(firstName)) {
+    return 'male';
+  }
+
+  // Default to female if unknown (since most guests in this context are female)
+  return 'female';
+};
+
 // Helper to transform guest_lists table row to frontend format
 const transformToGuestList = (row) => {
   // Map status to category for frontend compatibility
@@ -4322,11 +4437,14 @@ app.post('/api/v1/guest-lists', async (req, res) => {
 
     const id = `gst_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
+    // Auto-detect gender from name if not provided
+    const detectedGender = gender || detectGenderFromName(name);
+
     const result = await pool.query(
       `INSERT INTO guest_lists (id, event_id, name, email, phone, instagram, number_of_guests, vip_preferences, gender, status, email_sent, created_at, updated_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending', false, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
        RETURNING *`,
-      [id, eventId || 'default', name, email, phone || '', instagram || '', numberOfGuests || 1, vipPreferences || '', gender || '']
+      [id, eventId || 'default', name, email, phone || '', instagram || '', numberOfGuests || 1, vipPreferences || '', detectedGender]
     );
 
     const newGuest = transformToGuestList(result.rows[0]);
