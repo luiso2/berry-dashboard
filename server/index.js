@@ -4173,7 +4173,7 @@ const transformToGuestList = (row) => {
 // GET /api/v1/guest-lists - List all guests (LOCAL - reads from guest_lists table)
 app.get('/api/v1/guest-lists', async (req, res) => {
   try {
-    const { status, limit = '1000', offset = '0' } = req.query;
+    const { status, limit, offset } = req.query;
 
     let queryText = 'SELECT * FROM guest_lists WHERE 1=1';
     const params = [];
@@ -4186,8 +4186,16 @@ app.get('/api/v1/guest-lists', async (req, res) => {
     }
 
     queryText += ' ORDER BY created_at DESC';
-    queryText += ` LIMIT $${paramIndex++} OFFSET $${paramIndex++}`;
-    params.push(parseInt(limit), parseInt(offset));
+
+    // Only add LIMIT/OFFSET if explicitly provided
+    if (limit) {
+      queryText += ` LIMIT $${paramIndex++}`;
+      params.push(parseInt(limit));
+    }
+    if (offset) {
+      queryText += ` OFFSET $${paramIndex++}`;
+      params.push(parseInt(offset));
+    }
 
     const result = await pool.query(queryText, params);
     const entries = result.rows.map(transformToGuestList);
@@ -4199,8 +4207,8 @@ app.get('/api/v1/guest-lists', async (req, res) => {
     res.json({
       entries,
       total,
-      limit: parseInt(limit),
-      offset: parseInt(offset),
+      limit: limit ? parseInt(limit) : null,
+      offset: offset ? parseInt(offset) : 0,
     });
   } catch (error) {
     console.error('Error fetching guest-lists:', error);
