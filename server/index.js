@@ -57,7 +57,7 @@ if (process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && proce
 const TELNYX_API_KEY = process.env.TELNYX_API_KEY;
 const TELNYX_PHONE_NUMBER = process.env.TELNYX_PHONE_NUMBER || '+19858539097';
 
-async function sendSMS(to, message) {
+async function sendSMS(to, message, saveToConversations = true) {
   if (!TELNYX_API_KEY) {
     throw new Error('Telnyx API key not configured');
   }
@@ -85,6 +85,19 @@ async function sendSMS(to, message) {
 
   if (!response.ok) {
     throw new Error(data.errors?.[0]?.detail || 'Failed to send SMS');
+  }
+
+  // Save to sms_conversations for tracking in SMS AI section
+  if (saveToConversations && pool) {
+    try {
+      await pool.query(
+        `INSERT INTO sms_conversations (from_number, to_number, direction, message)
+         VALUES ($1, $2, $3, $4)`,
+        [TELNYX_PHONE_NUMBER, formattedTo, 'outbound', message]
+      );
+    } catch (err) {
+      console.log('Note: Could not save SMS to conversations:', err.message);
+    }
   }
 
   return {
@@ -1000,6 +1013,47 @@ const initDatabase = async () => {
       CREATE INDEX IF NOT EXISTS idx_scheduled_status ON scheduled_messages(status);
       CREATE INDEX IF NOT EXISTS idx_scheduled_time ON scheduled_messages(scheduled_at);
       CREATE INDEX IF NOT EXISTS idx_scheduled_user ON scheduled_messages(user_id);
+    `);
+
+    // Create email_templates table - For campaign templates
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS email_templates (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(255) NOT NULL,
+        subject VARCHAR(500) NOT NULL,
+        html_content TEXT NOT NULL,
+        description TEXT,
+        category VARCHAR(100) DEFAULT 'general',
+        is_active BOOLEAN DEFAULT true,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_email_templates_category ON email_templates(category);
+      CREATE INDEX IF NOT EXISTS idx_email_templates_active ON email_templates(is_active);
+    `);
+
+    // Create scheduled_emails table - For scheduled/bulk emails
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS scheduled_emails (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER,
+        event_id INTEGER,
+        template_id INTEGER,
+        recipients JSONB NOT NULL,
+        subject VARCHAR(500) NOT NULL,
+        html_content TEXT NOT NULL,
+        scheduled_at TIMESTAMP NOT NULL,
+        status VARCHAR(50) DEFAULT 'pending',
+        sent_at TIMESTAMP,
+        sent_count INTEGER DEFAULT 0,
+        failed_count INTEGER DEFAULT 0,
+        results JSONB,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_scheduled_emails_status ON scheduled_emails(status);
+      CREATE INDEX IF NOT EXISTS idx_scheduled_emails_time ON scheduled_emails(scheduled_at);
+      CREATE INDEX IF NOT EXISTS idx_scheduled_emails_user ON scheduled_emails(user_id);
     `);
 
     // Add user_id to staff table (after table creation)
@@ -11560,6 +11614,438 @@ async function processScheduledMessages() {
 // Start scheduled message processor (every minute)
 setInterval(processScheduledMessages, 60 * 1000);
 console.log('📅 Scheduled message processor started (checks every minute)');
+
+// ============================================
+// AUTOMATION ENDPOINTS - Email Templates & Scheduling
+// ============================================
+
+// GET /api/v1/automation/templates - List email templates
+app.get('/api/v1/automation/templates', async (req, res) => {
+  try {
+    const { category, active } = req.query;
+
+    let query = 'SELECT * FROM email_templates WHERE 1=1';
+    const params = [];
+    let paramIndex = 1;
+
+    if (category) {
+      query += ` AND category = $${paramIndex}`;
+      params.push(category);
+      paramIndex++;
+    }
+
+    if (active !== undefined) {
+      query += ` AND is_active = $${paramIndex}`;
+      params.push(active === 'true');
+      paramIndex++;
+    }
+
+    query += ' ORDER BY created_at DESC';
+
+    const result = await pool.query(query, params);
+
+    res.json({
+      success: true,
+      templates: result.rows,
+      total: result.rows.length
+    });
+  } catch (error) {
+    console.error('Error fetching email templates:', error);
+    res.status(500).json({ error: 'Failed to fetch email templates' });
+  }
+});
+
+// POST /api/v1/automation/templates - Create email template
+app.post('/api/v1/automation/templates', async (req, res) => {
+  try {
+    const { name, subject, htmlContent, description, category } = req.body;
+
+    if (!name || !subject || !htmlContent) {
+      return res.status(400).json({ error: 'Name, subject and htmlContent are required' });
+    }
+
+    const result = await pool.query(`
+      INSERT INTO email_templates (name, subject, html_content, description, category)
+      VALUES ($1, $2, $3, $4, $5)
+      RETURNING *
+    `, [name, subject, htmlContent, description || '', category || 'general']);
+
+    res.status(201).json({
+      success: true,
+      template: result.rows[0]
+    });
+  } catch (error) {
+    console.error('Error creating email template:', error);
+    res.status(500).json({ error: 'Failed to create email template' });
+  }
+});
+
+// PUT /api/v1/automation/templates/:id - Update email template
+app.put('/api/v1/automation/templates/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, subject, htmlContent, description, category, isActive } = req.body;
+
+    const result = await pool.query(`
+      UPDATE email_templates
+      SET name = COALESCE($1, name),
+          subject = COALESCE($2, subject),
+          html_content = COALESCE($3, html_content),
+          description = COALESCE($4, description),
+          category = COALESCE($5, category),
+          is_active = COALESCE($6, is_active),
+          updated_at = NOW()
+      WHERE id = $7
+      RETURNING *
+    `, [name, subject, htmlContent, description, category, isActive, id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Template not found' });
+    }
+
+    res.json({
+      success: true,
+      template: result.rows[0]
+    });
+  } catch (error) {
+    console.error('Error updating email template:', error);
+    res.status(500).json({ error: 'Failed to update email template' });
+  }
+});
+
+// DELETE /api/v1/automation/templates/:id - Delete email template
+app.delete('/api/v1/automation/templates/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const result = await pool.query('DELETE FROM email_templates WHERE id = $1 RETURNING *', [id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Template not found' });
+    }
+
+    res.json({
+      success: true,
+      message: 'Template deleted'
+    });
+  } catch (error) {
+    console.error('Error deleting email template:', error);
+    res.status(500).json({ error: 'Failed to delete email template' });
+  }
+});
+
+// POST /api/v1/automation/email/schedule - Schedule email campaign
+app.post('/api/v1/automation/email/schedule', async (req, res) => {
+  try {
+    const { recipients, subject, htmlContent, scheduledAt, eventId, templateId } = req.body;
+    const userId = req.user?.id || null;
+
+    if (!recipients || !Array.isArray(recipients) || recipients.length === 0) {
+      return res.status(400).json({ error: 'Recipients array is required' });
+    }
+
+    if (!subject || !htmlContent) {
+      return res.status(400).json({ error: 'Subject and htmlContent are required' });
+    }
+
+    if (!scheduledAt) {
+      return res.status(400).json({ error: 'scheduledAt timestamp is required' });
+    }
+
+    const scheduledTime = new Date(scheduledAt);
+    if (scheduledTime <= new Date()) {
+      return res.status(400).json({ error: 'Scheduled time must be in the future' });
+    }
+
+    const result = await pool.query(`
+      INSERT INTO scheduled_emails (user_id, event_id, template_id, recipients, subject, html_content, scheduled_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      RETURNING *
+    `, [userId, eventId || null, templateId || null, JSON.stringify(recipients), subject, htmlContent, scheduledTime]);
+
+    res.json({
+      success: true,
+      message: 'Email campaign scheduled successfully',
+      scheduledEmail: result.rows[0]
+    });
+  } catch (error) {
+    console.error('Error scheduling email:', error);
+    res.status(500).json({ error: 'Failed to schedule email campaign' });
+  }
+});
+
+// GET /api/v1/automation/email/scheduled - List scheduled emails
+app.get('/api/v1/automation/email/scheduled', async (req, res) => {
+  try {
+    const userId = req.user?.id;
+    const { status, eventId } = req.query;
+
+    let query = 'SELECT * FROM scheduled_emails WHERE 1=1';
+    const params = [];
+    let paramIndex = 1;
+
+    if (userId) {
+      query += ` AND (user_id = $${paramIndex}::integer OR user_id IS NULL)`;
+      params.push(userId);
+      paramIndex++;
+    }
+
+    if (status) {
+      query += ` AND status = $${paramIndex}`;
+      params.push(status);
+      paramIndex++;
+    }
+
+    if (eventId) {
+      query += ` AND event_id = $${paramIndex}`;
+      params.push(eventId);
+      paramIndex++;
+    }
+
+    query += ' ORDER BY scheduled_at ASC';
+
+    const result = await pool.query(query, params);
+
+    res.json({
+      success: true,
+      scheduledEmails: result.rows,
+      total: result.rows.length
+    });
+  } catch (error) {
+    console.error('Error fetching scheduled emails:', error);
+    res.status(500).json({ error: 'Failed to fetch scheduled emails' });
+  }
+});
+
+// DELETE /api/v1/automation/email/scheduled/:id - Cancel scheduled email
+app.delete('/api/v1/automation/email/scheduled/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const result = await pool.query(
+      'UPDATE scheduled_emails SET status = $1, updated_at = NOW() WHERE id = $2 AND status = $3 RETURNING *',
+      ['cancelled', id, 'pending']
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Scheduled email not found or already processed' });
+    }
+
+    res.json({
+      success: true,
+      message: 'Scheduled email cancelled',
+      scheduledEmail: result.rows[0]
+    });
+  } catch (error) {
+    console.error('Error cancelling scheduled email:', error);
+    res.status(500).json({ error: 'Failed to cancel scheduled email' });
+  }
+});
+
+// GET /api/v1/automation/campaigns - Get all scheduled campaigns (SMS + Email)
+app.get('/api/v1/automation/campaigns', async (req, res) => {
+  try {
+    const { status } = req.query;
+
+    let smsQuery = 'SELECT id, \'sms\' as type, recipients, message as content, scheduled_at, status, sent_at, sent_count, failed_count, created_at FROM scheduled_messages';
+    let emailQuery = 'SELECT id, \'email\' as type, recipients, subject || \': \' || LEFT(html_content, 100) as content, scheduled_at, status, sent_at, sent_count, failed_count, created_at FROM scheduled_emails';
+
+    if (status) {
+      smsQuery += ` WHERE status = '${status}'`;
+      emailQuery += ` WHERE status = '${status}'`;
+    }
+
+    const [smsResult, emailResult] = await Promise.all([
+      pool.query(smsQuery),
+      pool.query(emailQuery)
+    ]);
+
+    const campaigns = [...smsResult.rows, ...emailResult.rows]
+      .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+    res.json({
+      success: true,
+      campaigns,
+      total: campaigns.length,
+      smsCount: smsResult.rows.length,
+      emailCount: emailResult.rows.length
+    });
+  } catch (error) {
+    console.error('Error fetching campaigns:', error);
+    res.status(500).json({ error: 'Failed to fetch campaigns' });
+  }
+});
+
+// POST /api/v1/automation/send-now - Send immediate bulk SMS or email
+app.post('/api/v1/automation/send-now', async (req, res) => {
+  try {
+    const { type, recipients, message, subject, htmlContent } = req.body;
+
+    if (!recipients || !Array.isArray(recipients) || recipients.length === 0) {
+      return res.status(400).json({ error: 'Recipients array is required' });
+    }
+
+    const results = [];
+
+    if (type === 'sms') {
+      if (!message) {
+        return res.status(400).json({ error: 'Message is required for SMS' });
+      }
+
+      for (const recipient of recipients) {
+        try {
+          const result = await sendSMS(recipient, message);
+          results.push({ to: recipient, success: true, messageId: result.messageId });
+        } catch (err) {
+          results.push({ to: recipient, success: false, error: err.message });
+        }
+      }
+    } else if (type === 'email') {
+      if (!subject || !htmlContent) {
+        return res.status(400).json({ error: 'Subject and htmlContent are required for email' });
+      }
+
+      for (const recipient of recipients) {
+        try {
+          await resend.emails.send({
+            from: EMAIL_CONFIG.from,
+            to: recipient,
+            subject: subject,
+            html: htmlContent
+          });
+          results.push({ to: recipient, success: true });
+        } catch (err) {
+          results.push({ to: recipient, success: false, error: err.message });
+        }
+      }
+    } else {
+      return res.status(400).json({ error: 'Type must be "sms" or "email"' });
+    }
+
+    const sentCount = results.filter(r => r.success).length;
+    const failedCount = results.filter(r => !r.success).length;
+
+    res.json({
+      success: true,
+      message: `Sent ${sentCount} ${type}s, ${failedCount} failed`,
+      sentCount,
+      failedCount,
+      results
+    });
+  } catch (error) {
+    console.error('Error sending bulk messages:', error);
+    res.status(500).json({ error: 'Failed to send messages' });
+  }
+});
+
+// Function to process scheduled emails (runs every minute)
+async function processScheduledEmails() {
+  try {
+    const dueEmails = await pool.query(`
+      SELECT * FROM scheduled_emails
+      WHERE status = 'pending' AND scheduled_at <= NOW()
+      ORDER BY scheduled_at ASC
+      LIMIT 10
+    `);
+
+    if (dueEmails.rows.length === 0) return;
+
+    console.log(`📧 Processing ${dueEmails.rows.length} scheduled emails...`);
+
+    for (const email of dueEmails.rows) {
+      const recipients = email.recipients;
+      const results = [];
+
+      await pool.query(
+        'UPDATE scheduled_emails SET status = $1, updated_at = NOW() WHERE id = $2',
+        ['processing', email.id]
+      );
+
+      for (const recipient of recipients) {
+        try {
+          await resend.emails.send({
+            from: EMAIL_CONFIG.from,
+            to: recipient,
+            subject: email.subject,
+            html: email.html_content
+          });
+          results.push({ to: recipient, success: true });
+        } catch (e) {
+          results.push({ to: recipient, success: false, error: e.message });
+        }
+      }
+
+      const sentCount = results.filter(r => r.success).length;
+      const failedCount = results.filter(r => !r.success).length;
+
+      await pool.query(`
+        UPDATE scheduled_emails
+        SET status = $1, sent_at = NOW(), sent_count = $2, failed_count = $3, results = $4, updated_at = NOW()
+        WHERE id = $5
+      `, ['sent', sentCount, failedCount, JSON.stringify(results), email.id]);
+
+      console.log(`✅ Scheduled email ${email.id} sent: ${sentCount} success, ${failedCount} failed`);
+    }
+  } catch (error) {
+    console.error('Error processing scheduled emails:', error);
+  }
+}
+
+// Start scheduled email processor (every minute)
+setInterval(processScheduledEmails, 60 * 1000);
+console.log('📧 Scheduled email processor started (checks every minute)');
+
+// Seed default email templates if none exist
+async function seedEmailTemplates() {
+  try {
+    const existing = await pool.query('SELECT COUNT(*) FROM email_templates');
+    if (parseInt(existing.rows[0].count) === 0) {
+      const templates = [
+        {
+          name: 'VIP Invitation',
+          subject: 'You\'re Invited! - VIP Access Confirmed',
+          description: 'Template for VIP guest invitations',
+          category: 'invitation',
+          html: `<!DOCTYPE html><html><body style="margin:0;padding:0;background:#0a0a0a;font-family:Georgia,serif;"><div style="max-width:600px;margin:0 auto;padding:40px 20px;"><div style="text-align:center;margin-bottom:40px;"><h1 style="color:#d4af37;font-size:32px;margin:0;">Berry Bly</h1></div><div style="background:linear-gradient(180deg,rgba(212,175,55,0.1) 0%,transparent 100%);border:1px solid rgba(212,175,55,0.3);border-radius:16px;padding:40px;"><h2 style="color:#fff;font-size:24px;">Congratulations!</h2><p style="color:#ccc;font-size:16px;line-height:1.8;">You have been granted VIP access to our exclusive event. Your status has been upgraded and you will receive priority entry.</p></div></div></body></html>`
+        },
+        {
+          name: 'Event Reminder',
+          subject: 'Reminder: Your Event is Tomorrow!',
+          description: 'Reminder template sent 24h before event',
+          category: 'reminder',
+          html: `<!DOCTYPE html><html><body style="margin:0;padding:0;background:#0a0a0a;font-family:Georgia,serif;"><div style="max-width:600px;margin:0 auto;padding:40px 20px;"><div style="text-align:center;margin-bottom:40px;"><h1 style="color:#d4af37;font-size:32px;margin:0;">Berry Bly</h1></div><div style="background:linear-gradient(180deg,rgba(212,175,55,0.1) 0%,transparent 100%);border:1px solid rgba(212,175,55,0.3);border-radius:16px;padding:40px;"><h2 style="color:#fff;font-size:24px;">Event Reminder</h2><p style="color:#ccc;font-size:16px;line-height:1.8;">This is a friendly reminder that your event is happening tomorrow. We look forward to seeing you!</p></div></div></body></html>`
+        },
+        {
+          name: 'Thank You',
+          subject: 'Thank You for Attending!',
+          description: 'Post-event thank you template',
+          category: 'followup',
+          html: `<!DOCTYPE html><html><body style="margin:0;padding:0;background:#0a0a0a;font-family:Georgia,serif;"><div style="max-width:600px;margin:0 auto;padding:40px 20px;"><div style="text-align:center;margin-bottom:40px;"><h1 style="color:#d4af37;font-size:32px;margin:0;">Berry Bly</h1></div><div style="background:linear-gradient(180deg,rgba(212,175,55,0.1) 0%,transparent 100%);border:1px solid rgba(212,175,55,0.3);border-radius:16px;padding:40px;"><h2 style="color:#fff;font-size:24px;">Thank You!</h2><p style="color:#ccc;font-size:16px;line-height:1.8;">Thank you for attending our event. We hope you had an amazing time and we look forward to seeing you again soon!</p></div></div></body></html>`
+        },
+        {
+          name: 'Promotion',
+          subject: 'Special Offer Just for You!',
+          description: 'Promotional campaign template',
+          category: 'promotion',
+          html: `<!DOCTYPE html><html><body style="margin:0;padding:0;background:#0a0a0a;font-family:Georgia,serif;"><div style="max-width:600px;margin:0 auto;padding:40px 20px;"><div style="text-align:center;margin-bottom:40px;"><h1 style="color:#d4af37;font-size:32px;margin:0;">Berry Bly</h1></div><div style="background:linear-gradient(180deg,rgba(212,175,55,0.1) 0%,transparent 100%);border:1px solid rgba(212,175,55,0.3);border-radius:16px;padding:40px;"><h2 style="color:#fff;font-size:24px;">Exclusive Offer!</h2><p style="color:#ccc;font-size:16px;line-height:1.8;">We have a special promotion just for you. Don't miss out on this exclusive opportunity!</p></div></div></body></html>`
+        }
+      ];
+
+      for (const t of templates) {
+        await pool.query(`
+          INSERT INTO email_templates (name, subject, html_content, description, category)
+          VALUES ($1, $2, $3, $4, $5)
+        `, [t.name, t.subject, t.html, t.description, t.category]);
+      }
+      console.log('✅ Seeded 4 default email templates');
+    }
+  } catch (err) {
+    console.log('Note: Could not seed email templates:', err.message);
+  }
+}
+
+// Call seed function after DB init
+setTimeout(seedEmailTemplates, 5000);
 
 // GET /api/v1/telnyx/phone-numbers - List Telnyx phone numbers
 app.get('/api/v1/telnyx/phone-numbers', async (req, res) => {

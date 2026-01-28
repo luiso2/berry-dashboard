@@ -1,304 +1,322 @@
-// Automation View - AI-powered workflow automation
+// Automation View - Email/SMS Campaigns & Templates
 import { useState, useEffect, useCallback } from 'react';
 import { API_URL } from '../constants';
 
-interface Automation {
+interface EmailTemplate {
+  id: number;
+  name: string;
+  subject: string;
+  html_content: string;
+  description: string;
+  category: string;
+  is_active: boolean;
+  created_at: string;
+}
+
+interface Campaign {
+  id: number;
+  type: 'sms' | 'email';
+  recipients: string[];
+  content: string;
+  scheduled_at: string;
+  status: string;
+  sent_at: string | null;
+  sent_count: number;
+  failed_count: number;
+  created_at: string;
+}
+
+interface Guest {
   id: string;
   name: string;
-  description: string;
-  trigger: {
-    type: 'schedule' | 'event' | 'condition' | 'webhook';
-    config: Record<string, unknown>;
-  };
-  actions: AutomationAction[];
-  isActive: boolean;
-  lastRun?: string;
-  runCount: number;
-  createdAt: string;
-}
-
-interface AutomationAction {
-  id: string;
-  type: 'send_email' | 'send_sms' | 'update_guest' | 'create_task' | 'webhook' | 'ai_classify';
-  config: Record<string, unknown>;
-  order: number;
-}
-
-interface AutomationLog {
-  id: string;
-  automationId: string;
-  automationName: string;
-  status: 'success' | 'failed' | 'skipped';
-  message: string;
-  timestamp: string;
+  email: string;
+  phone: string;
 }
 
 interface AutomationViewProps {
   onToast: (message: string, type: 'success' | 'error' | 'info') => void;
 }
 
-const TRIGGER_TYPES = [
-  { value: 'event', label: 'Event Trigger', icon: '⚡', description: 'Run when an event occurs (guest added, checked in, etc.)' },
-  { value: 'schedule', label: 'Scheduled', icon: '⏰', description: 'Run at specific times or intervals' },
-  { value: 'condition', label: 'Condition', icon: '🔀', description: 'Run when conditions are met' },
-  { value: 'webhook', label: 'Webhook', icon: '🔗', description: 'Run when external webhook is triggered' },
-];
-
-const ACTION_TYPES: { value: AutomationAction['type']; label: string; icon: string }[] = [
-  { value: 'send_email', label: 'Send Email', icon: '✉️' },
-  { value: 'send_sms', label: 'Send SMS', icon: '📱' },
-  { value: 'update_guest', label: 'Update Guest', icon: '👤' },
-  { value: 'create_task', label: 'Create Task', icon: '📋' },
-  { value: 'ai_classify', label: 'AI Classification', icon: '🤖' },
-  { value: 'webhook', label: 'Call Webhook', icon: '🌐' },
-];
-
-const STATUS_COLORS: Record<string, string> = {
-  success: '#22c55e',
-  failed: '#ef4444',
-  skipped: '#f59e0b',
-};
-
 export function AutomationView({ onToast }: AutomationViewProps) {
-  // State
-  const [automations, setAutomations] = useState<Automation[]>([]);
-  const [logs, setLogs] = useState<AutomationLog[]>([]);
+  const [activeTab, setActiveTab] = useState<'campaigns' | 'templates' | 'send'>('campaigns');
+  const [templates, setTemplates] = useState<EmailTemplate[]>([]);
+  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+  const [guests, setGuests] = useState<Guest[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'automations' | 'logs'>('automations');
-  const [showForm, setShowForm] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
+  const [showTemplateForm, setShowTemplateForm] = useState(false);
+  const [showScheduleForm, setShowScheduleForm] = useState(false);
+  const [editingTemplate, setEditingTemplate] = useState<EmailTemplate | null>(null);
 
-  const [formData, setFormData] = useState({
+  // Form states
+  const [templateForm, setTemplateForm] = useState({
     name: '',
+    subject: '',
+    htmlContent: '',
     description: '',
-    triggerType: 'event' as Automation['trigger']['type'],
-    triggerEvent: 'guest_added',
-    scheduleInterval: '1h',
-    isActive: true,
-    actions: [] as { type: AutomationAction['type']; config: Record<string, unknown> }[],
+    category: 'general',
   });
 
-  // Fetch automations
-  const fetchAutomations = useCallback(async () => {
+  const [sendForm, setSendForm] = useState({
+    type: 'email' as 'email' | 'sms',
+    selectedTemplate: null as EmailTemplate | null,
+    subject: '',
+    message: '',
+    htmlContent: '',
+    selectedGuests: [] as string[],
+    selectAll: false,
+    scheduledAt: '',
+    sendNow: true,
+  });
+
+  // Fetch data
+  const fetchData = useCallback(async () => {
     try {
-      const [autoRes, logsRes] = await Promise.all([
-        fetch(`${API_URL}/automations`),
-        fetch(`${API_URL}/automations/logs`),
+      const [templatesRes, campaignsRes, guestsRes] = await Promise.all([
+        fetch(`${API_URL}/automation/templates`),
+        fetch(`${API_URL}/automation/campaigns`),
+        fetch(`${API_URL}/guest-lists`),
       ]);
 
-      if (autoRes.ok) {
-        const data = await autoRes.json();
-        setAutomations(data.automations || []);
+      if (templatesRes.ok) {
+        const data = await templatesRes.json();
+        setTemplates(data.templates || []);
       }
-      if (logsRes.ok) {
-        const data = await logsRes.json();
-        setLogs(data.logs || []);
+
+      if (campaignsRes.ok) {
+        const data = await campaignsRes.json();
+        setCampaigns(data.campaigns || []);
+      }
+
+      if (guestsRes.ok) {
+        const data = await guestsRes.json();
+        const entries = data.entries || data.data || data || [];
+        setGuests(entries.map((g: any) => ({
+          id: String(g.id),
+          name: g.name || '',
+          email: g.email || '',
+          phone: g.phone || '',
+        })));
       }
     } catch (err) {
-      console.error('Failed to fetch automations:', err);
-      // Mock data for demo
-      setAutomations([
-        {
-          id: '1',
-          name: 'Auto-approve VIP Guests',
-          description: 'Automatically approve guests with VIP status from Eventbrite',
-          trigger: { type: 'event', config: { event: 'guest_added', source: 'eventbrite' } },
-          actions: [
-            { id: 'a1', type: 'ai_classify', config: { threshold: 0.8 }, order: 1 },
-            { id: 'a2', type: 'update_guest', config: { category: 'A' }, order: 2 },
-            { id: 'a3', type: 'send_email', config: { template: 'vip_confirmation' }, order: 3 },
-          ],
-          isActive: true,
-          lastRun: new Date(Date.now() - 15 * 60000).toISOString(),
-          runCount: 156,
-          createdAt: new Date(Date.now() - 7 * 24 * 60 * 60000).toISOString(),
-        },
-        {
-          id: '2',
-          name: 'Event Reminder Emails',
-          description: 'Send reminder emails 24 hours before the event',
-          trigger: { type: 'schedule', config: { interval: '24h', before: 'event_start' } },
-          actions: [
-            { id: 'a4', type: 'send_email', config: { template: 'event_reminder' }, order: 1 },
-          ],
-          isActive: true,
-          lastRun: new Date(Date.now() - 2 * 60 * 60000).toISOString(),
-          runCount: 12,
-          createdAt: new Date(Date.now() - 14 * 24 * 60 * 60000).toISOString(),
-        },
-        {
-          id: '3',
-          name: 'Low Ticket Alert',
-          description: 'Alert when tickets are running low (< 10%)',
-          trigger: { type: 'condition', config: { field: 'tickets_remaining', operator: '<', value: 10, unit: 'percent' } },
-          actions: [
-            { id: 'a5', type: 'send_sms', config: { to: 'admin', message: 'Tickets running low!' }, order: 1 },
-            { id: 'a6', type: 'send_email', config: { to: 'team', template: 'low_ticket_alert' }, order: 2 },
-          ],
-          isActive: false,
-          runCount: 3,
-          createdAt: new Date(Date.now() - 30 * 24 * 60 * 60000).toISOString(),
-        },
-      ]);
-
-      setLogs([
-        { id: '1', automationId: '1', automationName: 'Auto-approve VIP Guests', status: 'success', message: 'Approved 3 VIP guests', timestamp: new Date(Date.now() - 15 * 60000).toISOString() },
-        { id: '2', automationId: '2', automationName: 'Event Reminder Emails', status: 'success', message: 'Sent 245 reminder emails', timestamp: new Date(Date.now() - 2 * 60 * 60000).toISOString() },
-        { id: '3', automationId: '1', automationName: 'Auto-approve VIP Guests', status: 'success', message: 'Approved 1 VIP guest', timestamp: new Date(Date.now() - 45 * 60000).toISOString() },
-        { id: '4', automationId: '1', automationName: 'Auto-approve VIP Guests', status: 'skipped', message: 'No matching guests found', timestamp: new Date(Date.now() - 60 * 60000).toISOString() },
-        { id: '5', automationId: '3', automationName: 'Low Ticket Alert', status: 'failed', message: 'Failed to send SMS: Invalid phone number', timestamp: new Date(Date.now() - 3 * 24 * 60 * 60000).toISOString() },
-      ]);
+      console.error('Failed to fetch automation data:', err);
     } finally {
       setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    fetchAutomations();
-  }, [fetchAutomations]);
+    fetchData();
+  }, [fetchData]);
 
-  // Toggle automation
-  const handleToggleAutomation = async (id: string) => {
-    const automation = automations.find(a => a.id === id);
-    if (!automation) return;
-
-    try {
-      await fetch(`${API_URL}/automations/${id}/toggle`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ isActive: !automation.isActive }),
-      });
-    } catch (err) {
-      // Continue with local update
-    }
-
-    setAutomations(prev => prev.map(a => a.id === id ? { ...a, isActive: !a.isActive } : a));
-    onToast(`Automation ${automation.isActive ? 'disabled' : 'enabled'}`, 'success');
-  };
-
-  // Run automation manually
-  const handleRunAutomation = async (id: string) => {
-    const automation = automations.find(a => a.id === id);
-    if (!automation) return;
-
-    onToast(`Running "${automation.name}"...`, 'info');
-
-    try {
-      await fetch(`${API_URL}/automations/${id}/run`, { method: 'POST' });
-      onToast(`"${automation.name}" executed successfully`, 'success');
-    } catch (err) {
-      onToast(`"${automation.name}" executed (demo mode)`, 'success');
-    }
-
-    // Add to logs
-    const newLog: AutomationLog = {
-      id: Date.now().toString(),
-      automationId: id,
-      automationName: automation.name,
-      status: 'success',
-      message: 'Manual execution completed',
-      timestamp: new Date().toISOString(),
-    };
-    setLogs(prev => [newLog, ...prev]);
-
-    // Update run count
-    setAutomations(prev => prev.map(a => a.id === id ? { ...a, runCount: a.runCount + 1, lastRun: new Date().toISOString() } : a));
-  };
-
-  // Delete automation
-  const handleDeleteAutomation = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this automation?')) return;
-
-    try {
-      await fetch(`${API_URL}/automations/${id}`, { method: 'DELETE' });
-    } catch (err) {
-      // Continue with local delete
-    }
-    setAutomations(prev => prev.filter(a => a.id !== id));
-    onToast('Automation deleted', 'success');
-  };
-
-  // Add action to form
-  const handleAddAction = (type: AutomationAction['type']) => {
-    setFormData(prev => ({
-      ...prev,
-      actions: [...prev.actions, { type, config: {} as Record<string, unknown> }],
-    }));
-  };
-
-  // Remove action from form
-  const handleRemoveAction = (index: number) => {
-    setFormData(prev => ({
-      ...prev,
-      actions: prev.actions.filter((_, i) => i !== index),
-    }));
-  };
-
-  // Save automation
-  const handleSaveAutomation = async () => {
-    if (!formData.name || formData.actions.length === 0) {
-      onToast('Please fill in name and add at least one action', 'error');
+  // Template CRUD
+  const handleSaveTemplate = async () => {
+    if (!templateForm.name || !templateForm.subject || !templateForm.htmlContent) {
+      onToast('Por favor completa todos los campos requeridos', 'error');
       return;
     }
 
-    const newAutomation: Automation = {
-      id: editingId || Date.now().toString(),
-      name: formData.name,
-      description: formData.description,
-      trigger: {
-        type: formData.triggerType,
-        config: formData.triggerType === 'event'
-          ? { event: formData.triggerEvent }
-          : formData.triggerType === 'schedule'
-            ? { interval: formData.scheduleInterval }
-            : {},
-      },
-      actions: formData.actions.map((a, i) => ({ id: `${Date.now()}-${i}`, ...a, order: i + 1 })),
-      isActive: formData.isActive,
-      runCount: 0,
-      createdAt: new Date().toISOString(),
-    };
+    try {
+      const url = editingTemplate
+        ? `${API_URL}/automation/templates/${editingTemplate.id}`
+        : `${API_URL}/automation/templates`;
 
-    if (editingId) {
-      setAutomations(prev => prev.map(a => a.id === editingId ? newAutomation : a));
-    } else {
-      setAutomations(prev => [newAutomation, ...prev]);
+      const res = await fetch(url, {
+        method: editingTemplate ? 'PUT' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(templateForm),
+      });
+
+      if (res.ok) {
+        onToast(editingTemplate ? 'Template actualizado' : 'Template creado', 'success');
+        fetchData();
+        resetTemplateForm();
+      } else {
+        throw new Error('Failed to save template');
+      }
+    } catch (err) {
+      onToast('Error al guardar template', 'error');
     }
-
-    onToast(editingId ? 'Automation updated' : 'Automation created', 'success');
-    resetForm();
   };
 
-  const resetForm = () => {
-    setFormData({
-      name: '',
-      description: '',
-      triggerType: 'event',
-      triggerEvent: 'guest_added',
-      scheduleInterval: '1h',
-      isActive: true,
-      actions: [],
+  const handleDeleteTemplate = async (id: number) => {
+    if (!confirm('¿Eliminar este template?')) return;
+
+    try {
+      await fetch(`${API_URL}/automation/templates/${id}`, { method: 'DELETE' });
+      onToast('Template eliminado', 'success');
+      fetchData();
+    } catch (err) {
+      onToast('Error al eliminar template', 'error');
+    }
+  };
+
+  const resetTemplateForm = () => {
+    setTemplateForm({ name: '', subject: '', htmlContent: '', description: '', category: 'general' });
+    setEditingTemplate(null);
+    setShowTemplateForm(false);
+  };
+
+  const handleEditTemplate = (template: EmailTemplate) => {
+    setTemplateForm({
+      name: template.name,
+      subject: template.subject,
+      htmlContent: template.html_content,
+      description: template.description || '',
+      category: template.category,
     });
-    setEditingId(null);
-    setShowForm(false);
+    setEditingTemplate(template);
+    setShowTemplateForm(true);
+  };
+
+  // Send/Schedule Campaign
+  const handleSendCampaign = async () => {
+    const recipients = sendForm.type === 'email'
+      ? guests.filter(g => sendForm.selectedGuests.includes(g.id)).map(g => g.email).filter(Boolean)
+      : guests.filter(g => sendForm.selectedGuests.includes(g.id)).map(g => g.phone).filter(Boolean);
+
+    if (recipients.length === 0) {
+      onToast('Selecciona al menos un destinatario', 'error');
+      return;
+    }
+
+    if (sendForm.type === 'email' && (!sendForm.subject || !sendForm.htmlContent)) {
+      onToast('Subject y contenido son requeridos para email', 'error');
+      return;
+    }
+
+    if (sendForm.type === 'sms' && !sendForm.message) {
+      onToast('Mensaje es requerido para SMS', 'error');
+      return;
+    }
+
+    try {
+      if (sendForm.sendNow) {
+        // Send immediately
+        const res = await fetch(`${API_URL}/automation/send-now`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            type: sendForm.type,
+            recipients,
+            message: sendForm.message,
+            subject: sendForm.subject,
+            htmlContent: sendForm.htmlContent,
+          }),
+        });
+
+        const data = await res.json();
+        if (res.ok) {
+          onToast(`Enviado: ${data.sentCount} exitosos, ${data.failedCount} fallidos`, 'success');
+          resetSendForm();
+          fetchData();
+        } else {
+          throw new Error(data.error);
+        }
+      } else {
+        // Schedule for later
+        if (!sendForm.scheduledAt) {
+          onToast('Selecciona fecha y hora para programar', 'error');
+          return;
+        }
+
+        const endpoint = sendForm.type === 'email'
+          ? `${API_URL}/automation/email/schedule`
+          : `${API_URL}/sms/schedule`;
+
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            recipients,
+            message: sendForm.message,
+            subject: sendForm.subject,
+            htmlContent: sendForm.htmlContent,
+            scheduledAt: sendForm.scheduledAt,
+          }),
+        });
+
+        if (res.ok) {
+          onToast('Campaña programada exitosamente', 'success');
+          resetSendForm();
+          fetchData();
+        } else {
+          throw new Error('Failed to schedule');
+        }
+      }
+    } catch (err) {
+      onToast('Error al enviar campaña', 'error');
+    }
+  };
+
+  const handleCancelCampaign = async (campaign: Campaign) => {
+    try {
+      const endpoint = campaign.type === 'email'
+        ? `${API_URL}/automation/email/scheduled/${campaign.id}`
+        : `${API_URL}/sms/scheduled/${campaign.id}`;
+
+      await fetch(endpoint, { method: 'DELETE' });
+      onToast('Campaña cancelada', 'success');
+      fetchData();
+    } catch (err) {
+      onToast('Error al cancelar campaña', 'error');
+    }
+  };
+
+  const resetSendForm = () => {
+    setSendForm({
+      type: 'email',
+      selectedTemplate: null,
+      subject: '',
+      message: '',
+      htmlContent: '',
+      selectedGuests: [],
+      selectAll: false,
+      scheduledAt: '',
+      sendNow: true,
+    });
+    setShowScheduleForm(false);
+  };
+
+  const handleSelectTemplate = (template: EmailTemplate) => {
+    setSendForm(prev => ({
+      ...prev,
+      selectedTemplate: template,
+      subject: template.subject,
+      htmlContent: template.html_content,
+    }));
+  };
+
+  const handleToggleGuest = (guestId: string) => {
+    setSendForm(prev => ({
+      ...prev,
+      selectedGuests: prev.selectedGuests.includes(guestId)
+        ? prev.selectedGuests.filter(id => id !== guestId)
+        : [...prev.selectedGuests, guestId],
+    }));
+  };
+
+  const handleSelectAllGuests = () => {
+    setSendForm(prev => ({
+      ...prev,
+      selectAll: !prev.selectAll,
+      selectedGuests: !prev.selectAll ? guests.map(g => g.id) : [],
+    }));
   };
 
   // Stats
   const stats = {
-    total: automations.length,
-    active: automations.filter(a => a.isActive).length,
-    totalRuns: automations.reduce((sum, a) => sum + a.runCount, 0),
-    successRate: logs.length > 0
-      ? Math.round((logs.filter(l => l.status === 'success').length / logs.length) * 100)
-      : 100,
+    totalCampaigns: campaigns.length,
+    pendingCampaigns: campaigns.filter(c => c.status === 'pending').length,
+    sentCampaigns: campaigns.filter(c => c.status === 'sent').length,
+    templates: templates.length,
   };
 
   if (loading) {
     return (
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 60 }}>
         <div style={{ textAlign: 'center' }}>
-          <div style={{ width: 40, height: 40, border: '3px solid #222', borderTopColor: '#8b5cf6', borderRadius: '50%', animation: 'spin 0.8s linear infinite', margin: '0 auto 16px' }} />
-          <p style={{ color: '#666' }}>Loading automations...</p>
+          <div style={{ width: 40, height: 40, border: '3px solid #222', borderTopColor: '#d4af37', borderRadius: '50%', animation: 'spin 0.8s linear infinite', margin: '0 auto 16px' }} />
+          <p style={{ color: '#666' }}>Cargando automatización...</p>
         </div>
       </div>
     );
@@ -308,395 +326,512 @@ export function AutomationView({ onToast }: AutomationViewProps) {
     <div>
       {/* Stats */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 16, marginBottom: 24 }}>
-        <div style={{ background: '#0a0a0a', border: '1px solid #1a1a1a', borderRadius: 12, padding: 20 }}>
-          <div style={{ fontSize: 13, color: '#888', marginBottom: 4 }}>Total Automations</div>
-          <div style={{ fontSize: 28, fontWeight: 700, color: '#fff' }}>{stats.total}</div>
+        <div style={{ background: 'rgba(255,255,255,0.02)', backdropFilter: 'blur(20px)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 16, padding: 20 }}>
+          <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.4)', marginBottom: 4 }}>Campañas Totales</div>
+          <div style={{ fontSize: 28, fontWeight: 700, color: '#fff' }}>{stats.totalCampaigns}</div>
         </div>
-        <div style={{ background: '#0a0a0a', border: '1px solid #1a1a1a', borderRadius: 12, padding: 20 }}>
-          <div style={{ fontSize: 13, color: '#888', marginBottom: 4 }}>Active</div>
-          <div style={{ fontSize: 28, fontWeight: 700, color: '#22c55e' }}>{stats.active}</div>
+        <div style={{ background: 'rgba(255,255,255,0.02)', backdropFilter: 'blur(20px)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 16, padding: 20 }}>
+          <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.4)', marginBottom: 4 }}>Pendientes</div>
+          <div style={{ fontSize: 28, fontWeight: 700, color: '#f59e0b' }}>{stats.pendingCampaigns}</div>
         </div>
-        <div style={{ background: '#0a0a0a', border: '1px solid #1a1a1a', borderRadius: 12, padding: 20 }}>
-          <div style={{ fontSize: 13, color: '#888', marginBottom: 4 }}>Total Runs</div>
-          <div style={{ fontSize: 28, fontWeight: 700, color: '#8b5cf6' }}>{stats.totalRuns}</div>
+        <div style={{ background: 'rgba(255,255,255,0.02)', backdropFilter: 'blur(20px)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 16, padding: 20 }}>
+          <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.4)', marginBottom: 4 }}>Enviadas</div>
+          <div style={{ fontSize: 28, fontWeight: 700, color: '#22c55e' }}>{stats.sentCampaigns}</div>
         </div>
-        <div style={{ background: '#0a0a0a', border: '1px solid #1a1a1a', borderRadius: 12, padding: 20 }}>
-          <div style={{ fontSize: 13, color: '#888', marginBottom: 4 }}>Success Rate</div>
-          <div style={{ fontSize: 28, fontWeight: 700, color: stats.successRate >= 90 ? '#22c55e' : '#f59e0b' }}>{stats.successRate}%</div>
+        <div style={{ background: 'rgba(255,255,255,0.02)', backdropFilter: 'blur(20px)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 16, padding: 20 }}>
+          <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.4)', marginBottom: 4 }}>Templates</div>
+          <div style={{ fontSize: 28, fontWeight: 700, color: '#d4af37' }}>{stats.templates}</div>
         </div>
       </div>
 
-      {/* Tabs & Actions */}
+      {/* Tabs */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
         <div style={{ display: 'flex', gap: 8 }}>
-          <button
-            onClick={() => setActiveTab('automations')}
-            style={{
-              background: activeTab === 'automations' ? '#1a1a1a' : 'transparent',
-              border: 'none',
-              padding: '10px 16px',
-              borderRadius: 8,
-              color: activeTab === 'automations' ? '#fff' : '#666',
-              cursor: 'pointer',
-              fontWeight: 500,
-            }}
-          >
-            Automations
-          </button>
-          <button
-            onClick={() => setActiveTab('logs')}
-            style={{
-              background: activeTab === 'logs' ? '#1a1a1a' : 'transparent',
-              border: 'none',
-              padding: '10px 16px',
-              borderRadius: 8,
-              color: activeTab === 'logs' ? '#fff' : '#666',
-              cursor: 'pointer',
-              fontWeight: 500,
-            }}
-          >
-            Activity Log
-          </button>
+          {(['campaigns', 'templates', 'send'] as const).map(tab => (
+            <button
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              style={{
+                background: activeTab === tab ? 'rgba(212,175,55,0.2)' : 'transparent',
+                border: activeTab === tab ? '1px solid rgba(212,175,55,0.3)' : '1px solid transparent',
+                padding: '10px 16px',
+                borderRadius: 8,
+                color: activeTab === tab ? '#d4af37' : 'rgba(255,255,255,0.4)',
+                cursor: 'pointer',
+                fontWeight: 500,
+                transition: 'all 0.2s',
+              }}
+            >
+              {tab === 'campaigns' ? '📅 Campañas' : tab === 'templates' ? '📧 Templates' : '🚀 Enviar'}
+            </button>
+          ))}
         </div>
-        <button
-          onClick={() => setShowForm(true)}
-          style={{ background: '#8b5cf6', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: 8, fontWeight: 600, cursor: 'pointer' }}
-        >
-          + Create Automation
-        </button>
+        {activeTab === 'templates' && (
+          <button
+            onClick={() => setShowTemplateForm(true)}
+            style={{ background: 'linear-gradient(to right, #d4af37, #b8922f)', color: '#000', border: 'none', padding: '10px 20px', borderRadius: 8, fontWeight: 600, cursor: 'pointer' }}
+          >
+            + Nuevo Template
+          </button>
+        )}
       </div>
 
-      {/* Form Modal */}
-      {showForm && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
-          <div style={{ background: '#111', border: '1px solid #333', borderRadius: 16, padding: 24, width: '100%', maxWidth: 600, maxHeight: '90vh', overflow: 'auto' }}>
+      {/* Campaigns Tab */}
+      {activeTab === 'campaigns' && (
+        <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 16, overflow: 'hidden' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                <th style={{ textAlign: 'left', padding: '12px 16px', color: 'rgba(255,255,255,0.4)', fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Tipo</th>
+                <th style={{ textAlign: 'left', padding: '12px 16px', color: 'rgba(255,255,255,0.4)', fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Contenido</th>
+                <th style={{ textAlign: 'left', padding: '12px 16px', color: 'rgba(255,255,255,0.4)', fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Destinatarios</th>
+                <th style={{ textAlign: 'left', padding: '12px 16px', color: 'rgba(255,255,255,0.4)', fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Programado</th>
+                <th style={{ textAlign: 'left', padding: '12px 16px', color: 'rgba(255,255,255,0.4)', fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Estado</th>
+                <th style={{ textAlign: 'left', padding: '12px 16px', color: 'rgba(255,255,255,0.4)', fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Acciones</th>
+              </tr>
+            </thead>
+            <tbody>
+              {campaigns.map(campaign => (
+                <tr key={`${campaign.type}-${campaign.id}`} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
+                  <td style={{ padding: '12px 16px' }}>
+                    <span style={{
+                      background: campaign.type === 'email' ? 'rgba(139,92,246,0.2)' : 'rgba(34,197,94,0.2)',
+                      color: campaign.type === 'email' ? '#8b5cf6' : '#22c55e',
+                      padding: '4px 10px',
+                      borderRadius: 6,
+                      fontSize: 12,
+                      fontWeight: 500,
+                    }}>
+                      {campaign.type === 'email' ? '✉️ Email' : '📱 SMS'}
+                    </span>
+                  </td>
+                  <td style={{ padding: '12px 16px', color: 'rgba(255,255,255,0.6)', fontSize: 13, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {campaign.content?.substring(0, 50)}...
+                  </td>
+                  <td style={{ padding: '12px 16px', color: 'rgba(255,255,255,0.9)', fontVariantNumeric: 'tabular-nums' }}>
+                    {Array.isArray(campaign.recipients) ? campaign.recipients.length : 0}
+                  </td>
+                  <td style={{ padding: '12px 16px', color: 'rgba(255,255,255,0.6)', fontSize: 13 }}>
+                    {new Date(campaign.scheduled_at).toLocaleString()}
+                  </td>
+                  <td style={{ padding: '12px 16px' }}>
+                    <span style={{
+                      background: campaign.status === 'sent' ? 'rgba(34,197,94,0.1)' : campaign.status === 'pending' ? 'rgba(245,158,11,0.1)' : 'rgba(239,68,68,0.1)',
+                      color: campaign.status === 'sent' ? '#22c55e' : campaign.status === 'pending' ? '#f59e0b' : '#ef4444',
+                      border: `1px solid ${campaign.status === 'sent' ? 'rgba(34,197,94,0.15)' : campaign.status === 'pending' ? 'rgba(245,158,11,0.15)' : 'rgba(239,68,68,0.15)'}`,
+                      padding: '4px 10px',
+                      borderRadius: 6,
+                      fontSize: 12,
+                      textTransform: 'capitalize',
+                    }}>
+                      {campaign.status}
+                    </span>
+                  </td>
+                  <td style={{ padding: '12px 16px' }}>
+                    {campaign.status === 'pending' && (
+                      <button
+                        onClick={() => handleCancelCampaign(campaign)}
+                        style={{ background: 'transparent', color: '#ef4444', border: '1px solid rgba(239,68,68,0.3)', padding: '4px 12px', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}
+                      >
+                        Cancelar
+                      </button>
+                    )}
+                    {campaign.status === 'sent' && (
+                      <span style={{ color: 'rgba(255,255,255,0.4)', fontSize: 12 }}>
+                        ✓ {campaign.sent_count} enviados
+                      </span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {campaigns.length === 0 && (
+            <div style={{ textAlign: 'center', padding: 60 }}>
+              <div style={{ fontSize: 48, marginBottom: 16, opacity: 0.3 }}>📅</div>
+              <p style={{ color: 'rgba(255,255,255,0.3)' }}>No hay campañas programadas</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Templates Tab */}
+      {activeTab === 'templates' && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 16 }}>
+          {templates.map(template => (
+            <div
+              key={template.id}
+              style={{
+                background: 'rgba(255,255,255,0.02)',
+                border: '1px solid rgba(255,255,255,0.06)',
+                borderRadius: 16,
+                padding: 20,
+                transition: 'all 0.2s',
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
+                <div>
+                  <h3 style={{ margin: '0 0 4px', fontSize: 16, fontWeight: 600, color: '#fff' }}>{template.name}</h3>
+                  <span style={{
+                    background: 'rgba(212,175,55,0.1)',
+                    color: '#d4af37',
+                    padding: '2px 8px',
+                    borderRadius: 4,
+                    fontSize: 11,
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.05em',
+                  }}>
+                    {template.category}
+                  </span>
+                </div>
+                <span style={{
+                  width: 8,
+                  height: 8,
+                  borderRadius: '50%',
+                  background: template.is_active ? '#22c55e' : '#6b7280',
+                }} />
+              </div>
+              <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: 13, margin: '0 0 12px', lineHeight: 1.5 }}>
+                {template.description || 'Sin descripción'}
+              </p>
+              <p style={{ color: 'rgba(255,255,255,0.6)', fontSize: 13, margin: '0 0 16px' }}>
+                <strong>Subject:</strong> {template.subject}
+              </p>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button
+                  onClick={() => handleSelectTemplate(template)}
+                  style={{ flex: 1, background: 'linear-gradient(to right, #d4af37, #b8922f)', color: '#000', border: 'none', padding: '8px 12px', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
+                >
+                  Usar Template
+                </button>
+                <button
+                  onClick={() => handleEditTemplate(template)}
+                  style={{ background: 'rgba(255,255,255,0.05)', color: 'rgba(255,255,255,0.6)', border: '1px solid rgba(255,255,255,0.1)', padding: '8px 12px', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}
+                >
+                  ✏️
+                </button>
+                <button
+                  onClick={() => handleDeleteTemplate(template.id)}
+                  style={{ background: 'transparent', color: '#ef4444', border: '1px solid rgba(239,68,68,0.3)', padding: '8px 12px', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}
+                >
+                  🗑️
+                </button>
+              </div>
+            </div>
+          ))}
+          {templates.length === 0 && (
+            <div style={{ gridColumn: '1 / -1', textAlign: 'center', padding: 60 }}>
+              <div style={{ fontSize: 48, marginBottom: 16, opacity: 0.3 }}>📧</div>
+              <p style={{ color: 'rgba(255,255,255,0.3)' }}>No hay templates de email</p>
+              <button
+                onClick={() => setShowTemplateForm(true)}
+                style={{ marginTop: 16, background: 'linear-gradient(to right, #d4af37, #b8922f)', color: '#000', border: 'none', padding: '12px 24px', borderRadius: 8, fontWeight: 600, cursor: 'pointer' }}
+              >
+                + Crear Primer Template
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Send Tab */}
+      {activeTab === 'send' && (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }}>
+          {/* Left: Form */}
+          <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 16, padding: 24 }}>
+            <h3 style={{ margin: '0 0 20px', fontSize: 18, fontWeight: 600 }}>Componer Mensaje</h3>
+
+            {/* Type selector */}
+            <div style={{ marginBottom: 20 }}>
+              <label style={{ fontSize: 13, color: 'rgba(255,255,255,0.4)', display: 'block', marginBottom: 8 }}>Tipo de Mensaje</label>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button
+                  onClick={() => setSendForm(prev => ({ ...prev, type: 'email' }))}
+                  style={{
+                    flex: 1,
+                    background: sendForm.type === 'email' ? 'rgba(139,92,246,0.2)' : 'rgba(255,255,255,0.03)',
+                    border: sendForm.type === 'email' ? '1px solid rgba(139,92,246,0.3)' : '1px solid rgba(255,255,255,0.06)',
+                    color: sendForm.type === 'email' ? '#8b5cf6' : 'rgba(255,255,255,0.4)',
+                    padding: '12px',
+                    borderRadius: 8,
+                    cursor: 'pointer',
+                    fontWeight: 500,
+                  }}
+                >
+                  ✉️ Email
+                </button>
+                <button
+                  onClick={() => setSendForm(prev => ({ ...prev, type: 'sms' }))}
+                  style={{
+                    flex: 1,
+                    background: sendForm.type === 'sms' ? 'rgba(34,197,94,0.2)' : 'rgba(255,255,255,0.03)',
+                    border: sendForm.type === 'sms' ? '1px solid rgba(34,197,94,0.3)' : '1px solid rgba(255,255,255,0.06)',
+                    color: sendForm.type === 'sms' ? '#22c55e' : 'rgba(255,255,255,0.4)',
+                    padding: '12px',
+                    borderRadius: 8,
+                    cursor: 'pointer',
+                    fontWeight: 500,
+                  }}
+                >
+                  📱 SMS
+                </button>
+              </div>
+            </div>
+
+            {/* Template selector for email */}
+            {sendForm.type === 'email' && templates.length > 0 && (
+              <div style={{ marginBottom: 20 }}>
+                <label style={{ fontSize: 13, color: 'rgba(255,255,255,0.4)', display: 'block', marginBottom: 8 }}>Template (opcional)</label>
+                <select
+                  value={sendForm.selectedTemplate?.id || ''}
+                  onChange={(e) => {
+                    const template = templates.find(t => t.id === Number(e.target.value));
+                    if (template) handleSelectTemplate(template);
+                  }}
+                  style={{ width: '100%', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', color: '#fff', padding: '10px 12px', borderRadius: 8 }}
+                >
+                  <option value="">Sin template</option>
+                  {templates.map(t => (
+                    <option key={t.id} value={t.id}>{t.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {/* Email fields */}
+            {sendForm.type === 'email' && (
+              <>
+                <div style={{ marginBottom: 16 }}>
+                  <label style={{ fontSize: 13, color: 'rgba(255,255,255,0.4)', display: 'block', marginBottom: 6 }}>Subject *</label>
+                  <input
+                    type="text"
+                    value={sendForm.subject}
+                    onChange={(e) => setSendForm(prev => ({ ...prev, subject: e.target.value }))}
+                    placeholder="Asunto del email"
+                    style={{ width: '100%', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', color: '#fff', padding: '10px 12px', borderRadius: 8 }}
+                  />
+                </div>
+                <div style={{ marginBottom: 16 }}>
+                  <label style={{ fontSize: 13, color: 'rgba(255,255,255,0.4)', display: 'block', marginBottom: 6 }}>Contenido HTML *</label>
+                  <textarea
+                    value={sendForm.htmlContent}
+                    onChange={(e) => setSendForm(prev => ({ ...prev, htmlContent: e.target.value }))}
+                    rows={6}
+                    placeholder="<html>...</html>"
+                    style={{ width: '100%', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', color: '#fff', padding: '10px 12px', borderRadius: 8, fontFamily: 'monospace', resize: 'vertical' }}
+                  />
+                </div>
+              </>
+            )}
+
+            {/* SMS field */}
+            {sendForm.type === 'sms' && (
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ fontSize: 13, color: 'rgba(255,255,255,0.4)', display: 'block', marginBottom: 6 }}>Mensaje *</label>
+                <textarea
+                  value={sendForm.message}
+                  onChange={(e) => setSendForm(prev => ({ ...prev, message: e.target.value }))}
+                  rows={4}
+                  maxLength={160}
+                  placeholder="Tu mensaje SMS (max 160 caracteres)"
+                  style={{ width: '100%', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', color: '#fff', padding: '10px 12px', borderRadius: 8, resize: 'vertical' }}
+                />
+                <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.3)', marginTop: 4 }}>
+                  {sendForm.message.length}/160 caracteres
+                </div>
+              </div>
+            )}
+
+            {/* Schedule options */}
+            <div style={{ marginBottom: 20 }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginBottom: 12 }}>
+                <input
+                  type="checkbox"
+                  checked={sendForm.sendNow}
+                  onChange={(e) => setSendForm(prev => ({ ...prev, sendNow: e.target.checked }))}
+                  style={{ accentColor: '#d4af37' }}
+                />
+                <span style={{ fontSize: 14 }}>Enviar ahora</span>
+              </label>
+              {!sendForm.sendNow && (
+                <input
+                  type="datetime-local"
+                  value={sendForm.scheduledAt}
+                  onChange={(e) => setSendForm(prev => ({ ...prev, scheduledAt: e.target.value }))}
+                  style={{ width: '100%', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', color: '#fff', padding: '10px 12px', borderRadius: 8 }}
+                />
+              )}
+            </div>
+
+            <button
+              onClick={handleSendCampaign}
+              disabled={sendForm.selectedGuests.length === 0}
+              style={{
+                width: '100%',
+                background: sendForm.selectedGuests.length > 0 ? 'linear-gradient(to right, #d4af37, #b8922f)' : 'rgba(255,255,255,0.1)',
+                color: sendForm.selectedGuests.length > 0 ? '#000' : 'rgba(255,255,255,0.3)',
+                border: 'none',
+                padding: '14px',
+                borderRadius: 8,
+                fontWeight: 600,
+                fontSize: 15,
+                cursor: sendForm.selectedGuests.length > 0 ? 'pointer' : 'not-allowed',
+              }}
+            >
+              {sendForm.sendNow ? '🚀 Enviar Ahora' : '📅 Programar'} ({sendForm.selectedGuests.length} destinatarios)
+            </button>
+          </div>
+
+          {/* Right: Recipients */}
+          <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 16, padding: 24, maxHeight: 600, overflow: 'auto' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <h3 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>Destinatarios</h3>
+              <button
+                onClick={handleSelectAllGuests}
+                style={{ background: 'rgba(255,255,255,0.05)', color: 'rgba(255,255,255,0.6)', border: '1px solid rgba(255,255,255,0.1)', padding: '6px 12px', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}
+              >
+                {sendForm.selectAll ? 'Deseleccionar todos' : 'Seleccionar todos'}
+              </button>
+            </div>
+
+            <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.4)', marginBottom: 12 }}>
+              {sendForm.selectedGuests.length} de {guests.length} seleccionados
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {guests.map(guest => (
+                <label
+                  key={guest.id}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 12,
+                    padding: '10px 12px',
+                    background: sendForm.selectedGuests.includes(guest.id) ? 'rgba(212,175,55,0.1)' : 'rgba(255,255,255,0.02)',
+                    border: sendForm.selectedGuests.includes(guest.id) ? '1px solid rgba(212,175,55,0.2)' : '1px solid rgba(255,255,255,0.03)',
+                    borderRadius: 8,
+                    cursor: 'pointer',
+                    transition: 'all 0.2s',
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={sendForm.selectedGuests.includes(guest.id)}
+                    onChange={() => handleToggleGuest(guest.id)}
+                    style={{ accentColor: '#d4af37' }}
+                  />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 500, color: '#fff', marginBottom: 2 }}>{guest.name}</div>
+                    <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {sendForm.type === 'email' ? guest.email : guest.phone}
+                    </div>
+                  </div>
+                </label>
+              ))}
+            </div>
+
+            {guests.length === 0 && (
+              <div style={{ textAlign: 'center', padding: 40 }}>
+                <div style={{ fontSize: 32, marginBottom: 12, opacity: 0.3 }}>👥</div>
+                <p style={{ color: 'rgba(255,255,255,0.3)', fontSize: 14 }}>No hay invitados disponibles</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Template Form Modal */}
+      {showTemplateForm && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+          <div style={{ background: '#0a0a0a', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 16, padding: 24, width: '100%', maxWidth: 600, maxHeight: '90vh', overflow: 'auto' }}>
             <h3 style={{ margin: '0 0 20px', fontSize: 18, fontWeight: 600 }}>
-              {editingId ? 'Edit Automation' : 'Create Automation'}
+              {editingTemplate ? 'Editar Template' : 'Nuevo Template'}
             </h3>
 
             <div style={{ display: 'grid', gap: 16 }}>
               <div>
-                <label style={{ fontSize: 13, color: '#888', display: 'block', marginBottom: 6 }}>Name *</label>
+                <label style={{ fontSize: 13, color: 'rgba(255,255,255,0.4)', display: 'block', marginBottom: 6 }}>Nombre *</label>
                 <input
                   type="text"
-                  value={formData.name}
-                  onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
-                  placeholder="e.g., Auto-approve VIP Guests"
-                  style={{ width: '100%', background: '#0a0a0a', border: '1px solid #333', color: '#fff', padding: '10px 12px', borderRadius: 8 }}
+                  value={templateForm.name}
+                  onChange={(e) => setTemplateForm(prev => ({ ...prev, name: e.target.value }))}
+                  placeholder="ej: VIP Invitation"
+                  style={{ width: '100%', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', color: '#fff', padding: '10px 12px', borderRadius: 8 }}
                 />
               </div>
 
               <div>
-                <label style={{ fontSize: 13, color: '#888', display: 'block', marginBottom: 6 }}>Description</label>
+                <label style={{ fontSize: 13, color: 'rgba(255,255,255,0.4)', display: 'block', marginBottom: 6 }}>Categoría</label>
+                <select
+                  value={templateForm.category}
+                  onChange={(e) => setTemplateForm(prev => ({ ...prev, category: e.target.value }))}
+                  style={{ width: '100%', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', color: '#fff', padding: '10px 12px', borderRadius: 8 }}
+                >
+                  <option value="general">General</option>
+                  <option value="invitation">Invitation</option>
+                  <option value="reminder">Reminder</option>
+                  <option value="followup">Follow Up</option>
+                  <option value="promotion">Promotion</option>
+                </select>
+              </div>
+
+              <div>
+                <label style={{ fontSize: 13, color: 'rgba(255,255,255,0.4)', display: 'block', marginBottom: 6 }}>Subject *</label>
+                <input
+                  type="text"
+                  value={templateForm.subject}
+                  onChange={(e) => setTemplateForm(prev => ({ ...prev, subject: e.target.value }))}
+                  placeholder="Asunto del email"
+                  style={{ width: '100%', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', color: '#fff', padding: '10px 12px', borderRadius: 8 }}
+                />
+              </div>
+
+              <div>
+                <label style={{ fontSize: 13, color: 'rgba(255,255,255,0.4)', display: 'block', marginBottom: 6 }}>Descripción</label>
+                <input
+                  type="text"
+                  value={templateForm.description}
+                  onChange={(e) => setTemplateForm(prev => ({ ...prev, description: e.target.value }))}
+                  placeholder="Breve descripción del template"
+                  style={{ width: '100%', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', color: '#fff', padding: '10px 12px', borderRadius: 8 }}
+                />
+              </div>
+
+              <div>
+                <label style={{ fontSize: 13, color: 'rgba(255,255,255,0.4)', display: 'block', marginBottom: 6 }}>Contenido HTML *</label>
                 <textarea
-                  value={formData.description}
-                  onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
-                  rows={2}
-                  placeholder="What does this automation do?"
-                  style={{ width: '100%', background: '#0a0a0a', border: '1px solid #333', color: '#fff', padding: '10px 12px', borderRadius: 8, resize: 'vertical' }}
+                  value={templateForm.htmlContent}
+                  onChange={(e) => setTemplateForm(prev => ({ ...prev, htmlContent: e.target.value }))}
+                  rows={10}
+                  placeholder="<!DOCTYPE html><html>..."
+                  style={{ width: '100%', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', color: '#fff', padding: '10px 12px', borderRadius: 8, fontFamily: 'monospace', resize: 'vertical' }}
                 />
-              </div>
-
-              <div>
-                <label style={{ fontSize: 13, color: '#888', display: 'block', marginBottom: 8 }}>Trigger</label>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8 }}>
-                  {TRIGGER_TYPES.map(trigger => (
-                    <button
-                      key={trigger.value}
-                      onClick={() => setFormData(prev => ({ ...prev, triggerType: trigger.value as Automation['trigger']['type'] }))}
-                      style={{
-                        background: formData.triggerType === trigger.value ? '#8b5cf620' : '#0a0a0a',
-                        border: formData.triggerType === trigger.value ? '1px solid #8b5cf6' : '1px solid #333',
-                        padding: 12,
-                        borderRadius: 8,
-                        cursor: 'pointer',
-                        textAlign: 'left',
-                      }}
-                    >
-                      <div style={{ fontSize: 16, marginBottom: 4 }}>{trigger.icon} {trigger.label}</div>
-                      <div style={{ fontSize: 11, color: '#666' }}>{trigger.description}</div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {formData.triggerType === 'event' && (
-                <div>
-                  <label style={{ fontSize: 13, color: '#888', display: 'block', marginBottom: 6 }}>Event Type</label>
-                  <select
-                    value={formData.triggerEvent}
-                    onChange={(e) => setFormData(prev => ({ ...prev, triggerEvent: e.target.value }))}
-                    style={{ width: '100%', background: '#0a0a0a', border: '1px solid #333', color: '#fff', padding: '10px 12px', borderRadius: 8 }}
-                  >
-                    <option value="guest_added">Guest Added</option>
-                    <option value="guest_approved">Guest Approved</option>
-                    <option value="guest_checked_in">Guest Checked In</option>
-                    <option value="ticket_purchased">Ticket Purchased</option>
-                    <option value="table_reserved">Table Reserved</option>
-                  </select>
-                </div>
-              )}
-
-              {formData.triggerType === 'schedule' && (
-                <div>
-                  <label style={{ fontSize: 13, color: '#888', display: 'block', marginBottom: 6 }}>Interval</label>
-                  <select
-                    value={formData.scheduleInterval}
-                    onChange={(e) => setFormData(prev => ({ ...prev, scheduleInterval: e.target.value }))}
-                    style={{ width: '100%', background: '#0a0a0a', border: '1px solid #333', color: '#fff', padding: '10px 12px', borderRadius: 8 }}
-                  >
-                    <option value="15m">Every 15 minutes</option>
-                    <option value="1h">Every hour</option>
-                    <option value="6h">Every 6 hours</option>
-                    <option value="24h">Every day</option>
-                    <option value="24h_before">24 hours before event</option>
-                    <option value="1h_before">1 hour before event</option>
-                  </select>
-                </div>
-              )}
-
-              <div>
-                <label style={{ fontSize: 13, color: '#888', display: 'block', marginBottom: 8 }}>Actions *</label>
-                {formData.actions.map((action, index) => {
-                  const actionType = ACTION_TYPES.find(a => a.value === action.type);
-                  return (
-                    <div
-                      key={index}
-                      style={{
-                        background: '#0a0a0a',
-                        border: '1px solid #333',
-                        borderRadius: 8,
-                        padding: 12,
-                        marginBottom: 8,
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                      }}
-                    >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <span style={{ fontSize: 20 }}>{actionType?.icon}</span>
-                        <span>{actionType?.label}</span>
-                        <span style={{ color: '#666', fontSize: 12 }}>#{index + 1}</span>
-                      </div>
-                      <button
-                        onClick={() => handleRemoveAction(index)}
-                        style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer' }}
-                      >
-                        ×
-                      </button>
-                    </div>
-                  );
-                })}
-                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                  {ACTION_TYPES.map(action => (
-                    <button
-                      key={action.value}
-                      onClick={() => handleAddAction(action.value)}
-                      style={{
-                        background: '#1a1a1a',
-                        border: '1px solid #333',
-                        color: '#888',
-                        padding: '6px 12px',
-                        borderRadius: 6,
-                        cursor: 'pointer',
-                        fontSize: 12,
-                      }}
-                    >
-                      + {action.icon} {action.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
-                  <input
-                    type="checkbox"
-                    checked={formData.isActive}
-                    onChange={(e) => setFormData(prev => ({ ...prev, isActive: e.target.checked }))}
-                  />
-                  <span style={{ fontSize: 14 }}>Enable automation immediately</span>
-                </label>
               </div>
             </div>
 
             <div style={{ display: 'flex', gap: 12, marginTop: 24 }}>
               <button
-                onClick={resetForm}
-                style={{ flex: 1, background: '#333', color: '#fff', border: 'none', padding: '12px', borderRadius: 8, cursor: 'pointer' }}
+                onClick={resetTemplateForm}
+                style={{ flex: 1, background: 'rgba(255,255,255,0.05)', color: '#fff', border: '1px solid rgba(255,255,255,0.1)', padding: '12px', borderRadius: 8, cursor: 'pointer' }}
               >
-                Cancel
+                Cancelar
               </button>
               <button
-                onClick={handleSaveAutomation}
-                style={{ flex: 1, background: '#8b5cf6', color: '#fff', border: 'none', padding: '12px', borderRadius: 8, fontWeight: 600, cursor: 'pointer' }}
+                onClick={handleSaveTemplate}
+                style={{ flex: 1, background: 'linear-gradient(to right, #d4af37, #b8922f)', color: '#000', border: 'none', padding: '12px', borderRadius: 8, fontWeight: 600, cursor: 'pointer' }}
               >
-                {editingId ? 'Update' : 'Create'} Automation
+                {editingTemplate ? 'Actualizar' : 'Crear'} Template
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Automations Tab */}
-      {activeTab === 'automations' && (
-        <div style={{ display: 'grid', gap: 16 }}>
-          {automations.map(automation => (
-            <div
-              key={automation.id}
-              style={{
-                background: '#0a0a0a',
-                border: automation.isActive ? '1px solid #22c55e30' : '1px solid #1a1a1a',
-                borderRadius: 12,
-                padding: 20,
-              }}
-            >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
-                <div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                    <span style={{ fontSize: 20 }}>
-                      {TRIGGER_TYPES.find(t => t.value === automation.trigger.type)?.icon}
-                    </span>
-                    <span style={{ fontSize: 18, fontWeight: 600, color: '#fff' }}>{automation.name}</span>
-                  </div>
-                  <p style={{ fontSize: 14, color: '#888', margin: 0 }}>{automation.description}</p>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span style={{
-                    background: automation.isActive ? '#22c55e20' : '#6b728020',
-                    color: automation.isActive ? '#22c55e' : '#6b7280',
-                    padding: '4px 12px',
-                    borderRadius: 20,
-                    fontSize: 12,
-                    fontWeight: 500,
-                  }}>
-                    {automation.isActive ? 'Active' : 'Inactive'}
-                  </span>
-                </div>
-              </div>
-
-              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
-                {automation.actions.map((action, i) => {
-                  const actionType = ACTION_TYPES.find(a => a.value === action.type);
-                  return (
-                    <span
-                      key={action.id}
-                      style={{
-                        background: '#1a1a1a',
-                        padding: '4px 10px',
-                        borderRadius: 6,
-                        fontSize: 12,
-                        color: '#888',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 4,
-                      }}
-                    >
-                      {i + 1}. {actionType?.icon} {actionType?.label}
-                    </span>
-                  );
-                })}
-              </div>
-
-              <div style={{ display: 'flex', gap: 24, marginBottom: 16, color: '#666', fontSize: 13 }}>
-                <span>Runs: {automation.runCount}</span>
-                {automation.lastRun && (
-                  <span>Last run: {new Date(automation.lastRun).toLocaleString()}</span>
-                )}
-              </div>
-
-              <div style={{ display: 'flex', gap: 8 }}>
-                <button
-                  onClick={() => handleToggleAutomation(automation.id)}
-                  style={{
-                    background: automation.isActive ? '#333' : '#22c55e',
-                    color: automation.isActive ? '#fff' : '#000',
-                    border: 'none',
-                    padding: '6px 16px',
-                    borderRadius: 6,
-                    fontSize: 12,
-                    fontWeight: 500,
-                    cursor: 'pointer',
-                  }}
-                >
-                  {automation.isActive ? 'Disable' : 'Enable'}
-                </button>
-                <button
-                  onClick={() => handleRunAutomation(automation.id)}
-                  style={{ background: '#8b5cf6', color: '#fff', border: 'none', padding: '6px 16px', borderRadius: 6, fontSize: 12, fontWeight: 500, cursor: 'pointer' }}
-                >
-                  Run Now
-                </button>
-                <button
-                  onClick={() => handleDeleteAutomation(automation.id)}
-                  style={{ background: 'transparent', color: '#ef4444', border: '1px solid #ef4444', padding: '6px 16px', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}
-                >
-                  Delete
-                </button>
-              </div>
-            </div>
-          ))}
-
-          {automations.length === 0 && (
-            <div style={{ textAlign: 'center', padding: 60 }}>
-              <div style={{ fontSize: 48, marginBottom: 16 }}>🤖</div>
-              <p style={{ color: '#888', fontSize: 16 }}>No automations yet</p>
-              <button
-                onClick={() => setShowForm(true)}
-                style={{ marginTop: 16, background: '#8b5cf6', color: '#fff', border: 'none', padding: '12px 24px', borderRadius: 8, fontWeight: 600, cursor: 'pointer' }}
-              >
-                + Create First Automation
-              </button>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Logs Tab */}
-      {activeTab === 'logs' && (
-        <div style={{ background: '#0a0a0a', border: '1px solid #1a1a1a', borderRadius: 12, overflow: 'hidden' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead>
-              <tr style={{ borderBottom: '1px solid #1a1a1a' }}>
-                <th style={{ textAlign: 'left', padding: '12px 16px', color: '#888', fontSize: 13 }}>Time</th>
-                <th style={{ textAlign: 'left', padding: '12px 16px', color: '#888', fontSize: 13 }}>Automation</th>
-                <th style={{ textAlign: 'left', padding: '12px 16px', color: '#888', fontSize: 13 }}>Status</th>
-                <th style={{ textAlign: 'left', padding: '12px 16px', color: '#888', fontSize: 13 }}>Message</th>
-              </tr>
-            </thead>
-            <tbody>
-              {logs.map(log => (
-                <tr key={log.id} style={{ borderBottom: '1px solid #111' }}>
-                  <td style={{ padding: '12px 16px', color: '#666', fontSize: 13 }}>
-                    {new Date(log.timestamp).toLocaleString()}
-                  </td>
-                  <td style={{ padding: '12px 16px', fontWeight: 500 }}>{log.automationName}</td>
-                  <td style={{ padding: '12px 16px' }}>
-                    <span style={{
-                      background: STATUS_COLORS[log.status] + '20',
-                      color: STATUS_COLORS[log.status],
-                      padding: '2px 8px',
-                      borderRadius: 4,
-                      fontSize: 12,
-                      textTransform: 'capitalize',
-                    }}>
-                      {log.status}
-                    </span>
-                  </td>
-                  <td style={{ padding: '12px 16px', color: '#888', fontSize: 13 }}>{log.message}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-
-          {logs.length === 0 && (
-            <div style={{ textAlign: 'center', padding: 60 }}>
-              <div style={{ fontSize: 48, marginBottom: 16 }}>📋</div>
-              <p style={{ color: '#888', fontSize: 16 }}>No activity logs yet</p>
-            </div>
-          )}
-        </div>
-      )}
+      <style>{`
+        @keyframes spin {
+          to { transform: rotate(360deg); }
+        }
+      `}</style>
     </div>
   );
 }
