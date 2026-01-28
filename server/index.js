@@ -4173,7 +4173,7 @@ const transformToGuestList = (row) => {
 // GET /api/v1/guest-lists - List all guests (LOCAL - reads from guest_lists table)
 app.get('/api/v1/guest-lists', async (req, res) => {
   try {
-    const { status, limit = '50', offset = '0' } = req.query;
+    const { status, limit = '1000', offset = '0' } = req.query;
 
     let queryText = 'SELECT * FROM guest_lists WHERE 1=1';
     const params = [];
