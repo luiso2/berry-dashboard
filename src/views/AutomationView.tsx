@@ -588,13 +588,15 @@ export function AutomationView({ onToast, token }: AutomationViewProps) {
           )}
 
           {/* Step 2: Select Event */}
-          {step === 2 && (
+          {step === 2 && (() => {
+            const upcomingEvents = events.filter(e => new Date(e.eventDate) >= new Date());
+            return (
             <div>
               <h2 style={{ margin: '0 0 8px', fontSize: 24, fontWeight: 600 }}>Select Event</h2>
-              <p style={{ margin: '0 0 24px', color: 'rgba(255,255,255,0.4)' }}>Choose the event for this automation</p>
+              <p style={{ margin: '0 0 24px', color: 'rgba(255,255,255,0.4)' }}>Choose an upcoming event for this automation</p>
 
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16 }}>
-                {events.map(event => (
+                {upcomingEvents.map(event => (
                   <button
                     key={event.id}
                     onClick={() => { setSelectedEvent(event); setStep(3); }}
@@ -631,10 +633,10 @@ export function AutomationView({ onToast, token }: AutomationViewProps) {
                 ))}
               </div>
 
-              {events.length === 0 && (
+              {upcomingEvents.length === 0 && (
                 <div style={{ textAlign: 'center', padding: 60, background: 'rgba(255,255,255,0.02)', borderRadius: 16 }}>
                   <div style={{ fontSize: 48, marginBottom: 16, opacity: 0.3 }}>📅</div>
-                  <p style={{ color: 'rgba(255,255,255,0.3)' }}>No events found. Create an event first.</p>
+                  <p style={{ color: 'rgba(255,255,255,0.3)' }}>No upcoming events found. Create an event first.</p>
                 </div>
               )}
 
@@ -645,7 +647,8 @@ export function AutomationView({ onToast, token }: AutomationViewProps) {
                 ← Back
               </button>
             </div>
-          )}
+            );
+          })()}
 
           {/* Step 3: Select Template */}
           {step === 3 && automationType && (
