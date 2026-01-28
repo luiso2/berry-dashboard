@@ -4571,9 +4571,15 @@ const updateGuestListHandler = async (req, res) => {
     }
 
     // Store category in vip_preferences field for now (or notes)
-    if (category && ['A', 'B', 'C', 'vip', 'priority', 'standard'].includes(category)) {
-      updates.push(`vip_preferences = $${paramIndex++}`);
-      params.push(category);
+    // Also clear vip_preferences when setting to pending
+    if (category) {
+      if (['A', 'B', 'C', 'vip', 'priority', 'standard'].includes(category)) {
+        updates.push(`vip_preferences = $${paramIndex++}`);
+        params.push(category);
+      } else if (category === 'pending') {
+        // Clear vip_preferences when setting back to pending
+        updates.push(`vip_preferences = NULL`);
+      }
     }
     if (notes !== undefined) {
       updates.push(`notes = COALESCE(notes, '') || $${paramIndex++}`);
