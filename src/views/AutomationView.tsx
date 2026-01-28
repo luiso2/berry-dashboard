@@ -280,8 +280,15 @@ export function AutomationView({ onToast, token }: AutomationViewProps) {
       filtered = filtered.filter(g => selectedGuestIds.includes(g.id));
     }
 
+    // Filter by channel - only include guests with valid contact info
+    if (channel === 'sms') {
+      filtered = filtered.filter(g => g.phone && g.phone.trim() !== '');
+    } else if (channel === 'email') {
+      filtered = filtered.filter(g => g.email && g.email.trim() !== '');
+    }
+
     return filtered;
-  }, [guests, selectedEvent, audienceType, selectedCategories, selectedStatuses, selectedGuestIds]);
+  }, [guests, selectedEvent, audienceType, selectedCategories, selectedStatuses, selectedGuestIds, channel]);
 
   // Calculate scheduled time
   const getScheduledTime = useCallback(() => {
@@ -325,7 +332,19 @@ export function AutomationView({ onToast, token }: AutomationViewProps) {
 
     try {
       // Send personalized messages to each guest
+      let successCount = 0;
+      let failCount = 0;
+
       const promises = filteredGuests.map(async (guest) => {
+        const recipient = channel === 'email' ? guest.email : guest.phone;
+
+        // Skip if no valid recipient
+        if (!recipient || recipient.trim() === '') {
+          console.warn(`Skipping ${guest.name}: no ${channel === 'email' ? 'email' : 'phone'}`);
+          failCount++;
+          return null;
+        }
+
         const personalizedContent = channel === 'email'
           ? personalizeMessage(selectedTemplate.content, guest.name)
           : personalizeMessage(selectedTemplate.smsContent, guest.name);
@@ -334,46 +353,70 @@ export function AutomationView({ onToast, token }: AutomationViewProps) {
           ? personalizeMessage(selectedTemplate.subject, guest.name)
           : '';
 
-        if (isImmediate) {
-          // Send now
-          return fetch(`${API_URL}/automation/send-now`, {
-            method: 'POST',
-            headers: getHeaders('application/json'),
-            body: JSON.stringify({
-              type: channel,
-              recipients: [channel === 'email' ? guest.email : guest.phone],
-              message: personalizedContent,
-              subject: personalizedSubject,
-              htmlContent: channel === 'email' ? `<div style="font-family: system-ui, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-                <div style="background: linear-gradient(135deg, #1a1a1a 0%, #0a0a0a 100%); border-radius: 16px; padding: 32px; color: #fff;">
-                  <h2 style="color: #d4af37; margin: 0 0 20px;">${personalizedSubject}</h2>
-                  <div style="white-space: pre-line; line-height: 1.6; color: rgba(255,255,255,0.9);">${personalizedContent}</div>
-                </div>
-              </div>` : undefined,
-            }),
-          });
-        } else {
-          // Schedule
-          return fetch(`${API_URL}/automation/email/schedule`, {
-            method: 'POST',
-            headers: getHeaders('application/json'),
-            body: JSON.stringify({
-              recipients: [channel === 'email' ? guest.email : guest.phone],
-              message: personalizedContent,
-              subject: personalizedSubject,
-              scheduledAt: scheduledAt.toISOString(),
-              automationType: automationType,
-              eventName: selectedEvent?.name,
-            }),
-          });
+        try {
+          if (isImmediate) {
+            // Send now
+            const res = await fetch(`${API_URL}/automation/send-now`, {
+              method: 'POST',
+              headers: getHeaders('application/json'),
+              body: JSON.stringify({
+                type: channel,
+                recipients: [recipient],
+                message: personalizedContent,
+                subject: personalizedSubject,
+                htmlContent: channel === 'email' ? `<div style="font-family: system-ui, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+                  <div style="background: linear-gradient(135deg, #1a1a1a 0%, #0a0a0a 100%); border-radius: 16px; padding: 32px; color: #fff;">
+                    <h2 style="color: #d4af37; margin: 0 0 20px;">${personalizedSubject}</h2>
+                    <div style="white-space: pre-line; line-height: 1.6; color: rgba(255,255,255,0.9);">${personalizedContent}</div>
+                  </div>
+                </div>` : undefined,
+              }),
+            });
+            const data = await res.json();
+            if (res.ok && data.sentCount > 0) {
+              successCount++;
+            } else {
+              console.error(`Failed to send to ${guest.name}:`, data);
+              failCount++;
+            }
+            return data;
+          } else {
+            // Schedule
+            const res = await fetch(`${API_URL}/automation/email/schedule`, {
+              method: 'POST',
+              headers: getHeaders('application/json'),
+              body: JSON.stringify({
+                recipients: [recipient],
+                message: personalizedContent,
+                subject: personalizedSubject,
+                scheduledAt: scheduledAt.toISOString(),
+                automationType: automationType,
+                eventName: selectedEvent?.name,
+              }),
+            });
+            if (res.ok) successCount++;
+            else failCount++;
+            return res.json();
+          }
+        } catch (err) {
+          console.error(`Error sending to ${guest.name}:`, err);
+          failCount++;
+          return null;
         }
       });
 
       await Promise.all(promises);
-      onToast(`Automation ${isImmediate ? 'sent' : 'scheduled'} for ${filteredGuests.length} recipients!`, 'success');
+
+      if (successCount > 0) {
+        onToast(`${channel === 'sms' ? 'SMS' : 'Email'} ${isImmediate ? 'sent' : 'scheduled'}: ${successCount} success${failCount > 0 ? `, ${failCount} failed` : ''}`, 'success');
+      } else {
+        onToast(`Failed to send ${channel === 'sms' ? 'SMS' : 'emails'}. Check console for details.`, 'error');
+      }
+
       resetWizard();
       fetchData();
     } catch (err) {
+      console.error('Automation error:', err);
       onToast('Error activating automation', 'error');
     }
   };
@@ -613,7 +656,10 @@ export function AutomationView({ onToast, token }: AutomationViewProps) {
                   >
                     <div style={{ fontSize: 18, fontWeight: 600, color: '#fff', marginBottom: 8 }}>{event.name}</div>
                     <div style={{ fontSize: 14, color: 'rgba(255,255,255,0.4)', marginBottom: 8 }}>
-                      📅 {new Date(event.eventDate).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
+                      📅 {(() => {
+                        const dateStr = event.eventDate?.split('T')[0] || '';
+                        return dateStr ? new Date(dateStr + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : 'No date';
+                      })()}
                     </div>
                     <div style={{ display: 'flex', gap: 8 }}>
                       <span style={{

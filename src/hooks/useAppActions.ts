@@ -621,7 +621,8 @@ export function useAppActions(state: AppState, token?: string, userId?: number) 
   }, [setGuests, addToast, getHeaders]);
 
   // Approve Guest (move to category and optionally send email)
-  const approveGuest = useCallback(async (guest: Guest, category: GuestCategory, sendEmail: boolean = true) => {
+  // NOTE: sendEmail defaults to false - email should only be sent after explicit user confirmation
+  const approveGuest = useCallback(async (guest: Guest, category: GuestCategory, sendEmail: boolean = false) => {
     try {
       // Update category
       const res = await fetch(`${API_URL}${ENDPOINTS.guests}/${guest.id}`, {
@@ -735,7 +736,8 @@ export function useAppActions(state: AppState, token?: string, userId?: number) 
   }, [addToast, getHeaders]);
 
   // Bulk Approve Guests
-  const bulkApproveGuests = useCallback(async (guestIds: string[], category: GuestCategory, sendEmails: boolean = true) => {
+  // NOTE: sendEmails defaults to false - emails should only be sent after explicit user confirmation
+  const bulkApproveGuests = useCallback(async (guestIds: string[], category: GuestCategory, sendEmails: boolean = false) => {
     try {
       await Promise.all(guestIds.map(id =>
         fetch(`${API_URL}${ENDPOINTS.guests}/${id}`, {

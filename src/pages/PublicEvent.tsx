@@ -345,12 +345,15 @@ export default function PublicEvent() {
             </div>
             <div>
               <div style={{ fontWeight: 600, fontSize: 16 }}>
-                {new Date(event.eventDate).toLocaleDateString('en-US', {
-                  weekday: 'long',
-                  month: 'long',
-                  day: 'numeric',
-                  year: 'numeric',
-                })}
+                {(() => {
+                  const dateStr = event.eventDate?.split('T')[0] || '';
+                  return dateStr ? new Date(dateStr + 'T12:00:00').toLocaleDateString('en-US', {
+                    weekday: 'long',
+                    month: 'long',
+                    day: 'numeric',
+                    year: 'numeric',
+                  }) : 'Date TBD';
+                })()}
               </div>
               {event.eventTime && (
                 <div style={{ fontSize: 14, opacity: 0.8 }}>

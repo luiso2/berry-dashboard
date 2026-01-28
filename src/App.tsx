@@ -347,8 +347,11 @@ function App() {
                   <button
                     onClick={async () => {
                       const ids = Array.from(state.selectedGuests);
-                      await actions.bulkApproveGuests(ids, 'A', true);
+                      await actions.bulkApproveGuests(ids, 'A', false);
                       state.setSelectedGuests(new Set());
+                      if (window.confirm(`Send approval email to ${ids.length} guest(s)?`)) {
+                        await actions.sendBulkGuestEmails(ids, 'approval');
+                      }
                     }}
                     style={{ background: '#22c55e', color: '#000', border: 'none', padding: '8px 16px', borderRadius: 6, fontWeight: 600, cursor: 'pointer', fontSize: 13 }}
                   >
@@ -357,8 +360,11 @@ function App() {
                   <button
                     onClick={async () => {
                       const ids = Array.from(state.selectedGuests);
-                      await actions.bulkApproveGuests(ids, 'B', true);
+                      await actions.bulkApproveGuests(ids, 'B', false);
                       state.setSelectedGuests(new Set());
+                      if (window.confirm(`Send approval email to ${ids.length} guest(s)?`)) {
+                        await actions.sendBulkGuestEmails(ids, 'approval');
+                      }
                     }}
                     style={{ background: '#3b82f6', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: 6, fontWeight: 600, cursor: 'pointer', fontSize: 13 }}
                   >
@@ -367,8 +373,11 @@ function App() {
                   <button
                     onClick={async () => {
                       const ids = Array.from(state.selectedGuests);
-                      await actions.bulkApproveGuests(ids, 'C', true);
+                      await actions.bulkApproveGuests(ids, 'C', false);
                       state.setSelectedGuests(new Set());
+                      if (window.confirm(`Send approval email to ${ids.length} guest(s)?`)) {
+                        await actions.sendBulkGuestEmails(ids, 'approval');
+                      }
                     }}
                     style={{ background: '#6b7280', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: 6, fontWeight: 600, cursor: 'pointer', fontSize: 13 }}
                   >
@@ -377,8 +386,10 @@ function App() {
                   <button
                     onClick={async () => {
                       const ids = Array.from(state.selectedGuests);
-                      await actions.sendBulkGuestEmails(ids, 'custom', 'Event Update', 'We have exciting news about the event!');
-                      state.setSelectedGuests(new Set());
+                      if (window.confirm(`Send bulk email to ${ids.length} guest(s)?`)) {
+                        await actions.sendBulkGuestEmails(ids, 'custom', 'Event Update', 'We have exciting news about the event!');
+                        state.setSelectedGuests(new Set());
+                      }
                     }}
                     style={{ background: '#d4af37', color: '#000', border: 'none', padding: '8px 16px', borderRadius: 6, fontWeight: 600, cursor: 'pointer', fontSize: 13 }}
                   >
@@ -665,19 +676,37 @@ function App() {
                                     label="Approve as VIP"
                                     description="Category A - Top priority"
                                     variant="success"
-                                    onClick={() => { actions.approveGuest(guest, 'A', true); setOpenActionMenu(null); }}
+                                    onClick={async () => {
+                                      await actions.approveGuest(guest, 'A', false);
+                                      setOpenActionMenu(null);
+                                      if (window.confirm(`Send approval email to ${guest.name}?`)) {
+                                        await actions.sendGuestEmail(guest, 'approval');
+                                      }
+                                    }}
                                   />
                                   <MenuItem
                                     icon="🎯"
                                     label="Approve as Priority"
                                     description="Category B - High priority"
-                                    onClick={() => { actions.approveGuest(guest, 'B', true); setOpenActionMenu(null); }}
+                                    onClick={async () => {
+                                      await actions.approveGuest(guest, 'B', false);
+                                      setOpenActionMenu(null);
+                                      if (window.confirm(`Send approval email to ${guest.name}?`)) {
+                                        await actions.sendGuestEmail(guest, 'approval');
+                                      }
+                                    }}
                                   />
                                   <MenuItem
                                     icon="👤"
                                     label="Approve as Standard"
                                     description="Category C - General admission"
-                                    onClick={() => { actions.approveGuest(guest, 'C', true); setOpenActionMenu(null); }}
+                                    onClick={async () => {
+                                      await actions.approveGuest(guest, 'C', false);
+                                      setOpenActionMenu(null);
+                                      if (window.confirm(`Send approval email to ${guest.name}?`)) {
+                                        await actions.sendGuestEmail(guest, 'approval');
+                                      }
+                                    }}
                                   />
                                   <MenuItem
                                     icon="✗"
@@ -695,13 +724,23 @@ function App() {
                                 icon="✉️"
                                 label="Send Confirmation Email"
                                 description="Event details & confirmation"
-                                onClick={() => { actions.sendGuestEmail(guest, 'confirmation'); setOpenActionMenu(null); }}
+                                onClick={async () => {
+                                  setOpenActionMenu(null);
+                                  if (window.confirm(`Send confirmation email to ${guest.name}?`)) {
+                                    await actions.sendGuestEmail(guest, 'confirmation');
+                                  }
+                                }}
                               />
                               <MenuItem
                                 icon="📧"
                                 label="Send Approval Email"
                                 description="Notify guest of approval"
-                                onClick={() => { actions.sendGuestEmail(guest, 'approval'); setOpenActionMenu(null); }}
+                                onClick={async () => {
+                                  setOpenActionMenu(null);
+                                  if (window.confirm(`Send approval email to ${guest.name}?`)) {
+                                    await actions.sendGuestEmail(guest, 'approval');
+                                  }
+                                }}
                               />
                               <MenuItem
                                 icon="📱"

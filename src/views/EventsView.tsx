@@ -376,7 +376,10 @@ export function EventsView({ onToast }: EventsViewProps) {
               </span>
             </div>
             <div style={{ display: 'flex', gap: 16, fontSize: 13, color: '#888' }}>
-              <span>📅 {new Date(event.eventDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+              <span>📅 {(() => {
+                const dateStr = event.eventDate?.split('T')[0] || '';
+                return dateStr ? new Date(dateStr + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'No date';
+              })()}</span>
               {event.startTime && <span>🕐 {event.startTime}</span>}
               {event.expectedAttendance && <span>👥 {event.expectedAttendance}</span>}
             </div>
@@ -1011,7 +1014,7 @@ export function EventsView({ onToast }: EventsViewProps) {
                           <div style={{ display: 'flex', alignItems: 'center', gap: 12, fontSize: 15 }}>
                             <span style={{ fontSize: 18 }}>📅</span>
                             <span>
-                              {new Date(eventFormData.eventDate).toLocaleDateString('en-US', {
+                              {new Date((eventFormData.eventDate?.split('T')[0] || '') + 'T12:00:00').toLocaleDateString('en-US', {
                                 weekday: 'long', month: 'long', day: 'numeric'
                               })}
                             </span>
