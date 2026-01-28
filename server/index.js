@@ -2928,7 +2928,7 @@ const transformGuest = (row) => ({
   rating: row.rating || 0,
 });
 
-// Email template generator
+// Email template generator - Optimized for inbox delivery
 const generateInvitationEmail = (guest, category, customMessage = '', eventName = '') => {
   const categoryNames = {
     A: 'VIP',
@@ -2938,85 +2938,134 @@ const generateInvitationEmail = (guest, category, customMessage = '', eventName 
   };
 
   const isPending = category === 'pending';
-  const eventDisplay = eventName || 'our exclusive event';
+  const eventDisplay = eventName || 'our event';
+  const guestName = guest.name || 'Guest';
+  const partySize = guest.partySize || guest.party_size || 1;
+
+  // Subject lines that avoid spam triggers
+  const subject = isPending
+    ? `${guestName}, we received your request for ${eventDisplay}`
+    : `${guestName}, your spot is confirmed for ${eventDisplay}`;
+
+  // Preheader text (shows in inbox preview)
+  const preheader = isPending
+    ? `Thank you for requesting access. We will review and get back to you soon.`
+    : `Great news! You're on the list for ${eventDisplay}. See your details inside.`;
 
   return {
-    subject: isPending
-      ? `Application Received - ${eventName || 'Berry Bly Events'}`
-      : `You're Invited! - ${eventName || 'Berry Bly Events'}`,
+    subject,
     html: `
       <!DOCTYPE html>
-      <html>
+      <html lang="en">
       <head>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <meta name="color-scheme" content="light dark">
+        <title>${subject}</title>
       </head>
-      <body style="margin: 0; padding: 0; background-color: #0a0a0a; font-family: Georgia, serif;">
-        <div style="max-width: 600px; margin: 0 auto; padding: 40px 20px;">
-          <!-- Header -->
-          <div style="text-align: center; margin-bottom: 40px;">
-            <h1 style="color: #d4af37; font-size: 32px; margin: 0;">Berry Bly</h1>
-            <p style="color: #666; font-size: 12px; text-transform: uppercase; letter-spacing: 3px; margin-top: 8px;">Exclusive Events</p>
-          </div>
-
-          <!-- Main Content -->
-          <div style="background: linear-gradient(180deg, rgba(212, 175, 55, 0.1) 0%, transparent 100%); border: 1px solid rgba(212, 175, 55, 0.3); border-radius: 16px; padding: 40px; margin-bottom: 30px;">
-            <h2 style="color: #ffffff; font-size: 24px; margin: 0 0 20px 0;">Dear ${guest.name},</h2>
-
-            ${isPending ? `
-            <p style="color: #cccccc; font-size: 16px; line-height: 1.8; margin: 0 0 20px 0;">
-              Thank you for your interest in <strong style="color: #d4af37;">${eventDisplay}</strong>!
-            </p>
-            <p style="color: #cccccc; font-size: 16px; line-height: 1.8; margin: 0 0 20px 0;">
-              Our team will review your application for <strong style="color: #d4af37;">${eventDisplay}</strong>. You'll receive a confirmation email once you're approved.
-            </p>
-            ` : `
-            <p style="color: #cccccc; font-size: 16px; line-height: 1.8; margin: 0 0 20px 0;">
-              We are delighted to confirm your <strong style="color: #d4af37;">${categoryNames[category]}</strong> invitation to <strong style="color: #d4af37;">${eventDisplay}</strong>.
-            </p>
-            `}
-
-            ${customMessage ? `
-            <div style="background: rgba(255,255,255,0.05); border-left: 3px solid #d4af37; padding: 20px; margin: 20px 0; border-radius: 0 8px 8px 0;">
-              <p style="color: #ffffff; font-size: 16px; line-height: 1.6; margin: 0;">${customMessage}</p>
-            </div>
-            ` : ''}
-
-            <!-- Event Details -->
-            <div style="margin-top: 30px; padding-top: 30px; border-top: 1px solid rgba(255,255,255,0.1);">
-              <h3 style="color: #d4af37; font-size: 14px; text-transform: uppercase; letter-spacing: 2px; margin: 0 0 20px 0;">Your Details</h3>
-
-              <table style="width: 100%; color: #999;">
-                ${eventName ? `
-                <tr>
-                  <td style="padding: 8px 0; color: #666;">Event</td>
-                  <td style="padding: 8px 0; color: #d4af37; text-align: right;">${eventName}</td>
-                </tr>
-                ` : ''}
-                <tr>
-                  <td style="padding: 8px 0; color: #666;">Status</td>
-                  <td style="padding: 8px 0; color: #d4af37; text-align: right;">${categoryNames[category] || category}</td>
-                </tr>
-                <tr>
-                  <td style="padding: 8px 0; color: #666;">Party Size</td>
-                  <td style="padding: 8px 0; color: #ffffff; text-align: right;">${guest.partySize || guest.party_size || 1} ${(guest.partySize || guest.party_size || 1) > 1 ? 'guests' : 'guest'}</td>
-                </tr>
-                ${guest.eventDate || guest.event_date ? `
-                <tr>
-                  <td style="padding: 8px 0; color: #666;">Event Date</td>
-                  <td style="padding: 8px 0; color: #ffffff; text-align: right;">${new Date(guest.eventDate || guest.event_date).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</td>
-                </tr>
-                ` : ''}
-              </table>
-            </div>
-          </div>
-
-          <!-- Footer -->
-          <div style="text-align: center; color: #666; font-size: 12px;">
-            <p style="margin: 0 0 10px 0;">Questions? Reply to this email or contact us directly.</p>
-            <p style="margin: 0; color: #444;">Berry Bly Events. All rights reserved.</p>
-          </div>
+      <body style="margin: 0; padding: 0; background-color: #f5f5f5; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
+        <!-- Preheader text (hidden but shows in inbox) -->
+        <div style="display: none; max-height: 0; overflow: hidden;">
+          ${preheader}
+          &nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;
         </div>
+
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color: #f5f5f5;">
+          <tr>
+            <td align="center" style="padding: 40px 20px;">
+              <table role="presentation" width="600" cellspacing="0" cellpadding="0" style="max-width: 600px; background-color: #ffffff; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.08);">
+
+                <!-- Header -->
+                <tr>
+                  <td style="padding: 32px 40px 24px; text-align: center; border-bottom: 1px solid #eee;">
+                    <h1 style="color: #1a1a1a; font-size: 24px; font-weight: 600; margin: 0;">Berry Bly</h1>
+                    <p style="color: #888; font-size: 13px; margin: 8px 0 0; letter-spacing: 1px;">EVENT MANAGEMENT</p>
+                  </td>
+                </tr>
+
+                <!-- Main Content -->
+                <tr>
+                  <td style="padding: 32px 40px;">
+                    <p style="color: #333; font-size: 16px; line-height: 1.6; margin: 0 0 20px;">
+                      Hi ${guestName},
+                    </p>
+
+                    ${isPending ? `
+                    <p style="color: #555; font-size: 16px; line-height: 1.7; margin: 0 0 16px;">
+                      Thank you for your interest in <strong>${eventDisplay}</strong>. We have received your request and our team will review it shortly.
+                    </p>
+                    <p style="color: #555; font-size: 16px; line-height: 1.7; margin: 0 0 24px;">
+                      You will receive another email once your request has been reviewed. This usually takes 24-48 hours.
+                    </p>
+                    ` : `
+                    <p style="color: #555; font-size: 16px; line-height: 1.7; margin: 0 0 16px;">
+                      Great news! Your request has been approved. You are confirmed as a <strong style="color: #b8922f;">${categoryNames[category]}</strong> guest for <strong>${eventDisplay}</strong>.
+                    </p>
+                    <p style="color: #555; font-size: 16px; line-height: 1.7; margin: 0 0 24px;">
+                      Please save this email for your records. You may need to show it at the door.
+                    </p>
+                    `}
+
+                    ${customMessage ? `
+                    <div style="background: #fafafa; border-left: 4px solid #b8922f; padding: 16px 20px; margin: 24px 0; border-radius: 0 8px 8px 0;">
+                      <p style="color: #444; font-size: 15px; line-height: 1.6; margin: 0;">${customMessage}</p>
+                    </div>
+                    ` : ''}
+
+                    <!-- Details Box -->
+                    <div style="background: #fafafa; border-radius: 8px; padding: 24px; margin-top: 24px;">
+                      <h3 style="color: #333; font-size: 14px; font-weight: 600; margin: 0 0 16px; text-transform: uppercase; letter-spacing: 0.5px;">Your Details</h3>
+
+                      <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
+                        ${eventName ? `
+                        <tr>
+                          <td style="padding: 8px 0; color: #666; font-size: 14px;">Event</td>
+                          <td style="padding: 8px 0; color: #333; font-size: 14px; text-align: right; font-weight: 500;">${eventName}</td>
+                        </tr>
+                        ` : ''}
+                        <tr>
+                          <td style="padding: 8px 0; color: #666; font-size: 14px;">Status</td>
+                          <td style="padding: 8px 0; color: #b8922f; font-size: 14px; text-align: right; font-weight: 600;">${categoryNames[category] || category}</td>
+                        </tr>
+                        <tr>
+                          <td style="padding: 8px 0; color: #666; font-size: 14px;">Party Size</td>
+                          <td style="padding: 8px 0; color: #333; font-size: 14px; text-align: right;">${partySize} ${partySize > 1 ? 'guests' : 'guest'}</td>
+                        </tr>
+                        ${guest.eventDate || guest.event_date ? `
+                        <tr>
+                          <td style="padding: 8px 0; color: #666; font-size: 14px;">Date</td>
+                          <td style="padding: 8px 0; color: #333; font-size: 14px; text-align: right;">${new Date(guest.eventDate || guest.event_date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}</td>
+                        </tr>
+                        ` : ''}
+                      </table>
+                    </div>
+
+                    <p style="color: #555; font-size: 15px; line-height: 1.6; margin: 28px 0 0;">
+                      If you have any questions, simply reply to this email.
+                    </p>
+                    <p style="color: #555; font-size: 15px; margin: 16px 0 0;">
+                      Best regards,<br>
+                      <strong>The Berry Bly Team</strong>
+                    </p>
+                  </td>
+                </tr>
+
+                <!-- Footer -->
+                <tr>
+                  <td style="padding: 24px 40px 32px; border-top: 1px solid #eee; text-align: center;">
+                    <p style="color: #999; font-size: 13px; line-height: 1.6; margin: 0;">
+                      Berry Bly Events<br>
+                      Miami, FL
+                    </p>
+                    <p style="color: #bbb; font-size: 12px; margin: 16px 0 0;">
+                      You received this email because you requested access to one of our events.
+                    </p>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+        </table>
       </body>
       </html>
     `,
