@@ -37,6 +37,7 @@ interface Campaign {
 
 interface AutomationViewProps {
   onToast: (message: string, type: 'success' | 'error' | 'info') => void;
+  token?: string;
 }
 
 // Predefined templates with {name} personalization
@@ -177,7 +178,7 @@ const TIMING_PRESETS = [
   { id: '1d-after', label: '1 day after', value: 1, unit: 'days', direction: 'after' },
 ];
 
-export function AutomationView({ onToast }: AutomationViewProps) {
+export function AutomationView({ onToast, token }: AutomationViewProps) {
   // Data states
   const [events, setEvents] = useState<Event[]>([]);
   const [guests, setGuests] = useState<Guest[]>([]);
@@ -205,13 +206,25 @@ export function AutomationView({ onToast }: AutomationViewProps) {
   // View mode
   const [viewMode, setViewMode] = useState<'create' | 'campaigns'>('create');
 
+  // Auth headers helper
+  const getHeaders = useCallback((contentType?: string) => {
+    const headers: HeadersInit = {};
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+    if (contentType) {
+      headers['Content-Type'] = contentType;
+    }
+    return headers;
+  }, [token]);
+
   // Fetch data
   const fetchData = useCallback(async () => {
     try {
       const [eventsRes, guestsRes, campaignsRes] = await Promise.all([
-        fetch(`${API_URL}/events`),
-        fetch(`${API_URL}/guest-lists`),
-        fetch(`${API_URL}/automation/campaigns`),
+        fetch(`${API_URL}/events`, { headers: getHeaders() }),
+        fetch(`${API_URL}/guest-lists`, { headers: getHeaders() }),
+        fetch(`${API_URL}/automation/campaigns`, { headers: getHeaders() }),
       ]);
 
       if (eventsRes.ok) {
@@ -242,7 +255,7 @@ export function AutomationView({ onToast }: AutomationViewProps) {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [getHeaders]);
 
   useEffect(() => {
     fetchData();
@@ -324,7 +337,7 @@ export function AutomationView({ onToast }: AutomationViewProps) {
           // Send now
           return fetch(`${API_URL}/automation/send-now`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: getHeaders('application/json'),
             body: JSON.stringify({
               type: channel,
               recipients: [channel === 'email' ? guest.email : guest.phone],
@@ -342,7 +355,7 @@ export function AutomationView({ onToast }: AutomationViewProps) {
           // Schedule
           return fetch(`${API_URL}/automation/email/schedule`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: getHeaders('application/json'),
             body: JSON.stringify({
               recipients: [channel === 'email' ? guest.email : guest.phone],
               message: personalizedContent,
@@ -381,7 +394,10 @@ export function AutomationView({ onToast }: AutomationViewProps) {
   // Cancel campaign
   const handleCancelCampaign = async (campaign: Campaign) => {
     try {
-      await fetch(`${API_URL}/automation/email/scheduled/${campaign.id}`, { method: 'DELETE' });
+      await fetch(`${API_URL}/automation/email/scheduled/${campaign.id}`, {
+        method: 'DELETE',
+        headers: getHeaders(),
+      });
       onToast('Campaign cancelled', 'success');
       fetchData();
     } catch (err) {

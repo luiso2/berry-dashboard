@@ -859,7 +859,7 @@ function App() {
         return <VendorsView onToast={actions.addToast} />;
 
       case 'automation':
-        return <AutomationView onToast={actions.addToast} />;
+        return <AutomationView onToast={actions.addToast} token={token ?? undefined} />;
 
       case 'models':
         return <ModelsView onToast={actions.addToast} />;
