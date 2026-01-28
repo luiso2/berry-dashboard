@@ -202,6 +202,7 @@ export function AutomationView({ onToast, token }: AutomationViewProps) {
   const [selectedStatuses, setSelectedStatuses] = useState<string[]>([]);
   const [selectedGuestIds, setSelectedGuestIds] = useState<string[]>([]);
   const [showGuestPicker, setShowGuestPicker] = useState(false);
+  const [guestSearch, setGuestSearch] = useState('');
 
   // View mode
   const [viewMode, setViewMode] = useState<'create' | 'campaigns'>('create');
@@ -957,63 +958,106 @@ export function AutomationView({ onToast, token }: AutomationViewProps) {
       )}
 
       {/* Guest Picker Modal */}
-      {showGuestPicker && (
+      {showGuestPicker && (() => {
+        const searchLower = guestSearch.toLowerCase();
+        const filteredPickerGuests = guests.filter(g =>
+          g.name.toLowerCase().includes(searchLower) ||
+          g.email.toLowerCase().includes(searchLower) ||
+          g.phone.toLowerCase().includes(searchLower)
+        );
+        return (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
           <div style={{ background: '#0a0a0a', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 16, padding: 24, width: '100%', maxWidth: 500, maxHeight: '80vh', display: 'flex', flexDirection: 'column' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
               <h3 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>Select Guests</h3>
-              <button
-                onClick={() => setSelectedGuestIds(guests.map(g => g.id))}
-                style={{ background: 'rgba(255,255,255,0.05)', color: 'rgba(255,255,255,0.6)', border: 'none', padding: '6px 12px', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}
-              >
-                Select All
-              </button>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button
+                  onClick={() => setSelectedGuestIds([])}
+                  style={{ background: 'rgba(255,255,255,0.05)', color: 'rgba(255,255,255,0.6)', border: 'none', padding: '6px 12px', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}
+                >
+                  Clear
+                </button>
+                <button
+                  onClick={() => setSelectedGuestIds(filteredPickerGuests.map(g => g.id))}
+                  style={{ background: 'rgba(255,255,255,0.05)', color: 'rgba(255,255,255,0.6)', border: 'none', padding: '6px 12px', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}
+                >
+                  Select All
+                </button>
+              </div>
             </div>
 
-            <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.4)', marginBottom: 12 }}>
-              {selectedGuestIds.length} of {guests.length} selected
+            {/* Search Input */}
+            <div style={{ marginBottom: 12 }}>
+              <input
+                type="text"
+                placeholder="🔍 Search by name, email or phone..."
+                value={guestSearch}
+                onChange={(e) => setGuestSearch(e.target.value)}
+                style={{
+                  width: '100%',
+                  background: 'rgba(255,255,255,0.05)',
+                  border: '1px solid rgba(255,255,255,0.1)',
+                  borderRadius: 8,
+                  padding: '10px 14px',
+                  color: '#fff',
+                  fontSize: 14,
+                  outline: 'none',
+                }}
+              />
+            </div>
+
+            <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.4)', marginBottom: 12, display: 'flex', justifyContent: 'space-between' }}>
+              <span>{selectedGuestIds.length} selected</span>
+              <span>{filteredPickerGuests.length} of {guests.length} shown</span>
             </div>
 
             <div style={{ flex: 1, overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {guests.map(guest => (
-                <label
-                  key={guest.id}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 12,
-                    padding: '10px 12px',
-                    background: selectedGuestIds.includes(guest.id) ? 'rgba(212,175,55,0.1)' : 'rgba(255,255,255,0.02)',
-                    border: selectedGuestIds.includes(guest.id) ? '1px solid rgba(212,175,55,0.2)' : '1px solid rgba(255,255,255,0.03)',
-                    borderRadius: 8,
-                    cursor: 'pointer',
-                  }}
-                >
-                  <input
-                    type="checkbox"
-                    checked={selectedGuestIds.includes(guest.id)}
-                    onChange={() => setSelectedGuestIds(prev => prev.includes(guest.id) ? prev.filter(id => id !== guest.id) : [...prev, guest.id])}
-                    style={{ accentColor: '#d4af37' }}
-                  />
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontWeight: 500, color: '#fff' }}>{guest.name}</div>
-                    <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)' }}>
-                      {channel === 'email' ? guest.email : guest.phone}
+              {filteredPickerGuests.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: 40, color: 'rgba(255,255,255,0.3)' }}>
+                  No guests match "{guestSearch}"
+                </div>
+              ) : (
+                filteredPickerGuests.map(guest => (
+                  <label
+                    key={guest.id}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 12,
+                      padding: '10px 12px',
+                      background: selectedGuestIds.includes(guest.id) ? 'rgba(212,175,55,0.1)' : 'rgba(255,255,255,0.02)',
+                      border: selectedGuestIds.includes(guest.id) ? '1px solid rgba(212,175,55,0.2)' : '1px solid rgba(255,255,255,0.03)',
+                      borderRadius: 8,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedGuestIds.includes(guest.id)}
+                      onChange={() => setSelectedGuestIds(prev => prev.includes(guest.id) ? prev.filter(id => id !== guest.id) : [...prev, guest.id])}
+                      style={{ accentColor: '#d4af37' }}
+                    />
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontWeight: 500, color: '#fff' }}>{guest.name}</div>
+                      <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)', display: 'flex', gap: 8 }}>
+                        <span>📧 {guest.email || '-'}</span>
+                        <span>📱 {guest.phone || '-'}</span>
+                      </div>
                     </div>
-                  </div>
-                </label>
-              ))}
+                  </label>
+                ))
+              )}
             </div>
 
             <div style={{ display: 'flex', gap: 12, marginTop: 16 }}>
               <button
-                onClick={() => { setSelectedGuestIds([]); setShowGuestPicker(false); }}
+                onClick={() => { setSelectedGuestIds([]); setGuestSearch(''); setShowGuestPicker(false); }}
                 style={{ flex: 1, background: 'rgba(255,255,255,0.05)', color: '#fff', border: 'none', padding: '12px', borderRadius: 8, cursor: 'pointer' }}
               >
                 Cancel
               </button>
               <button
-                onClick={() => setShowGuestPicker(false)}
+                onClick={() => { setGuestSearch(''); setShowGuestPicker(false); }}
                 style={{ flex: 1, background: 'linear-gradient(to right, #d4af37, #b8922f)', color: '#000', border: 'none', padding: '12px', borderRadius: 8, fontWeight: 600, cursor: 'pointer' }}
               >
                 Done ({selectedGuestIds.length})
@@ -1021,7 +1065,8 @@ export function AutomationView({ onToast, token }: AutomationViewProps) {
             </div>
           </div>
         </div>
-      )}
+        );
+      })()}
 
       <style>{`
         @keyframes spin {
