@@ -44,7 +44,6 @@ export function AutomationView({ onToast }: AutomationViewProps) {
   const [guests, setGuests] = useState<Guest[]>([]);
   const [loading, setLoading] = useState(true);
   const [showTemplateForm, setShowTemplateForm] = useState(false);
-  const [showScheduleForm, setShowScheduleForm] = useState(false);
   const [editingTemplate, setEditingTemplate] = useState<EmailTemplate | null>(null);
 
   // Form states
@@ -274,7 +273,6 @@ export function AutomationView({ onToast }: AutomationViewProps) {
       scheduledAt: '',
       sendNow: true,
     });
-    setShowScheduleForm(false);
   };
 
   const handleSelectTemplate = (template: EmailTemplate) => {
