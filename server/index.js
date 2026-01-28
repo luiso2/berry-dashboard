@@ -2763,7 +2763,12 @@ const authenticateToken = async (req, res, next) => {
     '/api/v1/auth/eventbrite',
     '/api/v1/auth/eventbrite/callback',
     '/api/v1/auth/eventbrite/status',
-    '/api/v1/auth/auto-login'
+    '/api/v1/auth/auto-login',
+    '/api/v1/sms/conversations',
+    '/api/v1/sms/conversations/threads',
+    '/api/v1/sms/conversations/stats',
+    '/api/v1/sms/conversations/thread',
+    '/api/v1/sms/conversations/reply'
   ];
 
   // Check if current path is public
