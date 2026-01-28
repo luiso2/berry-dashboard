@@ -2870,15 +2870,21 @@ const transformGuest = (row) => ({
 });
 
 // Email template generator
-const generateInvitationEmail = (guest, category, customMessage = '') => {
+const generateInvitationEmail = (guest, category, customMessage = '', eventName = '') => {
   const categoryNames = {
     A: 'VIP',
     B: 'Priority',
     C: 'Standard',
+    pending: 'Pending Review',
   };
 
+  const isPending = category === 'pending';
+  const eventDisplay = eventName || 'our exclusive event';
+
   return {
-    subject: `You're Invited! - Berry Bly Events`,
+    subject: isPending
+      ? `Application Received - ${eventName || 'Berry Bly Events'}`
+      : `You're Invited! - ${eventName || 'Berry Bly Events'}`,
     html: `
       <!DOCTYPE html>
       <html>
@@ -2898,9 +2904,18 @@ const generateInvitationEmail = (guest, category, customMessage = '') => {
           <div style="background: linear-gradient(180deg, rgba(212, 175, 55, 0.1) 0%, transparent 100%); border: 1px solid rgba(212, 175, 55, 0.3); border-radius: 16px; padding: 40px; margin-bottom: 30px;">
             <h2 style="color: #ffffff; font-size: 24px; margin: 0 0 20px 0;">Dear ${guest.name},</h2>
 
+            ${isPending ? `
             <p style="color: #cccccc; font-size: 16px; line-height: 1.8; margin: 0 0 20px 0;">
-              We are delighted to confirm your <strong style="color: #d4af37;">${categoryNames[category]}</strong> invitation to our exclusive event.
+              Thank you for your interest in <strong style="color: #d4af37;">${eventDisplay}</strong>!
             </p>
+            <p style="color: #cccccc; font-size: 16px; line-height: 1.8; margin: 0 0 20px 0;">
+              Our team will review your application for <strong style="color: #d4af37;">${eventDisplay}</strong>. You'll receive a confirmation email once you're approved.
+            </p>
+            ` : `
+            <p style="color: #cccccc; font-size: 16px; line-height: 1.8; margin: 0 0 20px 0;">
+              We are delighted to confirm your <strong style="color: #d4af37;">${categoryNames[category]}</strong> invitation to <strong style="color: #d4af37;">${eventDisplay}</strong>.
+            </p>
+            `}
 
             ${customMessage ? `
             <div style="background: rgba(255,255,255,0.05); border-left: 3px solid #d4af37; padding: 20px; margin: 20px 0; border-radius: 0 8px 8px 0;">
@@ -2913,13 +2928,19 @@ const generateInvitationEmail = (guest, category, customMessage = '') => {
               <h3 style="color: #d4af37; font-size: 14px; text-transform: uppercase; letter-spacing: 2px; margin: 0 0 20px 0;">Your Details</h3>
 
               <table style="width: 100%; color: #999;">
+                ${eventName ? `
                 <tr>
-                  <td style="padding: 8px 0; color: #666;">Guest Status</td>
-                  <td style="padding: 8px 0; color: #d4af37; text-align: right;">${categoryNames[category]}</td>
+                  <td style="padding: 8px 0; color: #666;">Event</td>
+                  <td style="padding: 8px 0; color: #d4af37; text-align: right;">${eventName}</td>
+                </tr>
+                ` : ''}
+                <tr>
+                  <td style="padding: 8px 0; color: #666;">Status</td>
+                  <td style="padding: 8px 0; color: #d4af37; text-align: right;">${categoryNames[category] || category}</td>
                 </tr>
                 <tr>
                   <td style="padding: 8px 0; color: #666;">Party Size</td>
-                  <td style="padding: 8px 0; color: #ffffff; text-align: right;">${guest.partySize || guest.party_size} ${(guest.partySize || guest.party_size) > 1 ? 'guests' : 'guest'}</td>
+                  <td style="padding: 8px 0; color: #ffffff; text-align: right;">${guest.partySize || guest.party_size || 1} ${(guest.partySize || guest.party_size || 1) > 1 ? 'guests' : 'guest'}</td>
                 </tr>
                 ${guest.eventDate || guest.event_date ? `
                 <tr>
@@ -4302,12 +4323,25 @@ app.post('/api/v1/guest-lists', async (req, res) => {
     const newGuest = transformToGuestList(result.rows[0]);
     console.log(`✅ New guest-list entry: ${name} - ${email}`);
 
-    // Send welcome email
-    const welcomeHtml = generateInvitationEmail({ name, partySize: numberOfGuests || 1 }, 'pending', '');
+    // Get event name for email
+    let eventName = '';
+    if (eventId && eventId !== 'default') {
+      try {
+        const eventResult = await pool.query('SELECT name FROM events WHERE id = $1', [eventId]);
+        if (eventResult.rows.length > 0) {
+          eventName = eventResult.rows[0].name;
+        }
+      } catch (err) {
+        console.error('Failed to fetch event name:', err);
+      }
+    }
+
+    // Send welcome email with event name
+    const welcomeHtml = generateInvitationEmail({ name, partySize: numberOfGuests || 1 }, 'pending', '', eventName);
     resend.emails.send({
       from: EMAIL_CONFIG.from,
       to: email,
-      subject: "You're on the List! - Berry Bly Events",
+      subject: welcomeHtml.subject,
       html: welcomeHtml.html,
     }).catch((err) => console.error('Failed to send welcome email:', err));
 
