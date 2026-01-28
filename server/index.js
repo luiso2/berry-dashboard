@@ -4246,6 +4246,8 @@ app.get('/api/v1/guest-lists/stats', async (req, res) => {
         COUNT(*) FILTER (WHERE status = 'pending') as pending,
         COUNT(*) FILTER (WHERE status = 'approved') as approved,
         COUNT(*) FILTER (WHERE status = 'declined') as declined,
+        COUNT(*) FILTER (WHERE LOWER(gender) = 'female') as female,
+        COUNT(*) FILTER (WHERE LOWER(gender) = 'male') as male,
         COALESCE(SUM(number_of_guests), 0) as total_guests
       FROM guest_lists
     `);
@@ -4256,6 +4258,8 @@ app.get('/api/v1/guest-lists/stats', async (req, res) => {
       pending: parseInt(row.pending),
       approved: parseInt(row.approved),
       declined: parseInt(row.declined),
+      female: parseInt(row.female),
+      male: parseInt(row.male),
       totalGuests: parseInt(row.total_guests),
     });
   } catch (error) {
