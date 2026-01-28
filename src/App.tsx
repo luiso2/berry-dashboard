@@ -481,6 +481,63 @@ function App() {
                 onClick={() => state.setFilters({ ...state.filters, gender: 'male' })}
                 label={`👨 Men (${state.guests.filter(g => g.gender?.toLowerCase() === 'male').length})`}
               />
+
+              <div style={{ width: 1, height: 24, background: '#333', margin: '0 8px' }} />
+
+              {/* Export Button */}
+              <button
+                onClick={() => {
+                  const guestsToExport = filteredGuests.filter(g => state.guestTab === 'all' || g.category === 'pending');
+                  if (guestsToExport.length === 0) {
+                    actions.addToast('No guests to export', 'error');
+                    return;
+                  }
+
+                  // Create CSV content
+                  const headers = ['Name', 'Email', 'Phone', 'Instagram', 'Category', 'Gender', 'Party Size', 'Event Date', 'Email Sent', 'Notes'];
+                  const csvRows = [
+                    headers.join(','),
+                    ...guestsToExport.map(g => [
+                      `"${(g.name || '').replace(/"/g, '""')}"`,
+                      `"${(g.email || '').replace(/"/g, '""')}"`,
+                      `"${(g.phone || '').replace(/"/g, '""')}"`,
+                      `"${(g.instagram || '').replace(/"/g, '""')}"`,
+                      `"${g.category === 'A' ? 'VIP' : g.category === 'B' ? 'Priority' : g.category === 'C' ? 'Standard' : g.category}"`,
+                      `"${(g.gender || '').replace(/"/g, '""')}"`,
+                      g.partySize || 1,
+                      `"${g.eventDate ? new Date(g.eventDate).toLocaleDateString() : ''}"`,
+                      g.emailSent ? 'Yes' : 'No',
+                      `"${(g.notes || '').replace(/"/g, '""')}"`,
+                    ].join(','))
+                  ];
+
+                  // Download CSV
+                  const blob = new Blob([csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' });
+                  const link = document.createElement('a');
+                  link.href = URL.createObjectURL(blob);
+                  const filterLabel = state.filters.gender !== 'all' ? `_${state.filters.gender}` : '';
+                  const tabLabel = state.guestTab === 'pending' ? '_pending' : '';
+                  link.download = `guests${tabLabel}${filterLabel}_${new Date().toISOString().split('T')[0]}.csv`;
+                  link.click();
+
+                  actions.addToast(`Exported ${guestsToExport.length} guests`, 'success');
+                }}
+                style={{
+                  background: 'rgba(212,175,55,0.1)',
+                  border: '1px solid rgba(212,175,55,0.3)',
+                  color: '#d4af37',
+                  padding: '8px 16px',
+                  borderRadius: 8,
+                  cursor: 'pointer',
+                  fontSize: 13,
+                  fontWeight: 500,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                }}
+              >
+                📥 Export CSV ({filteredGuests.filter(g => state.guestTab === 'all' || g.category === 'pending').length})
+              </button>
             </div>
 
             {/* Guest List Table */}
