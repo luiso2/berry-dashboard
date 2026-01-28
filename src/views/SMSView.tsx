@@ -364,15 +364,6 @@ export function SMSView({ onToast }: SMSViewProps) {
         )}
       </div>
 
-      {/* Info Section */}
-      <div style={{ marginTop: 24, background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.3)', borderRadius: 12, padding: 20 }}>
-        <h4 style={{ margin: '0 0 12px', fontSize: 14, fontWeight: 600, color: '#10b981' }}>About SMS AI</h4>
-        <div style={{ fontSize: 13, color: '#888', lineHeight: 1.6 }}>
-          <p style={{ margin: '0 0 8px' }}>The Berry Bly AI Assistant automatically responds to incoming SMS messages with event information, VIP tables, dress code, and more.</p>
-          <p style={{ margin: '0 0 8px' }}><strong>Human Takeover:</strong> Enable human mode to temporarily disable AI responses and respond manually.</p>
-          <p style={{ margin: 0 }}><strong>API Endpoint:</strong> <code style={{ background: '#1a1a1a', padding: '2px 6px', borderRadius: 4 }}>/api/v1/sms/conversations/*</code></p>
-        </div>
-      </div>
     </div>
   );
 }

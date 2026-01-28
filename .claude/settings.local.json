@@ -46,7 +46,8 @@
       "mcp__telnyx__send_message",
       "mcp__telnyx__update_phone_number_messaging_settings",
       "mcp__railway__get-logs",
-      "Bash(cd:*)"
+      "Bash(cd:*)",
+      "Bash(PGPASSWORD=xgNKAWwTrJNDfxrVkmkZWWBWGxMLFyeh psql:*)"
     ]
   }
 }

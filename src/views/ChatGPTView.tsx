@@ -9,7 +9,6 @@ export function ChatGPTView() {
     { icon: '👔', title: 'Staff Management', desc: 'Assign staff and manage schedules' },
     { icon: '💰', title: 'Budget Tracking', desc: 'Monitor expenses and financial health' },
     { icon: '🔌', title: 'Integrations', desc: 'Sync with Eventbrite, Mailchimp, Telnyx' },
-    { icon: '💻', title: 'Code Access', desc: 'Read and write project code files' },
   ];
 
   const exampleCommands = [
@@ -133,29 +132,6 @@ export function ChatGPTView() {
         </div>
       </div>
 
-      {/* API Endpoint Info */}
-      <div style={{
-        background: 'rgba(59,130,246,0.1)',
-        border: '1px solid rgba(59,130,246,0.3)',
-        borderRadius: 12,
-        padding: 20
-      }}>
-        <h4 style={{ margin: '0 0 12px', fontSize: 14, fontWeight: 600, color: '#3b82f6' }}>Developer Info</h4>
-        <div style={{ fontSize: 13, color: '#888' }}>
-          <p style={{ margin: '0 0 8px' }}>
-            <strong>API Endpoint:</strong>{' '}
-            <code style={{ background: '#1a1a1a', padding: '2px 6px', borderRadius: 4 }}>POST /api/v1/gpt/session</code>
-          </p>
-          <p style={{ margin: '0 0 8px' }}>
-            <strong>Code Access:</strong>{' '}
-            <code style={{ background: '#1a1a1a', padding: '2px 6px', borderRadius: 4 }}>POST /api/v1/gpt/code</code>
-          </p>
-          <p style={{ margin: 0 }}>
-            <strong>OpenAPI Spec:</strong>{' '}
-            <code style={{ background: '#1a1a1a', padding: '2px 6px', borderRadius: 4 }}>/server/openapi-gpt.yaml</code>
-          </p>
-        </div>
-      </div>
     </div>
   );
 }
