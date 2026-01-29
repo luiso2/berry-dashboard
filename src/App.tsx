@@ -421,6 +421,20 @@ function App() {
                   >
                     ✗ Reject Selected
                   </button>
+                  <button
+                    onClick={async () => {
+                      const ids = Array.from(state.selectedGuests);
+                      if (window.confirm(`Are you sure you want to PERMANENTLY DELETE ${ids.length} guest(s) from the list? This cannot be undone.`)) {
+                        for (const id of ids) {
+                          await actions.removeGuest(id);
+                        }
+                        state.setSelectedGuests(new Set());
+                      }
+                    }}
+                    style={{ background: '#7f1d1d', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: 6, fontWeight: 600, cursor: 'pointer', fontSize: 13 }}
+                  >
+                    🗑️ Remove from List
+                  </button>
                 </div>
               </div>
             )}
