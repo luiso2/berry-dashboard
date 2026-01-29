@@ -390,7 +390,7 @@ function App() {
                     onClick={async () => {
                       const ids = Array.from(state.selectedGuests);
                       const message = prompt('Enter SMS message to send to selected guests:');
-                      if (message) {
+                      if (message && window.confirm(`Send SMS to ${ids.length} guest(s)?\n\nMessage: "${message}"`)) {
                         await actions.sendBulkSMS(ids, message, state.guests);
                         state.setSelectedGuests(new Set());
                       }
@@ -1122,6 +1122,9 @@ function App() {
         onSend={async () => {
           if (!state.smsFormData.to || !state.smsFormData.message) {
             actions.addToast('Please enter phone number and message', 'error');
+            return;
+          }
+          if (!window.confirm(`Send SMS to ${state.smsFormData.to}?`)) {
             return;
           }
           state.setSmsSending(true);

@@ -419,7 +419,8 @@ export function useAppActions(state: AppState, token?: string, userId?: number) 
         })
       ));
       await fetchGuests();
-      addToast(`Updated ${ids.length} guest(s) to ${category}`, 'success');
+      const categoryName = category === 'A' ? 'VIP' : category === 'B' ? 'Priority' : category === 'C' ? 'Standard' : category === 'pending' ? 'Pending' : 'Rejected';
+      addToast(`${ids.length} guest(s) moved to ${categoryName}`, 'info');
     } catch (error) {
       console.error('Error updating guests:', error);
       addToast('Failed to update guests', 'error');
@@ -640,7 +641,7 @@ export function useAppActions(state: AppState, token?: string, userId?: number) 
           await sendGuestEmail(guest, 'approval');
         }
 
-        addToast(`${guest.name} approved as ${category === 'A' ? 'VIP' : category === 'B' ? 'Priority' : 'Standard'}`, 'success');
+        addToast(`${guest.name} moved to ${category === 'A' ? 'VIP' : category === 'B' ? 'Priority' : 'Standard'}`, 'info');
         return true;
       }
       return false;
@@ -755,7 +756,7 @@ export function useAppActions(state: AppState, token?: string, userId?: number) 
         await sendBulkGuestEmails(guestIds, 'approval');
       }
 
-      addToast(`${guestIds.length} guests approved as ${category === 'A' ? 'VIP' : category === 'B' ? 'Priority' : 'Standard'}`, 'success');
+      addToast(`${guestIds.length} guests moved to ${category === 'A' ? 'VIP' : category === 'B' ? 'Priority' : 'Standard'}`, 'info');
       return true;
     } catch (error) {
       console.error('Error bulk approving guests:', error);
