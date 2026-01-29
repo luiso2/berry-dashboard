@@ -715,9 +715,7 @@ function App() {
                                 <MenuDivider />
                               </>
                             )}
-{/* Change Status Section - visible for all guests */}
-                            {guest.category !== 'pending' && (
-                              <>
+{/* Change Status Section - visible for ALL guests */}
                                 <MenuSection title="Change Status">
                                   {guest.category !== 'A' && (
                                     <MenuItem
@@ -777,8 +775,6 @@ function App() {
                                   )}
                                 </MenuSection>
                                 <MenuDivider />
-                              </>
-                            )}
                             <MenuSection title="Communications">
                               <MenuItem
                                 icon="✉️"
