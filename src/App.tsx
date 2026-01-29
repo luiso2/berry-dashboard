@@ -773,10 +773,10 @@ function App() {
                                 label="Send Confirmation Email"
                                 description="Event details & confirmation"
                                 onClick={async () => {
-                                  setOpenActionMenu(null);
                                   if (window.confirm(`Send confirmation email to ${guest.name}?`)) {
                                     await actions.sendGuestEmail(guest, 'confirmation');
                                   }
+                                  setOpenActionMenu(null);
                                 }}
                               />
                               <MenuItem
@@ -784,10 +784,10 @@ function App() {
                                 label="Send Approval Email"
                                 description="Notify guest of approval"
                                 onClick={async () => {
-                                  setOpenActionMenu(null);
                                   if (window.confirm(`Send approval email to ${guest.name}?`)) {
                                     await actions.sendGuestEmail(guest, 'approval');
                                   }
+                                  setOpenActionMenu(null);
                                 }}
                               />
                               <MenuItem
