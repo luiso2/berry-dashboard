@@ -1926,6 +1926,7 @@ const initDatabase = async () => {
         notes TEXT,
         email_sent BOOLEAN DEFAULT false,
         email_sent_at TIMESTAMP,
+        checked_in_at TIMESTAMP,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
@@ -1940,10 +1941,19 @@ const initDatabase = async () => {
       END $$;
     `);
 
+    // Ensure checked_in_at column exists (for tables created without it)
+    await client.query(`
+      DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='guest_lists' AND column_name='checked_in_at') THEN
+          ALTER TABLE guest_lists ADD COLUMN checked_in_at TIMESTAMP;
+        END IF;
+      END $$;
+    `);
+
     // Update existing records with NULL instagram to empty string
     await client.query(`UPDATE guest_lists SET instagram = '' WHERE instagram IS NULL`);
 
-    console.log('guest_lists table initialized with instagram column');
+    console.log('guest_lists table initialized with instagram and checked_in_at columns');
 
     dbInitStatus.completed = true;
     console.log('Database tables initialized successfully (guests, email_events, tickets, activity_log, sponsors, events, budgets, vendors, staff, contracts, client_access, integrations, promoters, file_uploads)');
@@ -4360,6 +4370,7 @@ const transformToGuestList = (row) => {
     notes: row.notes || '',
     emailSent: row.email_sent || false,
     emailSentAt: row.email_sent_at ? row.email_sent_at.toISOString() : null,
+    checkedInAt: row.checked_in_at ? row.checked_in_at.toISOString() : null,
     createdAt: row.created_at ? row.created_at.toISOString() : new Date().toISOString(),
     updatedAt: row.updated_at ? row.updated_at.toISOString() : row.created_at ? row.created_at.toISOString() : new Date().toISOString(),
   };
@@ -4543,7 +4554,7 @@ const updateGuestListHandler = async (req, res) => {
   try {
     const { id } = req.params;
     // Accept both 'status' and 'category' for frontend compatibility
-    const { status, category, notes, emailSent, emailSentAt, gender } = req.body;
+    const { status, category, notes, emailSent, emailSentAt, gender, checkedInAt } = req.body;
 
     // Map category to status if provided
     const categoryToStatusMap = {
@@ -4596,6 +4607,10 @@ const updateGuestListHandler = async (req, res) => {
     if (gender !== undefined) {
       updates.push(`gender = $${paramIndex++}`);
       params.push(gender);
+    }
+    if (checkedInAt !== undefined) {
+      updates.push(`checked_in_at = $${paramIndex++}`);
+      params.push(checkedInAt);
     }
 
     // Always update updated_at

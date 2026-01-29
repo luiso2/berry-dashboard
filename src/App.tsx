@@ -763,6 +763,18 @@ function App() {
                                       setOpenActionMenu(null);
                                     }}
                                   />
+                                  {guest.category !== 'rejected' && (
+                                    <MenuItem
+                                      icon="✗"
+                                      label="Reject Guest"
+                                      description="Mark as rejected"
+                                      variant="danger"
+                                      onClick={async () => {
+                                        await actions.rejectGuest(guest, false);
+                                        setOpenActionMenu(null);
+                                      }}
+                                    />
+                                  )}
                                 </MenuSection>
                                 <MenuDivider />
                               </>
