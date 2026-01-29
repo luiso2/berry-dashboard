@@ -349,9 +349,6 @@ function App() {
                       const ids = Array.from(state.selectedGuests);
                       await actions.bulkApproveGuests(ids, 'A', false);
                       state.setSelectedGuests(new Set());
-                      if (window.confirm(`Send approval email to ${ids.length} guest(s)?`)) {
-                        await actions.sendBulkGuestEmails(ids, 'approval');
-                      }
                     }}
                     style={{ background: '#22c55e', color: '#000', border: 'none', padding: '8px 16px', borderRadius: 6, fontWeight: 600, cursor: 'pointer', fontSize: 13 }}
                   >
@@ -362,9 +359,6 @@ function App() {
                       const ids = Array.from(state.selectedGuests);
                       await actions.bulkApproveGuests(ids, 'B', false);
                       state.setSelectedGuests(new Set());
-                      if (window.confirm(`Send approval email to ${ids.length} guest(s)?`)) {
-                        await actions.sendBulkGuestEmails(ids, 'approval');
-                      }
                     }}
                     style={{ background: '#3b82f6', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: 6, fontWeight: 600, cursor: 'pointer', fontSize: 13 }}
                   >
@@ -375,9 +369,6 @@ function App() {
                       const ids = Array.from(state.selectedGuests);
                       await actions.bulkApproveGuests(ids, 'C', false);
                       state.setSelectedGuests(new Set());
-                      if (window.confirm(`Send approval email to ${ids.length} guest(s)?`)) {
-                        await actions.sendBulkGuestEmails(ids, 'approval');
-                      }
                     }}
                     style={{ background: '#6b7280', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: 6, fontWeight: 600, cursor: 'pointer', fontSize: 13 }}
                   >
@@ -693,9 +684,6 @@ function App() {
                                     onClick={async () => {
                                       await actions.approveGuest(guest, 'A', false);
                                       setOpenActionMenu(null);
-                                      if (window.confirm(`Send approval email to ${guest.name}?`)) {
-                                        await actions.sendGuestEmail(guest, 'approval');
-                                      }
                                     }}
                                   />
                                   <MenuItem
@@ -705,9 +693,6 @@ function App() {
                                     onClick={async () => {
                                       await actions.approveGuest(guest, 'B', false);
                                       setOpenActionMenu(null);
-                                      if (window.confirm(`Send approval email to ${guest.name}?`)) {
-                                        await actions.sendGuestEmail(guest, 'approval');
-                                      }
                                     }}
                                   />
                                   <MenuItem
@@ -717,9 +702,6 @@ function App() {
                                     onClick={async () => {
                                       await actions.approveGuest(guest, 'C', false);
                                       setOpenActionMenu(null);
-                                      if (window.confirm(`Send approval email to ${guest.name}?`)) {
-                                        await actions.sendGuestEmail(guest, 'approval');
-                                      }
                                     }}
                                   />
                                   <MenuItem
