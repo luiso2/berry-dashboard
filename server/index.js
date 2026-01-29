@@ -4571,13 +4571,13 @@ const updateGuestListHandler = async (req, res) => {
     }
 
     // Store category in vip_preferences field for now (or notes)
-    // Also clear vip_preferences when setting to pending
+    // Also clear vip_preferences when setting to pending or rejected
     if (category) {
       if (['A', 'B', 'C', 'vip', 'priority', 'standard'].includes(category)) {
         updates.push(`vip_preferences = $${paramIndex++}`);
         params.push(category);
-      } else if (category === 'pending') {
-        // Clear vip_preferences when setting back to pending
+      } else if (category === 'pending' || category === 'rejected') {
+        // Clear vip_preferences when setting back to pending or rejecting
         updates.push(`vip_preferences = NULL`);
       }
     }
