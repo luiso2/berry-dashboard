@@ -2849,6 +2849,7 @@ const authenticateToken = async (req, res, next) => {
     PUBLIC_PATHS.some(path => req.path === path || req.path.startsWith(path + '/')) ||
     (req.method === 'POST' && req.path === '/api/v1/guest-lists') ||
     (req.method === 'POST' && req.path === '/api/v1/guest-lists/reset-all-pending') ||
+    (req.method === 'POST' && req.path === '/api/v1/guest-lists/send-all-and-approve') ||
     isPublicEventDetail ||
     isSponsorPortalPath;
 
@@ -4678,6 +4679,84 @@ app.post('/api/v1/guest-lists/reset-all-pending', async (req, res) => {
   } catch (error) {
     console.error('Error resetting guests to pending:', error);
     res.status(500).json({ error: 'Failed to reset guests' });
+  }
+});
+
+// POST /api/v1/guest-lists/send-all-and-approve - Send email to ALL guests and change to Standard (C)
+app.post('/api/v1/guest-lists/send-all-and-approve', async (req, res) => {
+  try {
+    const { message, category } = req.body;
+
+    if (!message) {
+      return res.status(400).json({ error: 'Message is required' });
+    }
+
+    // Get all guests with email
+    const guestsResult = await pool.query(
+      `SELECT id, name, email FROM guest_lists WHERE email IS NOT NULL AND email != ''`
+    );
+
+    const guests = guestsResult.rows;
+    console.log(`Sending email to ${guests.length} guests...`);
+
+    const results = [];
+    const targetCategory = category || 'C'; // Default to Standard (C), NOT VIP
+
+    for (const guest of guests) {
+      try {
+        // Send email
+        const emailResult = await sendEmail({
+          to: guest.email,
+          subject: 'Teatro Guest List Confirmation - Grammy Event',
+          html: `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+              <p style="font-size: 16px; line-height: 1.6;">Hi${guest.name ? ' ' + guest.name.split(' ')[0] : ''},</p>
+              <p style="font-size: 16px; line-height: 1.6;">${message.replace(/\n/g, '<br>')}</p>
+            </div>
+          `,
+          emailType: 'confirmation',
+          relatedType: 'guest',
+          relatedId: guest.id
+        });
+
+        // Update status to approved (Standard)
+        await pool.query(
+          `UPDATE guest_lists SET status = $1 WHERE id = $2`,
+          [targetCategory === 'C' ? 'approved' : targetCategory, guest.id]
+        );
+
+        results.push({
+          id: guest.id,
+          email: guest.email,
+          success: emailResult.success,
+          error: emailResult.error
+        });
+
+        console.log(`✓ Email sent to ${guest.email}`);
+      } catch (e) {
+        results.push({
+          id: guest.id,
+          email: guest.email,
+          success: false,
+          error: e.message
+        });
+        console.error(`✗ Failed to send to ${guest.email}:`, e.message);
+      }
+    }
+
+    const successCount = results.filter(r => r.success).length;
+    console.log(`Completed: ${successCount}/${guests.length} emails sent`);
+
+    res.json({
+      success: true,
+      totalGuests: guests.length,
+      emailsSent: successCount,
+      emailsFailed: guests.length - successCount,
+      results
+    });
+  } catch (error) {
+    console.error('Error in send-all-and-approve:', error);
+    res.status(500).json({ error: 'Failed to send emails', details: error.message });
   }
 });
 
