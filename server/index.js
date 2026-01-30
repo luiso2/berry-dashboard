@@ -11379,9 +11379,16 @@ app.post('/api/v1/telnyx/send-bulk-sms', async (req, res) => {
     const fromNumber = from || TELNYX_PHONE_NUMBER;
     const messagingProfileId = null; // Not using messaging profile
 
+    if (!apiKey) {
+      console.error('Bulk SMS: TELNYX_API_KEY not configured');
+      return res.status(500).json({ error: 'Telnyx API key not configured' });
+    }
+
     if (!fromNumber) {
       return res.status(400).json({ error: 'No sender phone number configured' });
     }
+
+    console.log(`Bulk SMS: Sending to ${recipients.length} recipients from ${fromNumber}`);
 
     const results = [];
     for (const recipient of recipients) {
@@ -11423,10 +11430,17 @@ app.post('/api/v1/telnyx/send-bulk-sms', async (req, res) => {
     }
 
     const successCount = results.filter(r => r.success).length;
+    const failedCount = recipients.length - successCount;
+
+    console.log(`Bulk SMS: Sent ${successCount}/${recipients.length} messages successfully`);
+    if (failedCount > 0) {
+      console.log('Bulk SMS failed results:', results.filter(r => !r.success));
+    }
+
     res.json({
       success: true,
       totalSent: successCount,
-      totalFailed: recipients.length - successCount,
+      totalFailed: failedCount,
       results
     });
   } catch (error) {
