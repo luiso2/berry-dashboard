@@ -2850,6 +2850,7 @@ const authenticateToken = async (req, res, next) => {
     (req.method === 'POST' && req.path === '/api/v1/guest-lists') ||
     (req.method === 'POST' && req.path === '/api/v1/guest-lists/reset-all-pending') ||
     (req.method === 'POST' && req.path === '/api/v1/guest-lists/send-all-and-approve') ||
+    (req.method === 'POST' && req.path === '/api/v1/guest-lists/send-all-sms') ||
     isPublicEventDetail ||
     isSponsorPortalPath;
 
@@ -4767,6 +4768,79 @@ app.post('/api/v1/guest-lists/send-all-and-approve', async (req, res) => {
   } catch (error) {
     console.error('Error in send-all-and-approve:', error);
     res.status(500).json({ error: 'Failed to send emails', details: error.message });
+  }
+});
+
+// POST /api/v1/guest-lists/send-all-sms - Send SMS to ALL guests with phone numbers
+app.post('/api/v1/guest-lists/send-all-sms', async (req, res) => {
+  try {
+    const { message } = req.body;
+
+    if (!message) {
+      return res.status(400).json({ error: 'Message is required' });
+    }
+
+    // Get all guests with phone numbers
+    const guestsResult = await pool.query(
+      `SELECT id, name, phone FROM guest_lists WHERE phone IS NOT NULL AND phone != ''`
+    );
+
+    const guests = guestsResult.rows;
+    console.log(`Sending SMS to ${guests.length} guests...`);
+
+    const results = [];
+
+    for (let i = 0; i < guests.length; i++) {
+      const guest = guests[i];
+      try {
+        // Format phone number
+        let phone = guest.phone.replace(/[^0-9+]/g, '');
+        if (!phone.startsWith('+')) {
+          phone = '+1' + phone; // Assume US if no country code
+        }
+
+        // Send SMS via Telnyx
+        const smsResult = await sendSMS(phone, message, true);
+
+        results.push({
+          id: guest.id,
+          phone: phone,
+          name: guest.name,
+          success: true,
+          error: null
+        });
+
+        console.log(`✓ [${i+1}/${guests.length}] SMS sent to ${guest.name || phone}`);
+
+        // Rate limit: 500ms between SMS
+        if (i < guests.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+      } catch (e) {
+        results.push({
+          id: guest.id,
+          phone: guest.phone,
+          name: guest.name,
+          success: false,
+          error: e.message
+        });
+        console.error(`✗ Failed SMS to ${guest.phone}: ${e.message}`);
+      }
+    }
+
+    const successCount = results.filter(r => r.success).length;
+    console.log(`SMS Completed: ${successCount}/${guests.length} sent`);
+
+    res.json({
+      success: true,
+      totalGuests: guests.length,
+      smsSent: successCount,
+      smsFailed: guests.length - successCount,
+      results
+    });
+  } catch (error) {
+    console.error('Error in send-all-sms:', error);
+    res.status(500).json({ error: 'Failed to send SMS', details: error.message });
   }
 });
 
