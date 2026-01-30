@@ -621,11 +621,9 @@ export function useAppActions(state: AppState, token?: string, userId?: number) 
     }
   }, [setGuests, addToast, getHeaders]);
 
-  // Approve Guest (move to category and optionally send email)
-  // NOTE: sendEmail defaults to false - email should only be sent after explicit user confirmation
-  const approveGuest = useCallback(async (guest: Guest, category: GuestCategory, sendEmail: boolean = false) => {
+  // Approve Guest (move to category) - NO automatic emails
+  const approveGuest = useCallback(async (guest: Guest, category: GuestCategory) => {
     try {
-      // Update category
       const res = await fetch(`${API_URL}${ENDPOINTS.guests}/${guest.id}`, {
         method: 'PUT',
         headers: getHeaders('application/json'),
@@ -635,12 +633,6 @@ export function useAppActions(state: AppState, token?: string, userId?: number) 
         setGuests(prev => prev.map(g =>
           g.id === guest.id ? { ...g, category } : g
         ));
-
-        // Send approval email if requested
-        if (sendEmail) {
-          await sendGuestEmail(guest, 'approval');
-        }
-
         addToast(`${guest.name} moved to ${category === 'A' ? 'VIP' : category === 'B' ? 'Priority' : 'Standard'}`, 'info');
         return true;
       }
@@ -650,7 +642,7 @@ export function useAppActions(state: AppState, token?: string, userId?: number) 
       addToast('Failed to approve guest', 'error');
       return false;
     }
-  }, [setGuests, sendGuestEmail, addToast, getHeaders]);
+  }, [setGuests, addToast, getHeaders]);
 
   // Reject Guest
   const rejectGuest = useCallback(async (guest: Guest, _sendEmail: boolean = false) => {
@@ -736,9 +728,8 @@ export function useAppActions(state: AppState, token?: string, userId?: number) 
     }
   }, [addToast, getHeaders]);
 
-  // Bulk Approve Guests
-  // NOTE: sendEmails defaults to false - emails should only be sent after explicit user confirmation
-  const bulkApproveGuests = useCallback(async (guestIds: string[], category: GuestCategory, sendEmails: boolean = false) => {
+  // Bulk Approve Guests - NO automatic emails
+  const bulkApproveGuests = useCallback(async (guestIds: string[], category: GuestCategory) => {
     try {
       await Promise.all(guestIds.map(id =>
         fetch(`${API_URL}${ENDPOINTS.guests}/${id}`, {
@@ -752,10 +743,6 @@ export function useAppActions(state: AppState, token?: string, userId?: number) 
         guestIds.includes(g.id) ? { ...g, category } : g
       ));
 
-      if (sendEmails) {
-        await sendBulkGuestEmails(guestIds, 'approval');
-      }
-
       addToast(`${guestIds.length} guests moved to ${category === 'A' ? 'VIP' : category === 'B' ? 'Priority' : 'Standard'}`, 'info');
       return true;
     } catch (error) {
@@ -763,7 +750,7 @@ export function useAppActions(state: AppState, token?: string, userId?: number) 
       addToast('Failed to approve guests', 'error');
       return false;
     }
-  }, [setGuests, sendBulkGuestEmails, addToast]);
+  }, [setGuests, addToast, getHeaders]);
 
   return {
     addToast,

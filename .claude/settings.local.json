@@ -47,7 +47,18 @@
       "mcp__telnyx__update_phone_number_messaging_settings",
       "mcp__railway__get-logs",
       "Bash(cd:*)",
-      "Bash(PGPASSWORD=xgNKAWwTrJNDfxrVkmkZWWBWGxMLFyeh psql:*)"
+      "Bash(PGPASSWORD=xgNKAWwTrJNDfxrVkmkZWWBWGxMLFyeh psql:*)",
+      "Bash(git revert:*)",
+      "Bash(git checkout:*)",
+      "Bash(cd /Users/josemichaelhernandezvargas/Desktop/berry\\\\ dashboard && railway deployment:list:*)",
+      "Bash(railway logs:*)",
+      "mcp__plugin_playwright_playwright__browser_navigate",
+      "mcp__plugin_playwright_playwright__browser_click",
+      "mcp__plugin_playwright_playwright__browser_snapshot",
+      "mcp__plugin_playwright_playwright__browser_fill_form",
+      "mcp__railway__list-deployments",
+      "Bash(railway run:*)",
+      "Bash(railway shell:*)"
     ]
   }
 }

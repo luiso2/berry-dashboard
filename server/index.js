@@ -4658,6 +4658,27 @@ app.delete('/api/v1/guest-lists/:id', async (req, res) => {
   }
 });
 
+// POST /api/v1/guest-lists/reset-all-pending - Reset ALL guests to pending status
+app.post('/api/v1/guest-lists/reset-all-pending', async (req, res) => {
+  try {
+    const result = await pool.query(
+      `UPDATE guest_lists SET status = 'pending' WHERE status != 'pending' RETURNING id`
+    );
+
+    const updatedCount = result.rows.length;
+    console.log(`Reset ${updatedCount} guests to pending status`);
+
+    res.json({
+      success: true,
+      message: `${updatedCount} guests reset to pending`,
+      count: updatedCount
+    });
+  } catch (error) {
+    console.error('Error resetting guests to pending:', error);
+    res.status(500).json({ error: 'Failed to reset guests' });
+  }
+});
+
 // POST /api/v1/guest-lists/:id/send-invitation - Send invitation email (LOCAL - reads from guest_lists table)
 app.post('/api/v1/guest-lists/:id/send-invitation', async (req, res) => {
   const { id } = req.params;

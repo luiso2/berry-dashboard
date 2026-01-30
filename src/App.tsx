@@ -347,7 +347,7 @@ function App() {
                   <button
                     onClick={async () => {
                       const ids = Array.from(state.selectedGuests);
-                      await actions.bulkApproveGuests(ids, 'A', false);
+                      await actions.bulkApproveGuests(ids, 'A');
                       state.setSelectedGuests(new Set());
                     }}
                     style={{ background: '#22c55e', color: '#000', border: 'none', padding: '8px 16px', borderRadius: 6, fontWeight: 600, cursor: 'pointer', fontSize: 13 }}
@@ -357,7 +357,7 @@ function App() {
                   <button
                     onClick={async () => {
                       const ids = Array.from(state.selectedGuests);
-                      await actions.bulkApproveGuests(ids, 'B', false);
+                      await actions.bulkApproveGuests(ids, 'B');
                       state.setSelectedGuests(new Set());
                     }}
                     style={{ background: '#3b82f6', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: 6, fontWeight: 600, cursor: 'pointer', fontSize: 13 }}
@@ -367,7 +367,7 @@ function App() {
                   <button
                     onClick={async () => {
                       const ids = Array.from(state.selectedGuests);
-                      await actions.bulkApproveGuests(ids, 'C', false);
+                      await actions.bulkApproveGuests(ids, 'C');
                       state.setSelectedGuests(new Set());
                     }}
                     style={{ background: '#6b7280', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: 6, fontWeight: 600, cursor: 'pointer', fontSize: 13 }}
@@ -682,7 +682,7 @@ function App() {
                                     description="Category A - Top priority"
                                     variant="success"
                                     onClick={async () => {
-                                      await actions.approveGuest(guest, 'A', false);
+                                      await actions.approveGuest(guest, 'A');
                                       setOpenActionMenu(null);
                                     }}
                                   />
@@ -691,7 +691,7 @@ function App() {
                                     label="Approve as Priority"
                                     description="Category B - High priority"
                                     onClick={async () => {
-                                      await actions.approveGuest(guest, 'B', false);
+                                      await actions.approveGuest(guest, 'B');
                                       setOpenActionMenu(null);
                                     }}
                                   />
@@ -700,7 +700,7 @@ function App() {
                                     label="Approve as Standard"
                                     description="Category C - General admission"
                                     onClick={async () => {
-                                      await actions.approveGuest(guest, 'C', false);
+                                      await actions.approveGuest(guest, 'C');
                                       setOpenActionMenu(null);
                                     }}
                                   />
