@@ -709,7 +709,7 @@ function App() {
                                     label="Reject Guest"
                                     description="Remove from list"
                                     variant="danger"
-                                    onClick={() => { actions.rejectGuest(guest, false); setOpenActionMenu(null); }}
+                                    onClick={async () => { await actions.rejectGuest(guest, false); setOpenActionMenu(null); }}
                                   />
                                 </MenuSection>
                                 <MenuDivider />
