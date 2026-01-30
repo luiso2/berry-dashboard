@@ -4685,24 +4685,27 @@ app.post('/api/v1/guest-lists/reset-all-pending', async (req, res) => {
 // POST /api/v1/guest-lists/send-all-and-approve - Send email to ALL guests and change to Standard (C)
 app.post('/api/v1/guest-lists/send-all-and-approve', async (req, res) => {
   try {
-    const { message, category } = req.body;
+    const { message, category, onlyPending } = req.body;
 
     if (!message) {
       return res.status(400).json({ error: 'Message is required' });
     }
 
-    // Get all guests with email
-    const guestsResult = await pool.query(
-      `SELECT id, name, email FROM guest_lists WHERE email IS NOT NULL AND email != ''`
-    );
+    // Get guests - optionally only pending ones (for retry)
+    let query = `SELECT id, name, email FROM guest_lists WHERE email IS NOT NULL AND email != ''`;
+    if (onlyPending) {
+      query += ` AND status = 'pending'`;
+    }
+    const guestsResult = await pool.query(query);
 
     const guests = guestsResult.rows;
-    console.log(`Sending email to ${guests.length} guests...`);
+    console.log(`Sending email to ${guests.length} guests${onlyPending ? ' (pending only)' : ''}...`);
 
     const results = [];
     const targetCategory = category || 'C'; // Default to Standard (C), NOT VIP
 
-    for (const guest of guests) {
+    for (let i = 0; i < guests.length; i++) {
+      const guest = guests[i];
       try {
         // Send email
         const emailResult = await sendEmail({
@@ -4719,11 +4722,13 @@ app.post('/api/v1/guest-lists/send-all-and-approve', async (req, res) => {
           relatedId: guest.id
         });
 
-        // Update status to approved (Standard)
-        await pool.query(
-          `UPDATE guest_lists SET status = $1 WHERE id = $2`,
-          [targetCategory === 'C' ? 'approved' : targetCategory, guest.id]
-        );
+        if (emailResult.success) {
+          // Update status to approved only if email sent
+          await pool.query(
+            `UPDATE guest_lists SET status = $1 WHERE id = $2`,
+            [targetCategory === 'C' ? 'approved' : targetCategory, guest.id]
+          );
+        }
 
         results.push({
           id: guest.id,
@@ -4732,7 +4737,12 @@ app.post('/api/v1/guest-lists/send-all-and-approve', async (req, res) => {
           error: emailResult.error
         });
 
-        console.log(`✓ Email sent to ${guest.email}`);
+        console.log(`${emailResult.success ? '✓' : '✗'} [${i+1}/${guests.length}] ${guest.email}`);
+
+        // Rate limit: 600ms between emails (Resend limit is 2/sec)
+        if (i < guests.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 600));
+        }
       } catch (e) {
         results.push({
           id: guest.id,
@@ -4740,7 +4750,7 @@ app.post('/api/v1/guest-lists/send-all-and-approve', async (req, res) => {
           success: false,
           error: e.message
         });
-        console.error(`✗ Failed to send to ${guest.email}:`, e.message);
+        console.error(`✗ Failed: ${guest.email} - ${e.message}`);
       }
     }
 
