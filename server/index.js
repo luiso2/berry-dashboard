@@ -2849,6 +2849,7 @@ const authenticateToken = async (req, res, next) => {
     PUBLIC_PATHS.some(path => req.path === path || req.path.startsWith(path + '/')) ||
     (req.method === 'POST' && req.path === '/api/v1/guest-lists') ||
     (req.method === 'POST' && req.path === '/api/v1/guest-lists/reset-all-pending') ||
+    (req.method === 'POST' && req.path === '/api/v1/guest-lists/set-all-status') ||
     (req.method === 'POST' && req.path === '/api/v1/guest-lists/send-all-and-approve') ||
     (req.method === 'POST' && req.path === '/api/v1/guest-lists/send-all-sms') ||
     isPublicEventDetail ||
@@ -4680,6 +4681,34 @@ app.post('/api/v1/guest-lists/reset-all-pending', async (req, res) => {
   } catch (error) {
     console.error('Error resetting guests to pending:', error);
     res.status(500).json({ error: 'Failed to reset guests' });
+  }
+});
+
+// POST /api/v1/guest-lists/set-all-status - Set ALL guests to a specific status (NO notifications)
+app.post('/api/v1/guest-lists/set-all-status', async (req, res) => {
+  try {
+    const { status } = req.body;
+
+    if (!status) {
+      return res.status(400).json({ error: 'Status is required (approved, pending, declined)' });
+    }
+
+    const result = await pool.query(
+      `UPDATE guest_lists SET status = $1 RETURNING id`,
+      [status]
+    );
+
+    const updatedCount = result.rows.length;
+    console.log(`Set ${updatedCount} guests to status: ${status}`);
+
+    res.json({
+      success: true,
+      message: `${updatedCount} guests set to ${status}`,
+      count: updatedCount
+    });
+  } catch (error) {
+    console.error('Error setting guest status:', error);
+    res.status(500).json({ error: 'Failed to set guest status' });
   }
 });
 
