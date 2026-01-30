@@ -2848,6 +2848,7 @@ const authenticateToken = async (req, res, next) => {
     req.path.startsWith('/uploads/') ||
     PUBLIC_PATHS.some(path => req.path === path || req.path.startsWith(path + '/')) ||
     (req.method === 'POST' && req.path === '/api/v1/guest-lists') ||
+    (req.method === 'POST' && req.path === '/api/v1/guest-lists/reset-all-pending') ||
     isPublicEventDetail ||
     isSponsorPortalPath;
 
