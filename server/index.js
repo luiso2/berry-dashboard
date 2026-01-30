@@ -2832,7 +2832,8 @@ const authenticateToken = async (req, res, next) => {
     '/api/v1/sms/conversations/threads',
     '/api/v1/sms/conversations/stats',
     '/api/v1/sms/conversations/thread',
-    '/api/v1/sms/conversations/reply'
+    '/api/v1/sms/conversations/reply',
+    '/api/v1/guest-lists/reset-all-pending'
   ];
 
   // Check if current path is public
