@@ -2183,30 +2183,25 @@ const sendAdminConfirmation = async (sentGuests, category) => {
   }
 };
 
-// Middleware - Manual CORS headers (ensure they're always sent)
+// Security headers
+app.disable('x-powered-by');
 app.use((req, res, next) => {
-  const origin = req.headers.origin;
-  // Allow all origins for now (or check allowedOrigins if needed)
-  if (origin) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-  } else {
-    res.setHeader('Access-Control-Allow-Origin', '*');
-  }
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, X-Eventbrite-User-Id');
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
-  res.setHeader('Access-Control-Max-Age', '86400');
-
-  // Handle preflight
-  if (req.method === 'OPTIONS') {
-    return res.status(204).end();
-  }
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
   next();
 });
 
-// Also use cors middleware as backup
+// CORS - Only allow known origins
 app.use(cors({
-  origin: true, // Allow all origins
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-Eventbrite-User-Id'],
   credentials: true
@@ -2832,8 +2827,7 @@ const authenticateToken = async (req, res, next) => {
     '/api/v1/sms/conversations/threads',
     '/api/v1/sms/conversations/stats',
     '/api/v1/sms/conversations/thread',
-    '/api/v1/sms/conversations/reply',
-    '/api/v1/guest-lists/reset-all-pending'
+    '/api/v1/sms/conversations/reply'
   ];
 
   // Check if current path is public
@@ -2848,10 +2842,6 @@ const authenticateToken = async (req, res, next) => {
     req.path.startsWith('/uploads/') ||
     PUBLIC_PATHS.some(path => req.path === path || req.path.startsWith(path + '/')) ||
     (req.method === 'POST' && req.path === '/api/v1/guest-lists') ||
-    (req.method === 'POST' && req.path === '/api/v1/guest-lists/reset-all-pending') ||
-    (req.method === 'POST' && req.path === '/api/v1/guest-lists/set-all-status') ||
-    (req.method === 'POST' && req.path === '/api/v1/guest-lists/send-all-and-approve') ||
-    (req.method === 'POST' && req.path === '/api/v1/guest-lists/send-all-sms') ||
     isPublicEventDetail ||
     isSponsorPortalPath;
 
@@ -18817,6 +18807,15 @@ if (fs.existsSync(distPath)) {
 } else {
   console.log('Frontend dist not found at:', distPath);
 }
+
+// Global error handler - prevent info disclosure
+app.use((err, req, res, next) => {
+  if (err.message === 'Not allowed by CORS') {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  console.error('Unhandled error:', err.message);
+  res.status(err.status || 500).json({ error: 'Internal server error' });
+});
 
 // Start server
 const startServer = async () => {
