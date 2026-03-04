@@ -2171,13 +2171,12 @@ const sendAdminConfirmation = async (sentGuests, category) => {
   `;
 
   try {
-    await resend.emails.send({
-      from: EMAIL_CONFIG.from,
+    await sendEmail({
       to: EMAIL_CONFIG.adminEmail,
       subject: `${sentGuests.length} Invitation${sentGuests.length > 1 ? 's' : ''} Sent Successfully - Berry Bly`,
       html,
+      emailType: 'admin_confirmation',
     });
-    console.log(`Admin confirmation sent to ${EMAIL_CONFIG.adminEmail}`);
   } catch (error) {
     console.error('Failed to send admin confirmation:', error);
   }
@@ -2827,7 +2826,6 @@ const authenticateToken = async (req, res, next) => {
     '/api/v1/sms/conversations/threads',
     '/api/v1/sms/conversations/stats',
     '/api/v1/sms/conversations/thread',
-    '/api/v1/sms/conversations/reply'
   ];
 
   // Check if current path is public
@@ -2933,6 +2931,17 @@ const transformGuest = (row) => ({
   rating: row.rating || 0,
 });
 
+// Sanitize user input to prevent HTML/XSS injection in emails
+const escapeHtml = (str) => {
+  if (!str) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+};
+
 // Email template generator
 const generateInvitationEmail = (guest, category, customMessage = '', eventName = '') => {
   const categoryNames = {
@@ -2983,7 +2992,7 @@ const generateInvitationEmail = (guest, category, customMessage = '', eventName 
 
             ${customMessage ? `
             <div style="background: rgba(255,255,255,0.05); border-left: 3px solid #d4af37; padding: 20px; margin: 20px 0; border-radius: 0 8px 8px 0;">
-              <p style="color: #ffffff; font-size: 16px; line-height: 1.6; margin: 0;">${customMessage}</p>
+              <p style="color: #ffffff; font-size: 16px; line-height: 1.6; margin: 0;">${escapeHtml(customMessage)}</p>
             </div>
             ` : ''}
 
@@ -3080,17 +3089,16 @@ app.post('/api/guests', async (req, res) => {
     const newGuest = transformGuest(result.rows[0]);
     console.log(`✅ New guest added: ${name} (@${instagram || 'no instagram'}) - Party: ${normalizedPartySize}`);
 
-    // Send welcome email asynchronously
+    // Send welcome email asynchronously (uses centralized sendEmail for tracking)
     const welcomeHtml = generateInvitationEmail(newGuest, 'pending', '');
-    resend.emails.send({
-      from: EMAIL_CONFIG.from,
+    sendEmail({
       to: email,
-      subject: "You're on the List! - Berry Bly Events",
+      subject: welcomeHtml.subject,
       html: welcomeHtml.html,
-    }).then(() => {
-      console.log(`📧 Welcome email sent to ${email}`);
+      emailType: 'welcome',
+      relatedId: newGuest.id,
     }).catch((err) => {
-      console.error(`❌ Failed to send welcome email to ${email}:`, err);
+      console.error(`Failed to send welcome email to ${email}:`, err);
     });
 
     // Response compatible with landing page expectations
@@ -3437,12 +3445,16 @@ const verifyWebhookSignature = (payload, signature, secret) => {
 // Webhook URL: https://berry.merktop.com/api/webhooks/resend
 app.post('/api/webhooks/resend', async (req, res) => {
   try {
-    // Verify webhook signature
+    // Verify webhook signature - REJECT if secret is configured but signature missing/invalid
     const signature = req.headers['svix-signature'];
-    if (RESEND_WEBHOOK_SECRET && signature) {
+    if (RESEND_WEBHOOK_SECRET) {
+      if (!signature) {
+        console.error('Webhook rejected: missing svix-signature header');
+        return res.status(401).json({ error: 'Missing signature' });
+      }
       const isValid = verifyWebhookSignature(req.body, signature, RESEND_WEBHOOK_SECRET);
       if (!isValid) {
-        console.error('Invalid webhook signature');
+        console.error('Webhook rejected: invalid signature');
         return res.status(401).json({ error: 'Invalid signature' });
       }
     }
@@ -3450,6 +3462,10 @@ app.post('/api/webhooks/resend', async (req, res) => {
     const payload = req.body;
     const eventType = payload.type;
     const data = payload.data;
+
+    if (!eventType || !data) {
+      return res.status(400).json({ error: 'Invalid webhook payload' });
+    }
 
     console.log(`Resend webhook received: ${eventType}`, JSON.stringify(data, null, 2));
 
@@ -3679,13 +3695,14 @@ app.post('/api/v1/guests', async (req, res) => {
     const newGuest = transformGuest(result.rows[0]);
     console.log(`✅ New guest (v1): ${name} - Party: ${normalizedPartySize}`);
 
-    // Send welcome email
+    // Send welcome email (uses centralized sendEmail for tracking)
     const welcomeHtml = generateInvitationEmail(newGuest, 'pending', '');
-    resend.emails.send({
-      from: EMAIL_CONFIG.from,
+    sendEmail({
       to: email,
-      subject: "You're on the List! - Berry Bly Events",
+      subject: welcomeHtml.subject,
       html: welcomeHtml.html,
+      emailType: 'welcome',
+      relatedId: newGuest.id,
     }).catch((err) => console.error(`Failed to send welcome email:`, err));
 
     res.status(201).json({
@@ -4705,11 +4722,13 @@ app.post('/api/v1/guest-lists/set-all-status', async (req, res) => {
 // POST /api/v1/guest-lists/send-all-and-approve - Send email to ALL guests and change to Standard (C)
 app.post('/api/v1/guest-lists/send-all-and-approve', async (req, res) => {
   try {
-    const { message, category, onlyPending } = req.body;
+    const { message, category, onlyPending, subject } = req.body;
 
     if (!message) {
       return res.status(400).json({ error: 'Message is required' });
     }
+
+    const emailSubject = subject || 'Guest List Confirmation - Berry Bly Events';
 
     // Get guests - optionally only pending ones (for retry)
     let query = `SELECT id, name, email FROM guest_lists WHERE email IS NOT NULL AND email != ''`;
@@ -4727,14 +4746,15 @@ app.post('/api/v1/guest-lists/send-all-and-approve', async (req, res) => {
     for (let i = 0; i < guests.length; i++) {
       const guest = guests[i];
       try {
+        const sanitizedMessage = escapeHtml(message).replace(/\n/g, '<br>');
         // Send email
         const emailResult = await sendEmail({
           to: guest.email,
-          subject: 'Teatro Guest List Confirmation - Grammy Event',
+          subject: emailSubject,
           html: `
             <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-              <p style="font-size: 16px; line-height: 1.6;">Hi${guest.name ? ' ' + guest.name.split(' ')[0] : ''},</p>
-              <p style="font-size: 16px; line-height: 1.6;">${message.replace(/\n/g, '<br>')}</p>
+              <p style="font-size: 16px; line-height: 1.6;">Hi${guest.name ? ' ' + escapeHtml(guest.name.split(' ')[0]) : ''},</p>
+              <p style="font-size: 16px; line-height: 1.6;">${sanitizedMessage}</p>
             </div>
           `,
           emailType: 'confirmation',
@@ -4913,7 +4933,7 @@ app.post('/api/v1/guest-lists/:id/send-invitation', async (req, res) => {
             </p>
             ${customMessage ? `
             <div style="background: rgba(255,255,255,0.05); border-left: 3px solid #d4af37; padding: 20px; margin: 20px 0; border-radius: 0 8px 8px 0;">
-              <p style="color: #ffffff; font-size: 16px; line-height: 1.6; margin: 0;">${customMessage}</p>
+              <p style="color: #ffffff; font-size: 16px; line-height: 1.6; margin: 0;">${escapeHtml(customMessage)}</p>
             </div>
             ` : ''}
             <div style="margin-top: 30px; padding-top: 30px; border-top: 1px solid rgba(255,255,255,0.1);">
@@ -5030,7 +5050,7 @@ app.post('/api/v1/guest-lists/:id/send-reminder', async (req, res) => {
             </p>
             ${customMessage ? `
             <div style="background: rgba(255,255,255,0.05); border-left: 3px solid #d4af37; padding: 20px; margin: 20px 0; border-radius: 0 8px 8px 0;">
-              <p style="color: #ffffff; font-size: 16px; line-height: 1.6; margin: 0;">${customMessage}</p>
+              <p style="color: #ffffff; font-size: 16px; line-height: 1.6; margin: 0;">${escapeHtml(customMessage)}</p>
             </div>
             ` : ''}
             <div style="margin-top: 30px; padding-top: 30px; border-top: 1px solid rgba(255,255,255,0.1);">
