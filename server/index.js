@@ -4344,8 +4344,7 @@ const detectGenderFromName = (fullName) => {
     return 'male';
   }
 
-  // Default to female if unknown (since most guests in this context are female)
-  return 'female';
+  return '';
 };
 
 // Helper to transform guest_lists table row to frontend format
@@ -18837,9 +18836,34 @@ app.use((err, req, res, next) => {
   res.status(err.status || 500).json({ error: 'Internal server error' });
 });
 
+// Backfill gender for existing guests that don't have one
+const backfillGender = async () => {
+  try {
+    const result = await pool.query(
+      `SELECT id, name FROM guest_lists WHERE (gender IS NULL OR gender = '') AND name IS NOT NULL`
+    );
+    if (result.rows.length === 0) {
+      console.log('Gender backfill: all guests already have gender assigned');
+      return;
+    }
+    let updated = 0;
+    for (const row of result.rows) {
+      const gender = detectGenderFromName(row.name);
+      if (gender) {
+        await pool.query(`UPDATE guest_lists SET gender = $1 WHERE id = $2`, [gender, row.id]);
+        updated++;
+      }
+    }
+    console.log(`Gender backfill: ${updated}/${result.rows.length} guests updated`);
+  } catch (error) {
+    console.error('Gender backfill error:', error.message);
+  }
+};
+
 // Start server
 const startServer = async () => {
   await initDatabase();
+  await backfillGender();
 
   server.listen(PORT, () => {
     console.log(`
