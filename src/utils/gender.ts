@@ -1,0 +1,91 @@
+// Gender detection from first name
+// Uses common name databases for English and Spanish names
+
+const FEMALE_NAMES = new Set([
+  'abby','abigail','ada','adele','adriana','agnes','aileen','aimee','alana','alejandra',
+  'alessandra','alexa','alexandra','alice','alicia','alina','alison','allison','alma',
+  'amanda','amber','amelia','amy','ana','anastasia','andrea','angela','angelica','angelina',
+  'angie','anita','ann','anna','anne','annette','annie','april','ariana','ariel',
+  'ashley','athena','audrey','aurora','ava','barbara','beatrice','becky','bella','beth',
+  'bethany','betty','beverly','bianca','bonnie','brenda','brianna','bridget','brittany','brooke',
+  'camila','candace','carla','carmen','carol','carolina','caroline','carrie','cassandra','catherine',
+  'cecilia','celeste','charlene','charlotte','chelsea','cheryl','chloe','christina','christine','cindy',
+  'claire','clara','claudia','colleen','connie','constance','cora','courtney','cristina','crystal',
+  'cynthia','daisy','dana','daniela','danielle','daphne','dawn','debbie','deborah','debra',
+  'denise','diana','diane','dolores','dominique','donna','dora','doris','dorothy','edith',
+  'eileen','elaine','elena','elisa','elizabeth','ella','ellen','eloise','elsa','emilia',
+  'emily','emma','erica','erika','erin','esmeralda','esther','eva','evelyn','faith',
+  'fatima','felicia','fernanda','fiona','florence','frances','francesca','gabriela','gabriella','gabrielle',
+  'gemma','genevieve','georgia','gina','giselle','gloria','grace','greta','hannah','harriet',
+  'hayley','heather','heidi','helen','helena','hilary','holly','hope','ida','ingrid',
+  'irene','iris','irma','isabel','isabella','isabelle','ivy','jacqueline','jade','jamie',
+  'jane','janet','janice','jasmine','jean','jenna','jennifer','jenny','jessica','jill',
+  'joanna','jocelyn','josephine','joy','joyce','juanita','judith','julia','juliana','julie',
+  'juliet','june','justine','kaitlyn','kara','karen','karina','karla','kate','katherine',
+  'kathleen','kathryn','kathy','katie','katrina','kayla','kelly','kelsey','kendra','kim',
+  'kimberly','kirsten','kristen','kristin','kristina','lacey','lana','laura','lauren','laurie',
+  'lea','leah','leigh','lena','leslie','leticia','lila','lillian','lily','linda',
+  'lindsay','lisa','liz','lorena','lorraine','louise','lucia','luciana','lucy','luisa',
+  'luz','lydia','lynn','mackenzie','madeleine','madison','maggie','mandy','margaret','margarita',
+  'maria','mariah','mariana','marianne','marie','marilyn','marina','marisa','marissa','marlene',
+  'martha','mary','matilda','maureen','maya','megan','melanie','melinda','melissa','melody',
+  'mercedes','meredith','mia','michaela','michelle','mikayla','mildred','miranda','miriam','molly',
+  'monica','monique','morgan','muriel','nadia','nancy','naomi','natalia','natalie','natasha',
+  'nicole','nina','nora','norma','olga','olivia','paige','pamela','paola','patricia',
+  'paula','pauline','pearl','peggy','penelope','petra','phyllis','priscilla','rachel','ramona',
+  'raquel','rebecca','regina','renee','rhonda','rita','roberta','robin','rosa','rosalie',
+  'rose','rosemary','ruby','ruth','sabrina','sally','samantha','sandra','sara','sarah',
+  'savannah','scarlett','selena','serena','shannon','sharon','sheila','shelby','shirley','silvia',
+  'simone','sofia','sophia','sophie','stacy','stella','stephanie','susan','susana','suzanne',
+  'sylvia','tabitha','tamara','tammy','tania','tanya','tara','tatiana','taylor','teresa',
+  'tessa','theresa','tiffany','tina','tonya','tracy','ursula','valentina','valerie','vanessa',
+  'vera','veronica','victoria','violet','virginia','vivian','wanda','wendy','whitney','wilma',
+  'ximena','yolanda','yvette','yvonne','zara','zoe','zoey',
+]);
+
+const MALE_NAMES = new Set([
+  'aaron','adam','adrian','aiden','alan','albert','alec','alejandro','alex','alexander',
+  'alfred','allen','andre','andrew','andy','angelo','anthony','antonio','armando','arnold',
+  'arthur','austin','barry','ben','benjamin','bernard','bill','billy','blake','bob',
+  'bobby','brad','bradley','brandon','brendan','brent','brett','brian','bruce','bryan',
+  'byron','caleb','calvin','cameron','carl','carlos','casey','chad','charles','charlie',
+  'chase','chris','christian','christopher','clarence','clark','claude','clayton','clifford',
+  'clint','clyde','cody','colin','connor','corey','craig','curtis','dale','damian',
+  'damon','dan','daniel','danny','darrell','darren','dave','david','dean','dennis',
+  'derek','derrick','devin','diego','dillon','dominic','don','donald','douglas','drew',
+  'dustin','dwight','dylan','earl','eddie','edgar','edward','edwin','eli','elias',
+  'elijah','elliot','elliott','emanuel','emilio','emmanuel','enrique','eric','erik','ernest',
+  'ethan','eugene','evan','everett','ezra','felix','fernando','floyd','francis','francisco',
+  'frank','franklin','fred','frederick','gabriel','garrett','gary','gavin','gene','george',
+  'gerald','gerardo','gilbert','giovanni','glen','glenn','gordon','graham','grant','greg',
+  'gregory','guillermo','gustavo','harold','harry','harvey','hector','henry','herbert',
+  'herman','howard','hugo','hunter','ian','ignacio','irving','isaac','ivan','jack',
+  'jackson','jacob','jaime','jake','james','jared','jarvis','jason','javier','jay',
+  'jeff','jeffrey','jeremy','jerome','jerry','jesse','jesus','jim','jimmy','joaquin',
+  'joe','joel','john','johnny','jon','jonathan','jordan','jorge','jose','joseph',
+  'josh','joshua','juan','julian','julio','justin','karl','keith','ken','kenneth',
+  'kenny','kevin','kirk','kurt','kyle','lance','larry','lawrence','lee','leo',
+  'leon','leonard','leonardo','leroy','liam','lloyd','logan','lorenzo','louis','lucas',
+  'luis','luke','malcolm','manuel','marc','marco','marcos','marcus','mario','mark',
+  'marshall','martin','marvin','mason','matt','matthew','maurice','max','michael','miguel',
+  'miles','mitchell','mohammed','morgan','nathan','nathaniel','neil','nelson','nicholas','nick',
+  'nicolas','noah','noel','norman','oliver','omar','orlando','oscar','owen','pablo',
+  'patrick','paul','pedro','perry','peter','philip','phillip','pierre','preston','quentin',
+  'rafael','ralph','ramon','randall','randy','raul','ray','raymond','reed','rene',
+  'ricardo','richard','rick','ricky','robert','roberto','rodney','rodrigo','roger','roland',
+  'roman','ronald','ross','roy','ruben','russell','ryan','salvador','sam','samuel',
+  'santiago','scott','sean','sebastian','sergio','seth','shane','shaun','shawn','simon',
+  'spencer','stanley','stefan','stephen','steve','steven','stuart','ted','terry','theodore',
+  'thomas','tim','timothy','todd','tom','tommy','tony','travis','trevor','troy',
+  'tyler','victor','vince','vincent','wade','walter','warren','wayne','wesley','will',
+  'william','willie','xavier','zachary','zane',
+]);
+
+export function detectGenderFromName(fullName: string): 'male' | 'female' | '' {
+  if (!fullName) return '';
+  const firstName = fullName.trim().split(' ')[0].toLowerCase();
+  if (!firstName) return '';
+  if (FEMALE_NAMES.has(firstName)) return 'female';
+  if (MALE_NAMES.has(firstName)) return 'male';
+  return '';
+}

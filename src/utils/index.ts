@@ -3,3 +3,4 @@
 export { calculateAIScore } from './scoring';
 export { statusToCategory } from './mapping';
 export { generateAIMessage } from './messages';
+export { detectGenderFromName } from './gender';

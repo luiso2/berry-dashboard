@@ -1,5 +1,7 @@
 // Add Guest Modal
+import { useState } from 'react';
 import { Input } from '../common';
+import { detectGenderFromName } from '../../utils/gender';
 
 interface GuestFormData {
   name: string;
@@ -21,6 +23,8 @@ interface AddGuestModalProps {
 }
 
 export function AddGuestModal({ show, onClose, formData, onFormChange, onSubmit }: AddGuestModalProps) {
+  const [manualGender, setManualGender] = useState(false);
+
   if (!show) return null;
 
   return (
@@ -78,7 +82,14 @@ export function AddGuestModal({ show, onClose, formData, onFormChange, onSubmit 
             label="Full Name"
             placeholder="John Doe"
             value={formData.name}
-            onChange={(v) => onFormChange({ ...formData, name: v })}
+            onChange={(v) => {
+              const detected = detectGenderFromName(v);
+              if (!manualGender && detected) {
+                onFormChange({ ...formData, name: v, gender: detected });
+              } else {
+                onFormChange({ ...formData, name: v });
+              }
+            }}
             required
           />
           <Input
@@ -102,7 +113,10 @@ export function AddGuestModal({ show, onClose, formData, onFormChange, onSubmit 
               <label style={{ display: 'block', marginBottom: 8, fontSize: 13, color: '#888' }}>Gender</label>
               <select
                 value={formData.gender}
-                onChange={(e) => onFormChange({ ...formData, gender: e.target.value })}
+                onChange={(e) => {
+                  setManualGender(!!e.target.value);
+                  onFormChange({ ...formData, gender: e.target.value });
+                }}
                 style={{
                   width: '100%',
                   padding: '10px 14px',
