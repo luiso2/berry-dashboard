@@ -582,6 +582,7 @@ function App() {
                       <th style={{ textAlign: 'left', padding: '12px 16px', color: '#888', fontSize: 13 }}>Phone</th>
                       <th style={{ textAlign: 'left', padding: '12px 16px', color: '#888', fontSize: 13 }}>Category</th>
                       <th style={{ textAlign: 'left', padding: '12px 16px', color: '#888', fontSize: 13 }}>Party</th>
+                      <th style={{ textAlign: 'left', padding: '12px 16px', color: '#888', fontSize: 13 }}>Enlisted</th>
                       <th style={{ textAlign: 'left', padding: '12px 16px', color: '#888', fontSize: 13 }}>Email Status</th>
                       <th style={{ textAlign: 'left', padding: '12px 16px', color: '#888', fontSize: 13 }}>Actions</th>
                     </tr>
@@ -643,6 +644,9 @@ function App() {
                           </span>
                         </td>
                         <td style={{ padding: '12px 16px' }}>{guest.partySize}</td>
+                        <td style={{ padding: '12px 16px', color: '#666', fontSize: 13, whiteSpace: 'nowrap' }}>
+                          {guest.createdAt ? new Date(guest.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}
+                        </td>
                         <td style={{ padding: '12px 16px' }}>
                           {guest.emailSent ? (
                             <span style={{ color: '#22c55e', fontSize: 13 }}>✓ Sent</span>
