@@ -4,6 +4,13 @@ import type { Guest, GuestCategory } from '../../types';
 import { StatusBadge, SmallBtn } from '../common';
 import { thStyle, tdStyle } from '../common/tableStyles';
 
+const formatDate = (dateStr: string) => {
+  if (!dateStr) return '—';
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return '—';
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+};
+
 interface GuestListProps {
   guests: Guest[];
   selectedGuests: Set<string>;
@@ -50,6 +57,7 @@ export const GuestList = ({
             <th style={thStyle}>Gender</th>
             <th style={{ ...thStyle }} className="hide-tablet">Instagram</th>
             <th style={{ ...thStyle, width: 120 }}>Phone</th>
+            <th style={thStyle}>Enlisted</th>
             <th style={thStyle}>Status</th>
             <th style={{ ...thStyle, width: 180 }}>Actions</th>
           </tr>
@@ -122,6 +130,9 @@ export const GuestList = ({
                 ) : (
                   <span style={{ color: '#666' }}>—</span>
                 )}
+              </td>
+              <td style={{ ...tdStyle, color: '#666', fontSize: 13, whiteSpace: 'nowrap' }}>
+                {formatDate(guest.createdAt)}
               </td>
               <td style={tdStyle}>
                 <StatusBadge category={guest.category} />
@@ -220,6 +231,7 @@ export const GuestList = ({
                 )}
                 {guest.instagram && <a href={`https://instagram.com/${guest.instagram.replace('@', '')}`} target="_blank" rel="noopener noreferrer" style={{ color: '#d4af37', textDecoration: 'none' }}>📸 @{guest.instagram.replace('@', '')}</a>}
                 <span>👥 {guest.partySize}</span>
+                <span style={{ color: '#555' }}>📅 {formatDate(guest.createdAt)}</span>
               </div>
 
 
