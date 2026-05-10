@@ -1955,8 +1955,69 @@ const initDatabase = async () => {
 
     console.log('guest_lists table initialized with instagram and checked_in_at columns');
 
+    // Merktop FL client-acquisition: prospects, campaigns, outreach emails
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS prospects (
+        id SERIAL PRIMARY KEY,
+        place_id VARCHAR(255) UNIQUE NOT NULL,
+        business_name VARCHAR(500) NOT NULL,
+        niche VARCHAR(100),
+        city VARCHAR(100),
+        state VARCHAR(50) DEFAULT 'FL',
+        formatted_address TEXT,
+        phone VARCHAR(50),
+        email VARCHAR(255),
+        website VARCHAR(500),
+        has_website BOOLEAN DEFAULT FALSE,
+        google_types JSONB,
+        status VARCHAR(50) DEFAULT 'new',
+        do_not_contact BOOLEAN DEFAULT FALSE,
+        last_contacted_at TIMESTAMP,
+        notes TEXT,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_prospects_niche ON prospects(niche);
+      CREATE INDEX IF NOT EXISTS idx_prospects_city ON prospects(city);
+      CREATE INDEX IF NOT EXISTS idx_prospects_status ON prospects(status);
+      CREATE INDEX IF NOT EXISTS idx_prospects_has_website ON prospects(has_website);
+    `);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS outreach_campaigns (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(255) NOT NULL,
+        niche VARCHAR(100) NOT NULL,
+        cities JSONB,
+        template_id VARCHAR(100) NOT NULL,
+        daily_cap INT DEFAULT 200,
+        starts_at TIMESTAMP DEFAULT NOW(),
+        status VARCHAR(50) DEFAULT 'active',
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_outreach_campaigns_status ON outreach_campaigns(status);
+    `);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS outreach_emails (
+        id SERIAL PRIMARY KEY,
+        campaign_id INT REFERENCES outreach_campaigns(id) ON DELETE CASCADE,
+        prospect_id INT REFERENCES prospects(id) ON DELETE CASCADE,
+        resend_email_id VARCHAR(255),
+        subject VARCHAR(500),
+        status VARCHAR(50) DEFAULT 'sent',
+        sent_at TIMESTAMP DEFAULT NOW(),
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_outreach_emails_campaign ON outreach_emails(campaign_id);
+      CREATE INDEX IF NOT EXISTS idx_outreach_emails_prospect ON outreach_emails(prospect_id);
+      CREATE INDEX IF NOT EXISTS idx_outreach_emails_resend ON outreach_emails(resend_email_id);
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_outreach_emails_campaign_prospect
+        ON outreach_emails(campaign_id, prospect_id);
+    `);
+    console.log('Merktop outreach tables initialized (prospects, outreach_campaigns, outreach_emails)');
+
     dbInitStatus.completed = true;
-    console.log('Database tables initialized successfully (guests, email_events, tickets, activity_log, sponsors, events, budgets, vendors, staff, contracts, client_access, integrations, promoters, file_uploads)');
+    console.log('Database tables initialized successfully (guests, email_events, tickets, activity_log, sponsors, events, budgets, vendors, staff, contracts, client_access, integrations, promoters, file_uploads, prospects, outreach_campaigns, outreach_emails)');
   } catch (error) {
     dbInitStatus.error = error.message;
     console.error('Error initializing database:', error);
@@ -3493,6 +3554,28 @@ app.post('/api/webhooks/resend', async (req, res) => {
        VALUES ($1, $2, $3, $4, $5, $6, $7)`,
       [emailId, guestId, eventType, recipientEmail, subject, timestamp, JSON.stringify(payload)]
     );
+
+    // Merktop outreach: propagate Resend events to outreach_emails.status when applicable
+    if (emailId) {
+      const statusMap = {
+        'email.delivered': 'delivered',
+        'email.opened': 'opened',
+        'email.clicked': 'clicked',
+        'email.bounced': 'bounced',
+        'email.complained': 'bounced',
+      };
+      const mappedStatus = statusMap[eventType];
+      if (mappedStatus) {
+        try {
+          await pool.query(
+            `UPDATE outreach_emails SET status = $1 WHERE resend_email_id = $2`,
+            [mappedStatus, emailId]
+          );
+        } catch (e) {
+          console.warn('outreach_emails status update skipped:', e.message);
+        }
+      }
+    }
 
     // Update guest record based on event type
     if (guestId) {
@@ -18860,10 +18943,19 @@ const backfillGender = async () => {
   }
 };
 
+// Merktop FL client-acquisition routes + worker
+import { createProspectRoutes } from './modules/prospects.js';
+import { createOutreachRoutes } from './modules/outreach.js';
+import { startOutreachWorker } from './workers/outreachWorker.js';
+
+app.use('/api/v1/merktop/prospects', createProspectRoutes(pool));
+app.use('/api/v1/merktop', createOutreachRoutes(pool));
+
 // Start server
 const startServer = async () => {
   await initDatabase();
   await backfillGender();
+  startOutreachWorker(pool);
 
   server.listen(PORT, () => {
     console.log(`

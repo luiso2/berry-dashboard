@@ -18,6 +18,9 @@ import { authenticateToken } from './middleware/auth.js';
 // Modules
 import { createAuthRoutes } from './modules/auth.js';
 import { createGuestRoutes } from './modules/guests.js';
+import { createProspectRoutes } from './modules/prospects.js';
+import { createOutreachRoutes } from './modules/outreach.js';
+import { startOutreachWorker } from './workers/outreachWorker.js';
 
 // ============================================
 // EXPRESS APP SETUP
@@ -103,6 +106,10 @@ app.use(authRoutes);
 const guestRoutes = createGuestRoutes(pool);
 app.use('/api/v1/guests', guestRoutes);
 
+// Merktop FL client-acquisition routes
+app.use('/api/v1/merktop/prospects', createProspectRoutes(pool));
+app.use('/api/v1/merktop', createOutreachRoutes(pool));
+
 // ============================================
 // WEBSOCKET SETUP
 // ============================================
@@ -159,6 +166,9 @@ const startServer = async () => {
     console.log('Initializing database...');
     await initializeDatabase();
     console.log('✓ Database initialized');
+
+    // Start Merktop outreach worker
+    startOutreachWorker(pool);
 
     // Start server
     server.listen(PORT, () => {

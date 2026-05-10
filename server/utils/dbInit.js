@@ -99,6 +99,68 @@ export const initializeDatabase = async () => {
       CREATE INDEX IF NOT EXISTS idx_email_events_event_type ON email_events(event_type);
     `);
 
+    // Merktop FL client-acquisition: prospects discovered via Google Places
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS prospects (
+        id SERIAL PRIMARY KEY,
+        place_id VARCHAR(255) UNIQUE NOT NULL,
+        business_name VARCHAR(500) NOT NULL,
+        niche VARCHAR(100),
+        city VARCHAR(100),
+        state VARCHAR(50) DEFAULT 'FL',
+        formatted_address TEXT,
+        phone VARCHAR(50),
+        email VARCHAR(255),
+        website VARCHAR(500),
+        has_website BOOLEAN DEFAULT FALSE,
+        google_types JSONB,
+        status VARCHAR(50) DEFAULT 'new',
+        do_not_contact BOOLEAN DEFAULT FALSE,
+        last_contacted_at TIMESTAMP,
+        notes TEXT,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_prospects_niche ON prospects(niche);
+      CREATE INDEX IF NOT EXISTS idx_prospects_city ON prospects(city);
+      CREATE INDEX IF NOT EXISTS idx_prospects_status ON prospects(status);
+      CREATE INDEX IF NOT EXISTS idx_prospects_has_website ON prospects(has_website);
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS outreach_campaigns (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(255) NOT NULL,
+        niche VARCHAR(100) NOT NULL,
+        cities JSONB,
+        template_id VARCHAR(100) NOT NULL,
+        daily_cap INT DEFAULT 200,
+        starts_at TIMESTAMP DEFAULT NOW(),
+        status VARCHAR(50) DEFAULT 'active',
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_outreach_campaigns_status ON outreach_campaigns(status);
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS outreach_emails (
+        id SERIAL PRIMARY KEY,
+        campaign_id INT REFERENCES outreach_campaigns(id) ON DELETE CASCADE,
+        prospect_id INT REFERENCES prospects(id) ON DELETE CASCADE,
+        resend_email_id VARCHAR(255),
+        subject VARCHAR(500),
+        status VARCHAR(50) DEFAULT 'sent',
+        sent_at TIMESTAMP DEFAULT NOW(),
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_outreach_emails_campaign ON outreach_emails(campaign_id);
+      CREATE INDEX IF NOT EXISTS idx_outreach_emails_prospect ON outreach_emails(prospect_id);
+      CREATE INDEX IF NOT EXISTS idx_outreach_emails_resend ON outreach_emails(resend_email_id);
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_outreach_emails_campaign_prospect
+        ON outreach_emails(campaign_id, prospect_id);
+    `);
+
     console.log('Database tables initialized successfully');
     dbInitStatus.completed = true;
 
