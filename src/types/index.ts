@@ -67,3 +67,13 @@ export type { SMSMessage, SMSThread, SMSStats } from './sms';
 
 // UI Components
 export type { Toast } from './ui';
+
+// PeptideConnect
+export type {
+  PeptideSupplier,
+  PeptidePharmacy,
+  PeptideDoctor,
+  PeptideOpportunity,
+  PeptideItem,
+  PeptideMessage,
+} from './peptide';

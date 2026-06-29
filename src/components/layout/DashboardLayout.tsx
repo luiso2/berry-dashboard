@@ -169,6 +169,12 @@ export function DashboardLayout({
             <NavItem label="Automation" active={activeView === 'automation'} icon="⚡" onClick={() => navigateTo('automation')} />
             <NavItem label="ChatGPT" active={activeView === 'chatgpt'} icon="🤖" onClick={() => navigateTo('chatgpt')} />
             <NavItem label="SMS AI" active={activeView === 'sms'} icon="💬" count={stats.smsStats.unread_messages} onClick={() => navigateTo('sms')} />
+
+            {/* PeptideConnect Section */}
+            <div style={{ fontSize: 10, fontWeight: 600, color: '#555', textTransform: 'uppercase', letterSpacing: '0.5px', padding: '16px 8px 8px', marginTop: 8 }}>
+              PeptideConnect
+            </div>
+            <NavItem label="PeptideConnect" active={activeView === 'peptideconnect'} icon="🧬" onClick={() => navigateTo('peptideconnect')} />
           </div>
         </nav>
 

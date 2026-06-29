@@ -31,6 +31,7 @@ import {
   VendorsView,
   AutomationView,
   ModelsView,
+  PeptideConnectView,
 } from './views';
 
 // Eventbrite Components
@@ -159,6 +160,7 @@ function App() {
       eventbrite: 'Eventbrite Analytics',
       automation: 'Automation',
       checkin: 'Check-In',
+      peptideconnect: 'PeptideConnect',
     };
     return titles[state.activeView] || 'Dashboard';
   };
@@ -185,6 +187,7 @@ function App() {
       eventbrite: 'Ticket sales & analytics',
       automation: 'Workflow automation',
       checkin: 'Guest check-in',
+      peptideconnect: 'B2B peptide marketplace · AI agent',
     };
     return subtitles[state.activeView] || '';
   };
@@ -1019,6 +1022,9 @@ function App() {
 
       case 'models':
         return <ModelsView onToast={actions.addToast} />;
+
+      case 'peptideconnect':
+        return <PeptideConnectView onToast={actions.addToast} />;
 
       default:
         return (

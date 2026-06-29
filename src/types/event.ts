@@ -20,7 +20,8 @@ export type ViewType =
   | 'integrations'
   | 'chatgpt'
   | 'sms'
-  | 'eventbrite';
+  | 'eventbrite'
+  | 'peptideconnect';
 
 export interface Event {
   id: number;

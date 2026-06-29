@@ -16,6 +16,8 @@ import * as XLSX from 'xlsx';
 import { parse as csvParse } from 'csv-parse/sync';
 import bcrypt from 'bcrypt';
 import { v2 as cloudinary } from 'cloudinary';
+import { createPeptideRoutes } from './modules/peptide/routes.js';
+import { initPeptideSchema } from './modules/peptide/schema.js';
 
 // API Version - for tracking deployments
 const API_VERSION = '3.15.2-guest-status';
@@ -3647,6 +3649,9 @@ app.use('/api/v1', (req, res, next) => {
   req.url = req.url;
   next();
 });
+
+// PeptideConnect B2B marketplace routes
+app.use('/api/v1/peptide', createPeptideRoutes(pool));
 
 // Mount all /api routes also on /api/v1
 app.get('/api/v1/guests', async (req, res) => {
@@ -18863,6 +18868,7 @@ const backfillGender = async () => {
 // Start server
 const startServer = async () => {
   await initDatabase();
+  await initPeptideSchema(pool);
   await backfillGender();
 
   server.listen(PORT, () => {
