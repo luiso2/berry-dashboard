@@ -144,6 +144,8 @@ function App() {
       analytics: 'Dashboard',
       guests: 'Guest Lists',
       'guest-approvals': 'Guest Approvals',
+      'guest-approvals-men': 'Guest Approvals: Men',
+      'guest-approvals-women': 'Guest Approvals: Women',
       emails: 'Email Communications',
       events: 'Events',
       models: 'Models',
@@ -171,6 +173,8 @@ function App() {
       analytics: 'Overview of your event metrics',
       guests: `${stats.total} guests • ${stats.pending} pending`,
       'guest-approvals': 'Gender-segmented approval workflow',
+      'guest-approvals-men': 'Approval workflow for men',
+      'guest-approvals-women': 'Approval workflow for women',
       emails: `${stats.emailsSent} emails sent`,
       events: `${state.eventStats.total} events`,
       models: `${state.modelStats.total} models`,
@@ -1024,7 +1028,11 @@ function App() {
         return <ModelsView onToast={actions.addToast} />;
 
       case 'guest-approvals':
-        return <GuestApprovalsView onToast={actions.addToast} token={token ?? undefined} />;
+      case 'guest-approvals-men':
+        return <GuestApprovalsView onToast={actions.addToast} token={token ?? undefined} fixedGender="male" />;
+
+      case 'guest-approvals-women':
+        return <GuestApprovalsView onToast={actions.addToast} token={token ?? undefined} fixedGender="female" />;
 
       default:
         return (

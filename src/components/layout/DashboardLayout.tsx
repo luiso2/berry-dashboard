@@ -134,7 +134,8 @@ export function DashboardLayout({
             <NavItem label="Dashboard" active={activeView === 'analytics'} icon="📊" onClick={() => navigateTo('analytics')} />
             <NavItem label="Events" active={activeView === 'events'} icon="📅" count={stats.eventStats.total} onClick={() => navigateTo('events')} />
             <NavItem label="Guest Lists" active={activeView === 'guests'} icon="👥" count={stats.total} onClick={() => navigateTo('guests')} />
-            <NavItem label="Guest Approvals" active={activeView === 'guest-approvals'} icon="✅" onClick={() => navigateTo('guest-approvals')} />
+            <NavItem label="Approvals: Men" active={activeView === 'guest-approvals-men' || activeView === 'guest-approvals'} icon="🤵" onClick={() => navigateTo('guest-approvals-men')} />
+            <NavItem label="Approvals: Women" active={activeView === 'guest-approvals-women'} icon="💃" onClick={() => navigateTo('guest-approvals-women')} />
 
             {/* Revenue Section */}
             <div style={{ fontSize: 10, fontWeight: 600, color: '#555', textTransform: 'uppercase', letterSpacing: '0.5px', padding: '16px 8px 8px', marginTop: 8 }}>

@@ -4,6 +4,8 @@ export type ViewType =
   | 'overview'
   | 'guests'
   | 'guest-approvals'
+  | 'guest-approvals-men'
+  | 'guest-approvals-women'
   | 'emails'
   | 'analytics'
   | 'automation'

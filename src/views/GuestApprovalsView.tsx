@@ -9,6 +9,8 @@ import { API_URL } from '../constants';
 interface GuestApprovalsViewProps {
   onToast: (message: string, type: 'success' | 'error' | 'info') => void;
   token?: string;
+  /** Client rule: men and women are managed on separate pages. Each page fixes its gender. */
+  fixedGender: 'male' | 'female';
 }
 
 interface BerryEvent {
@@ -108,10 +110,10 @@ const mapGuest = (g: Record<string, unknown>): ApprovalGuest => ({
   createdAt: (g.createdAt as string) || '',
 });
 
-export function GuestApprovalsView({ onToast, token }: GuestApprovalsViewProps) {
+export function GuestApprovalsView({ onToast, token, fixedGender }: GuestApprovalsViewProps) {
   const [events, setEvents] = useState<BerryEvent[]>([]);
   const [eventId, setEventId] = useState('');
-  const [gender, setGender] = useState<Gender>('male');
+  const gender: Gender = fixedGender;
   const [folder, setFolder] = useState('none');
   const [guests, setGuests] = useState<ApprovalGuest[]>([]);
   const [counts, setCounts] = useState<Record<string, number>>({});
@@ -201,16 +203,16 @@ export function GuestApprovalsView({ onToast, token }: GuestApprovalsViewProps) 
     refresh();
   }, [refresh]);
 
-  const switchGender = (next: Gender) => {
-    if (next === gender) return;
-    setGender(next);
-    setFolder('none');
-  };
-
   // Apply a segment via the dashboard server proxy -> berry-api (handles emails + validation)
   const applySegment = async (guest: ApprovalGuest, segment: string) => {
-    if (segment === 'removed' && !window.confirm(`Remove ${guest.name} from the list? This is a soft remove (no email is sent).`)) {
-      return;
+    // Client rule: female REMOVE permanently deletes; male REMOVE only takes them off the list.
+    if (segment === 'removed') {
+      const confirmMessage = gender === 'female'
+        ? `Remove and permanently DELETE ${guest.name}? This cannot be undone. No email is sent.`
+        : `Remove ${guest.name} from the list? (No email is sent.)`;
+      if (!window.confirm(confirmMessage)) {
+        return;
+      }
     }
 
     const payload: { segment: string; ticketUrl?: string } = { segment };
@@ -317,26 +319,19 @@ export function GuestApprovalsView({ onToast, token }: GuestApprovalsViewProps) 
           ))}
         </select>
 
-        {/* Gender tabs */}
-        <div style={{ display: 'flex', background: '#0a0a0a', border: '1px solid #1a1a1a', borderRadius: 8, overflow: 'hidden' }}>
-          {(['male', 'female'] as Gender[]).map((g) => (
-            <button
-              key={g}
-              onClick={() => switchGender(g)}
-              style={{
-                background: gender === g ? (g === 'male' ? '#3b82f6' : '#ec4899') : 'transparent',
-                border: 'none',
-                color: gender === g ? '#fff' : '#666',
-                padding: '10px 20px',
-                fontSize: 13,
-                fontWeight: 600,
-                cursor: 'pointer',
-                letterSpacing: '0.5px',
-              }}
-            >
-              {g === 'male' ? 'MALE' : 'FEMALE'}
-            </button>
-          ))}
+        {/* Fixed gender badge: men and women are managed on separate pages */}
+        <div
+          style={{
+            background: gender === 'male' ? '#3b82f6' : '#ec4899',
+            color: '#fff',
+            borderRadius: 8,
+            padding: '10px 20px',
+            fontSize: 13,
+            fontWeight: 600,
+            letterSpacing: '0.5px',
+          }}
+        >
+          {gender === 'male' ? 'MEN' : 'WOMEN'}
         </div>
 
         {/* Ticket link (required for VIP PAID / GA TICKET actions) */}
