@@ -3,6 +3,7 @@
 export type ViewType =
   | 'overview'
   | 'guests'
+  | 'guest-approvals'
   | 'emails'
   | 'analytics'
   | 'automation'

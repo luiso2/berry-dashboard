@@ -134,6 +134,7 @@ export function DashboardLayout({
             <NavItem label="Dashboard" active={activeView === 'analytics'} icon="📊" onClick={() => navigateTo('analytics')} />
             <NavItem label="Events" active={activeView === 'events'} icon="📅" count={stats.eventStats.total} onClick={() => navigateTo('events')} />
             <NavItem label="Guest Lists" active={activeView === 'guests'} icon="👥" count={stats.total} onClick={() => navigateTo('guests')} />
+            <NavItem label="Guest Approvals" active={activeView === 'guest-approvals'} icon="✅" onClick={() => navigateTo('guest-approvals')} />
 
             {/* Revenue Section */}
             <div style={{ fontSize: 10, fontWeight: 600, color: '#555', textTransform: 'uppercase', letterSpacing: '0.5px', padding: '16px 8px 8px', marginTop: 8 }}>

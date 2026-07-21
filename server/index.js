@@ -2826,6 +2826,7 @@ const authenticateToken = async (req, res, next) => {
     '/api/v1/sms/conversations/threads',
     '/api/v1/sms/conversations/stats',
     '/api/v1/sms/conversations/thread',
+    '/api/v1/berry-events',
   ];
 
   // Check if current path is public
@@ -4375,7 +4376,11 @@ const transformToGuestList = (row) => {
     numberOfGuests: row.number_of_guests || 1,
     partySize: row.number_of_guests || 1,
     vipPreferences: categoryFromVip ? '' : (row.vip_preferences || ''),
-    gender: row.gender,
+    gender: row.gender || null,
+    city: row.city || null,
+    linkedin: row.linkedin || null,
+    invitedBy: row.invited_by || null,
+    segment: row.segment || null,
     category: category,
     status: row.status || 'pending',
     notes: row.notes || '',
@@ -4390,19 +4395,42 @@ const transformToGuestList = (row) => {
 // GET /api/v1/guest-lists - List all guests (LOCAL - reads from guest_lists table)
 app.get('/api/v1/guest-lists', async (req, res) => {
   try {
-    const { status, limit, offset } = req.query;
+    const { status, eventId, gender, segment, limit, offset } = req.query;
 
-    let queryText = 'SELECT * FROM guest_lists WHERE 1=1';
-    const params = [];
+    let whereClause = ' WHERE 1=1';
+    const filterParams = [];
     let paramIndex = 1;
 
     // Filter by status
     if (status) {
-      queryText += ` AND status = $${paramIndex++}`;
-      params.push(status);
+      whereClause += ` AND status = $${paramIndex++}`;
+      filterParams.push(status);
     }
 
-    queryText += ' ORDER BY created_at DESC';
+    // Filter by event
+    if (eventId) {
+      whereClause += ` AND event_id = $${paramIndex++}`;
+      filterParams.push(eventId);
+    }
+
+    // Filter by gender
+    if (gender) {
+      whereClause += ` AND gender = $${paramIndex++}`;
+      filterParams.push(gender);
+    }
+
+    // Filter by segment ('none' means segment IS NULL)
+    if (segment) {
+      if (segment === 'none') {
+        whereClause += ' AND segment IS NULL';
+      } else {
+        whereClause += ` AND segment = $${paramIndex++}`;
+        filterParams.push(segment);
+      }
+    }
+
+    let queryText = `SELECT * FROM guest_lists${whereClause} ORDER BY created_at DESC`;
+    const params = [...filterParams];
 
     // Only add LIMIT/OFFSET if explicitly provided
     if (limit) {
@@ -4417,8 +4445,8 @@ app.get('/api/v1/guest-lists', async (req, res) => {
     const result = await pool.query(queryText, params);
     const entries = result.rows.map(transformToGuestList);
 
-    // Get total count
-    const countResult = await pool.query('SELECT COUNT(*) as total FROM guest_lists');
+    // Get total count (same filters as the main query)
+    const countResult = await pool.query(`SELECT COUNT(*) as total FROM guest_lists${whereClause}`, filterParams);
     const total = parseInt(countResult.rows[0].total);
 
     res.json({
@@ -4651,6 +4679,49 @@ const updateGuestListHandler = async (req, res) => {
 // Register both PATCH and PUT for frontend compatibility
 app.patch('/api/v1/guest-lists/:id', updateGuestListHandler);
 app.put('/api/v1/guest-lists/:id', updateGuestListHandler);
+
+// Berry API (public monorepo backend) - used for the gender-segmented approval workflow
+const BERRY_API_URL = process.env.BERRY_API_URL || 'https://berry-api-production.up.railway.app/api/v1';
+const BERRY_API_KEY = process.env.BERRY_API_KEY;
+
+// PATCH /api/v1/guest-lists/:id/segment - Proxy segment change to berry-api
+// berry-api validates the segment per gender and sends approval/purchase-link emails
+app.patch('/api/v1/guest-lists/:id/segment', async (req, res) => {
+  try {
+    if (!BERRY_API_KEY) {
+      return res.status(500).json({ error: 'BERRY_API_KEY not configured' });
+    }
+
+    const { id } = req.params;
+    const upstream = await fetch(`${BERRY_API_URL}/guest-lists/${id}/segment`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-API-Key': BERRY_API_KEY,
+      },
+      body: JSON.stringify(req.body),
+    });
+
+    // Relay upstream status code and JSON body verbatim
+    const body = await upstream.json().catch(() => ({ error: 'Invalid JSON response from berry-api' }));
+    res.status(upstream.status).json(body);
+  } catch (error) {
+    console.error('Error proxying segment update to berry-api:', error);
+    res.status(502).json({ error: 'Failed to reach berry-api' });
+  }
+});
+
+// GET /api/v1/berry-events - Proxy upcoming events from berry-api (public, no key needed)
+app.get('/api/v1/berry-events', async (req, res) => {
+  try {
+    const upstream = await fetch(`${BERRY_API_URL}/events?status=upcoming`);
+    const body = await upstream.json().catch(() => ({ error: 'Invalid JSON response from berry-api' }));
+    res.status(upstream.status).json(body);
+  } catch (error) {
+    console.error('Error fetching events from berry-api:', error);
+    res.status(502).json({ error: 'Failed to reach berry-api' });
+  }
+});
 
 // DELETE /api/v1/guest-lists/:id - Delete guest (LOCAL - deletes from guest_lists table)
 app.delete('/api/v1/guest-lists/:id', async (req, res) => {

@@ -31,6 +31,7 @@ import {
   VendorsView,
   AutomationView,
   ModelsView,
+  GuestApprovalsView,
 } from './views';
 
 // Eventbrite Components
@@ -142,6 +143,7 @@ function App() {
       overview: 'Overview',
       analytics: 'Dashboard',
       guests: 'Guest Lists',
+      'guest-approvals': 'Guest Approvals',
       emails: 'Email Communications',
       events: 'Events',
       models: 'Models',
@@ -168,6 +170,7 @@ function App() {
       overview: 'Event overview',
       analytics: 'Overview of your event metrics',
       guests: `${stats.total} guests • ${stats.pending} pending`,
+      'guest-approvals': 'Gender-segmented approval workflow',
       emails: `${stats.emailsSent} emails sent`,
       events: `${state.eventStats.total} events`,
       models: `${state.modelStats.total} models`,
@@ -1019,6 +1022,9 @@ function App() {
 
       case 'models':
         return <ModelsView onToast={actions.addToast} />;
+
+      case 'guest-approvals':
+        return <GuestApprovalsView onToast={actions.addToast} token={token ?? undefined} />;
 
       default:
         return (

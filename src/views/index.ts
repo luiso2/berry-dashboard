@@ -18,3 +18,4 @@ export { BudgetView } from './BudgetView';
 export { VendorsView } from './VendorsView';
 export { AutomationView } from './AutomationView';
 export { ModelsView } from './ModelsView';
+export { GuestApprovalsView } from './GuestApprovalsView';
