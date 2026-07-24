@@ -254,6 +254,7 @@ const initDatabase = async () => {
         user_id INTEGER,
         access_token VARCHAR(255) UNIQUE NOT NULL,
         refresh_token VARCHAR(255),
+        refresh_expires_at TIMESTAMP,
         code VARCHAR(255),
         token_type VARCHAR(50) DEFAULT 'session',
         expires_at TIMESTAMP,
@@ -266,6 +267,10 @@ const initDatabase = async () => {
     // Add token_type column if it doesn't exist (for existing databases)
     await client.query(`
       ALTER TABLE oauth_tokens ADD COLUMN IF NOT EXISTS token_type VARCHAR(50) DEFAULT 'session';
+      ALTER TABLE oauth_tokens ADD COLUMN IF NOT EXISTS refresh_expires_at TIMESTAMP;
+      UPDATE oauth_tokens
+      SET refresh_expires_at = expires_at + INTERVAL '60 days'
+      WHERE refresh_token IS NOT NULL AND refresh_expires_at IS NULL;
     `);
 
     // Create guests table
@@ -2525,7 +2530,9 @@ app.post('/oauth/login', async (req, res) => {
 
     // Save token
     await pool.query(
-      'INSERT INTO oauth_tokens (user_id, access_token, refresh_token, code, expires_at) VALUES ($1, $2, $3, $4, NOW() + INTERVAL \'30 days\')',
+      `INSERT INTO oauth_tokens
+       (user_id, access_token, refresh_token, code, expires_at, refresh_expires_at)
+       VALUES ($1, $2, $3, $4, NOW() + INTERVAL '30 days', NOW() + INTERVAL '90 days')`,
       [user.id, accessToken, refreshToken, code]
     );
 
@@ -2599,7 +2606,9 @@ app.post('/oauth/register', async (req, res) => {
 
     // Save token
     await pool.query(
-      'INSERT INTO oauth_tokens (user_id, access_token, refresh_token, code, expires_at) VALUES ($1, $2, $3, $4, NOW() + INTERVAL \'30 days\')',
+      `INSERT INTO oauth_tokens
+       (user_id, access_token, refresh_token, code, expires_at, refresh_expires_at)
+       VALUES ($1, $2, $3, $4, NOW() + INTERVAL '30 days', NOW() + INTERVAL '90 days')`,
       [userId, accessToken, refreshToken, code]
     );
 
@@ -2681,33 +2690,75 @@ app.post('/oauth/token', async (req, res) => {
   try {
     const { code, grant_type, refresh_token } = req.body;
 
-    let tokenResult;
-
     if (grant_type === 'authorization_code' && code) {
-      tokenResult = await pool.query('SELECT * FROM oauth_tokens WHERE code = $1', [code]);
-    } else if (grant_type === 'refresh_token' && refresh_token) {
-      tokenResult = await pool.query('SELECT * FROM oauth_tokens WHERE refresh_token = $1', [refresh_token]);
-    } else {
-      return res.status(400).json({ error: 'invalid_grant' });
-    }
+      const tokenResult = await pool.query(
+        `SELECT * FROM oauth_tokens
+         WHERE code = $1 AND expires_at > NOW()`,
+        [code]
+      );
 
-    if (tokenResult.rows.length === 0) {
-      return res.status(400).json({ error: 'invalid_grant', error_description: 'Code or token not found' });
-    }
+      if (tokenResult.rows.length === 0) {
+        return res.status(400).json({
+          error: 'invalid_grant',
+          error_description: 'Authorization code is invalid or expired'
+        });
+      }
 
-    const token = tokenResult.rows[0];
-
-    // Clear the code after use (one-time use)
-    if (code) {
+      const token = tokenResult.rows[0];
       await pool.query('UPDATE oauth_tokens SET code = NULL WHERE id = $1', [token.id]);
+
+      return res.json({
+        access_token: token.access_token,
+        token_type: 'Bearer',
+        expires_in: 2592000,
+        refresh_token: token.refresh_token
+      });
     }
 
-    res.json({
-      access_token: token.access_token,
-      token_type: 'Bearer',
-      expires_in: 2592000, // 30 days
-      refresh_token: token.refresh_token
-    });
+    if (grant_type === 'refresh_token' && refresh_token) {
+      const tokenResult = await pool.query(
+        `SELECT t.id, t.user_id, u.email, u.name, u.company
+         FROM oauth_tokens t
+         JOIN users u ON u.id = t.user_id
+         WHERE t.refresh_token = $1 AND t.refresh_expires_at > NOW()`,
+        [refresh_token]
+      );
+
+      if (tokenResult.rows.length === 0) {
+        return res.status(400).json({
+          error: 'invalid_grant',
+          error_description: 'Refresh token is invalid or expired'
+        });
+      }
+
+      const token = tokenResult.rows[0];
+      const accessToken = generateToken();
+
+      await pool.query(
+        `UPDATE oauth_tokens
+         SET access_token = $1,
+             code = NULL,
+             expires_at = NOW() + INTERVAL '30 days',
+             refresh_expires_at = NOW() + INTERVAL '90 days'
+         WHERE id = $2`,
+        [accessToken, token.id]
+      );
+
+      return res.json({
+        access_token: accessToken,
+        token_type: 'Bearer',
+        expires_in: 2592000,
+        refresh_token,
+        user: {
+          id: token.user_id,
+          email: token.email,
+          name: token.name,
+          company: token.company
+        }
+      });
+    }
+
+    return res.status(400).json({ error: 'invalid_grant' });
   } catch (error) {
     console.error('OAuth token error:', error);
     res.status(500).json({ error: 'server_error' });
@@ -2852,7 +2903,7 @@ const authenticateToken = async (req, res, next) => {
       const token = authHeader.substring(7);
       try {
         const result = await pool.query(
-          `SELECT u.* FROM users u
+          `SELECT u.*, t.expires_at AS token_expires_at FROM users u
            JOIN oauth_tokens t ON u.id = t.user_id
            WHERE t.access_token = $1 AND t.expires_at > NOW()`,
           [token]
@@ -2884,7 +2935,7 @@ const authenticateToken = async (req, res, next) => {
 
   try {
     const result = await pool.query(
-      `SELECT u.* FROM users u
+      `SELECT u.*, t.expires_at AS token_expires_at FROM users u
        JOIN oauth_tokens t ON u.id = t.user_id
        WHERE t.access_token = $1 AND t.expires_at > NOW()`,
       [token]
@@ -2908,6 +2959,20 @@ const authenticateToken = async (req, res, next) => {
 
 // Apply auth middleware to all routes
 app.use(authenticateToken);
+
+// Validate a stored dashboard session before rendering protected routes.
+app.get('/api/v1/auth/session', (req, res) => {
+  res.json({
+    valid: true,
+    expires_at: req.user.token_expires_at,
+    user: {
+      id: req.user.id,
+      email: req.user.email,
+      name: req.user.name,
+      company: req.user.company
+    }
+  });
+});
 
 // ============================================
 // END OAUTH
@@ -13404,16 +13469,22 @@ app.post('/api/v1/auth/auto-login', async (req, res) => {
 
     // Generate a new session token
     const newToken = crypto.randomBytes(32).toString('hex');
+    const refreshToken = crypto.randomBytes(32).toString('hex');
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
+    const refreshExpiresAt = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000);
 
     await pool.query(`
-      INSERT INTO oauth_tokens (user_id, access_token, token_type, expires_at)
-      VALUES ($1, $2, 'session', $3)
-    `, [userData.user_id, newToken, expiresAt]);
+      INSERT INTO oauth_tokens
+      (user_id, access_token, refresh_token, token_type, expires_at, refresh_expires_at)
+      VALUES ($1, $2, $3, 'session', $4, $5)
+    `, [userData.user_id, newToken, refreshToken, expiresAt, refreshExpiresAt]);
 
     res.json({
       success: true,
       token: newToken,
+      access_token: newToken,
+      refresh_token: refreshToken,
+      expires_in: 604800,
       user: {
         id: userData.user_id,
         email: userData.email,
