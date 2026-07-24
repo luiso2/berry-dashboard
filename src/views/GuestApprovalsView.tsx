@@ -38,6 +38,7 @@ interface ApprovalGuest {
 type Gender = 'male' | 'female';
 
 const DEFAULT_EVENT_ID = 'evt_68d357bd-5efd-48d3-b146-8aa51d7c3481';
+const UNASSIGNED_EVENT_ID = 'general';
 
 // Folder chips per gender tab ('none' = segment IS NULL = Inbox)
 const FOLDERS: Record<Gender, { key: string; label: string }[]> = {
@@ -143,11 +144,14 @@ export function GuestApprovalsView({ onToast, token, fixedGender }: GuestApprova
           title: (e.title as string) || 'Untitled event',
           date: e.date as string | undefined,
         }));
-        setEvents(list);
+        const eventOptions = list.some((event) => event.id === UNASSIGNED_EVENT_ID)
+          ? list
+          : [...list, { id: UNASSIGNED_EVENT_ID, title: 'Unassigned website submissions' }];
+        setEvents(eventOptions);
         setEventId((prev) => {
           if (prev) return prev;
           if (list.some((e) => e.id === DEFAULT_EVENT_ID)) return DEFAULT_EVENT_ID;
-          return list[0]?.id || '';
+          return list[0]?.id || UNASSIGNED_EVENT_ID;
         });
       } catch (err) {
         console.error('Failed to fetch berry events:', err);
@@ -183,6 +187,16 @@ export function GuestApprovalsView({ onToast, token, fixedGender }: GuestApprova
       ]);
       const rowsData = await rowsRes.json();
       const allData = await allRes.json();
+
+      if (!rowsRes.ok || !allRes.ok) {
+        const failedResponse = !rowsRes.ok ? rowsData : allData;
+        throw new Error(
+          failedResponse.message ||
+          failedResponse.error ||
+          `Guest list request failed (${!rowsRes.ok ? rowsRes.status : allRes.status})`
+        );
+      }
+
       setGuests((rowsData.entries || []).map(mapGuest));
 
       const nextCounts: Record<string, number> = {};
@@ -193,7 +207,9 @@ export function GuestApprovalsView({ onToast, token, fixedGender }: GuestApprova
       setCounts(nextCounts);
     } catch (err) {
       console.error('Failed to fetch guest approvals:', err);
-      onToast('Error loading guest approvals', 'error');
+      if (!silent) {
+        onToast(err instanceof Error ? err.message : 'Error loading guest approvals', 'error');
+      }
     } finally {
       setLoading(false);
     }
@@ -201,6 +217,26 @@ export function GuestApprovalsView({ onToast, token, fixedGender }: GuestApprova
 
   useEffect(() => {
     refresh();
+  }, [refresh]);
+
+  // Keep an already-open dashboard synchronized with new website submissions.
+  // Refresh immediately when the tab regains focus and poll while it is visible.
+  useEffect(() => {
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') {
+        void refresh(true);
+      }
+    };
+
+    const intervalId = window.setInterval(refreshWhenVisible, 15_000);
+    window.addEventListener('focus', refreshWhenVisible);
+    document.addEventListener('visibilitychange', refreshWhenVisible);
+
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener('focus', refreshWhenVisible);
+      document.removeEventListener('visibilitychange', refreshWhenVisible);
+    };
   }, [refresh]);
 
   // Apply a segment via the dashboard server proxy -> berry-api (handles emails + validation)
