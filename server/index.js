@@ -4788,6 +4788,145 @@ app.get('/api/v1/berry-events', async (req, res) => {
   }
 });
 
+// ============================================
+// MIDSUMMER RSVP SYNC
+// Pulls RSVPs from the midsummernightsdreamla.com landing into guest_lists so the
+// approvals dashboard shows them. Imports are silent on purpose: those guests already
+// got their confirmation on that site, so Berry Bly emails/SMS are not re-sent here.
+// ============================================
+const MIDSUMMER_EVENT_ID = process.env.MIDSUMMER_EVENT_ID || 'evt_68d357bd-5efd-48d3-b146-8aa51d7c3481';
+const MIDSUMMER_RSVP_URL = process.env.MIDSUMMER_RSVP_URL || 'https://midsummernightsdreamla.com/api/rsvps';
+const MIDSUMMER_RSVP_TOKEN = process.env.MIDSUMMER_RSVP_TOKEN;
+
+let lastRsvpSync = { at: null, imported: 0, skipped: 0, total: 0, error: null };
+let rsvpColumnsReady = false;
+
+// Trace where each guest came from and make re-imports idempotent.
+// The ledger records every RSVP ever imported, so a guest the client removes
+// (female REMOVE is a permanent delete) never comes back on the next sync.
+async function ensureRsvpColumns() {
+  if (rsvpColumnsReady) return;
+  await pool.query(`
+    ALTER TABLE guest_lists
+    ADD COLUMN IF NOT EXISTS source VARCHAR(40),
+    ADD COLUMN IF NOT EXISTS external_id VARCHAR(100)
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS midsummer_rsvp_imports (
+      external_id VARCHAR(100) PRIMARY KEY,
+      email VARCHAR(255),
+      guest_id VARCHAR(100),
+      imported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+  rsvpColumnsReady = true;
+}
+
+async function syncMidsummerRsvps() {
+  if (!MIDSUMMER_RSVP_TOKEN) {
+    lastRsvpSync = { ...lastRsvpSync, at: new Date().toISOString(), error: 'MIDSUMMER_RSVP_TOKEN not configured' };
+    return lastRsvpSync;
+  }
+
+  try {
+    await ensureRsvpColumns();
+
+    const upstream = await fetch(MIDSUMMER_RSVP_URL, {
+      headers: { Authorization: `Bearer ${MIDSUMMER_RSVP_TOKEN}` },
+    });
+    if (!upstream.ok) throw new Error(`RSVP API responded ${upstream.status}`);
+
+    const body = await upstream.json();
+    const rsvps = Array.isArray(body.rsvps) ? body.rsvps : [];
+
+    let imported = 0;
+    let skipped = 0;
+
+    for (const r of rsvps) {
+      const email = String(r.email || '').trim();
+      if (!email) { skipped++; continue; }
+
+      // Imported before? The ledger answers even if the guest was deleted since.
+      if (r.id) {
+        const seen = await pool.query('SELECT 1 FROM midsummer_rsvp_imports WHERE external_id = $1', [r.id]);
+        if (seen.rows.length > 0) { skipped++; continue; }
+      }
+
+      // Or the person already applied for this event through the other form
+      const existing = await pool.query(
+        `SELECT id FROM guest_lists
+         WHERE (external_id IS NOT NULL AND external_id = $1)
+            OR (LOWER(email) = LOWER($2) AND event_id = $3)
+         LIMIT 1`,
+        [r.id || null, email, MIDSUMMER_EVENT_ID]
+      );
+      if (existing.rows.length > 0) {
+        // Record it so the ledger stays complete
+        if (r.id) {
+          await pool.query(
+            `INSERT INTO midsummer_rsvp_imports (external_id, email, guest_id)
+             VALUES ($1, $2, $3) ON CONFLICT (external_id) DO NOTHING`,
+            [r.id, email, existing.rows[0].id]
+          );
+        }
+        skipped++;
+        continue;
+      }
+
+      const name = [r.firstName, r.lastName].filter(Boolean).join(' ').trim() || email;
+      const instagram = r.instagram
+        ? (String(r.instagram).startsWith('@') ? String(r.instagram) : `@${r.instagram}`)
+        : '';
+      const gender = r.gender === 'male' || r.gender === 'female' ? r.gender : null;
+      const id = `gst_${crypto.randomUUID()}`;
+
+      await pool.query(
+        `INSERT INTO guest_lists
+          (id, event_id, name, email, phone, instagram, linkedin, invited_by, gender,
+           number_of_guests, status, email_sent, source, external_id, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 1, 'pending', false, 'midsummer_site', $10, $11, CURRENT_TIMESTAMP)`,
+        [id, MIDSUMMER_EVENT_ID, name, email, r.phone || '', instagram, r.linkedin || null,
+         r.invitedBy || null, gender, r.id || null, r.createdAt || new Date().toISOString()]
+      );
+
+      if (r.id) {
+        await pool.query(
+          `INSERT INTO midsummer_rsvp_imports (external_id, email, guest_id)
+           VALUES ($1, $2, $3) ON CONFLICT (external_id) DO NOTHING`,
+          [r.id, email, id]
+        );
+      }
+      imported++;
+    }
+
+    lastRsvpSync = { at: new Date().toISOString(), imported, skipped, total: rsvps.length, error: null };
+    if (imported > 0) {
+      console.log(`🌙 Midsummer RSVP sync: ${imported} imported, ${skipped} already present (${rsvps.length} upstream)`);
+    }
+    return lastRsvpSync;
+  } catch (error) {
+    lastRsvpSync = { at: new Date().toISOString(), imported: 0, skipped: 0, total: 0, error: error.message };
+    console.error('❌ Midsummer RSVP sync error:', error.message);
+    return lastRsvpSync;
+  }
+}
+
+// POST /api/v1/integrations/midsummer/sync - Run the import on demand
+app.post('/api/v1/integrations/midsummer/sync', async (_req, res) => {
+  const result = await syncMidsummerRsvps();
+  res.status(result.error ? 502 : 200).json(result);
+});
+
+// GET /api/v1/integrations/midsummer/status - Last sync result (for the dashboard)
+app.get('/api/v1/integrations/midsummer/status', async (_req, res) => {
+  res.json({ ...lastRsvpSync, configured: !!MIDSUMMER_RSVP_TOKEN, source: MIDSUMMER_RSVP_URL });
+});
+
+// Keep the dashboard within a minute of the landing page
+setInterval(syncMidsummerRsvps, 60 * 1000);
+setTimeout(syncMidsummerRsvps, 10 * 1000);
+console.log('🌙 Midsummer RSVP sync started (checks every minute)');
+
 // DELETE /api/v1/guest-lists/:id - Delete guest (LOCAL - deletes from guest_lists table)
 app.delete('/api/v1/guest-lists/:id', async (req, res) => {
   try {
