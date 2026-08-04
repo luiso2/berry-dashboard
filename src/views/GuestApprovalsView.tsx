@@ -53,7 +53,7 @@ const FOLDERS: Record<Gender, { key: string; label: string }[]> = {
     { key: 'none', label: 'Inbox' },
     { key: 'vip_comp', label: 'VIP Comp' },
     { key: 'pending', label: 'Pending' },
-    { key: 'ga_ticket', label: 'GA Tickets' },
+    { key: 'ga_ticket', label: 'VIP Paid' },
     { key: 'removed', label: 'Removed' },
   ],
 };
@@ -69,7 +69,7 @@ const ACTIONS: Record<Gender, { segment: string; label: string; color: string }[
   female: [
     { segment: 'vip_comp', label: 'VIP COMP', color: '#22c55e' },
     { segment: 'pending', label: 'PENDING', color: '#f59e0b' },
-    { segment: 'ga_ticket', label: 'GA TICKET', color: '#a78bfa' },
+    { segment: 'ga_ticket', label: 'VIP PAID', color: '#a78bfa' },
     { segment: 'removed', label: 'REMOVE', color: '#ef4444' },
   ],
 };
@@ -78,7 +78,7 @@ const SEGMENT_LABELS: Record<string, string> = {
   vip_comp: 'VIP Comp',
   vip_paid: 'VIP Paid',
   ga_future: 'GA Future',
-  ga_ticket: 'GA Ticket',
+  ga_ticket: 'VIP Paid',
   pending: 'Pending',
   removed: 'Removed',
 };
@@ -253,12 +253,9 @@ export function GuestApprovalsView({ onToast, token, fixedGender }: GuestApprova
 
     const payload: { segment: string; ticketUrl?: string } = { segment };
     if (TICKET_SEGMENTS.includes(segment)) {
+      // Optional override: leaving it empty uses the client's official ticket link
       const link = ticketLink.trim();
-      if (!link) {
-        onToast(`Enter a Ticket link in the toolbar first - ${SEGMENT_LABELS[segment]} sends a purchase-link email`, 'error');
-        return;
-      }
-      payload.ticketUrl = link;
+      if (link) payload.ticketUrl = link;
     }
 
     setActionInProgress(guest.id);
@@ -370,12 +367,12 @@ export function GuestApprovalsView({ onToast, token, fixedGender }: GuestApprova
           {gender === 'male' ? 'MEN' : 'WOMEN'}
         </div>
 
-        {/* Ticket link (required for VIP PAID / GA TICKET actions) */}
+        {/* Ticket link (optional: the API falls back to the client's TicketSpice link) */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#111', border: '1px solid #333', borderRadius: 8, padding: '0 12px', flex: 1, minWidth: 260 }}>
           <LinkIcon size={14} color="#666" />
           <input
             type="text"
-            placeholder={`Ticket link (required for ${gender === 'male' ? 'VIP PAID' : 'GA TICKET'})`}
+            placeholder="Ticket link override (optional, defaults to the official link)"
             value={ticketLink}
             onChange={(e) => handleTicketLinkChange(e.target.value)}
             style={{ background: 'transparent', border: 'none', outline: 'none', color: '#fff', padding: '10px 0', fontSize: 13, flex: 1 }}
