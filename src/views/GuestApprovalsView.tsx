@@ -13,6 +13,15 @@ interface GuestApprovalsViewProps {
   fixedGender: 'male' | 'female';
 }
 
+interface EmailPreview {
+  guest: ApprovalGuest;
+  segment: string;
+  subject: string;
+  emailBody: string;
+  html: string;
+  dirty: boolean;
+}
+
 interface BerryEvent {
   id: string;
   title: string;
@@ -94,6 +103,8 @@ const SEGMENT_COLORS: Record<string, string> = {
 
 // Segments that send a purchase-link email and therefore require a ticket link
 const TICKET_SEGMENTS = ['vip_paid', 'ga_ticket'];
+// Segments that email the guest: these always open the confirmation preview first
+const EMAIL_SEGMENTS = ['vip_comp', 'vip_paid', 'ga_ticket'];
 
 const mapGuest = (g: Record<string, unknown>): ApprovalGuest => ({
   id: String(g.id),
@@ -121,6 +132,9 @@ export function GuestApprovalsView({ onToast, token, fixedGender }: GuestApprova
   const [loading, setLoading] = useState(true);
   const [ticketLink, setTicketLink] = useState('');
   const [actionInProgress, setActionInProgress] = useState<string | null>(null);
+  const [preview, setPreview] = useState<EmailPreview | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [sending, setSending] = useState(false);
 
   const getHeaders = useCallback((contentType?: string) => {
     const headers: HeadersInit = {};
@@ -239,23 +253,115 @@ export function GuestApprovalsView({ onToast, token, fixedGender }: GuestApprova
     };
   }, [refresh]);
 
-  // Apply a segment via the dashboard server proxy -> berry-api (handles emails + validation)
-  const applySegment = async (guest: ApprovalGuest, segment: string) => {
+  // Step 1: never send blind. Segments that email open a preview the client confirms.
+  const requestSegment = async (guest: ApprovalGuest, segment: string) => {
     // Client rule: female REMOVE permanently deletes; male REMOVE only takes them off the list.
     if (segment === 'removed') {
       const confirmMessage = gender === 'female'
         ? `Remove and permanently DELETE ${guest.name}? This cannot be undone. No email is sent.`
         : `Remove ${guest.name} from the list? (No email is sent.)`;
-      if (!window.confirm(confirmMessage)) {
-        return;
-      }
+      if (!window.confirm(confirmMessage)) return;
+      await applySegment(guest, segment);
+      return;
     }
 
-    const payload: { segment: string; ticketUrl?: string } = { segment };
+    if (!EMAIL_SEGMENTS.includes(segment)) {
+      // GA Future / Pending send nothing, so there is nothing to preview
+      await applySegment(guest, segment);
+      return;
+    }
+
+    setPreviewLoading(true);
+    setActionInProgress(guest.id);
+    try {
+      const qs = new URLSearchParams({ segment });
+      const link = ticketLink.trim();
+      if (link) qs.set('ticketUrl', link);
+
+      const res = await fetch(`${API_URL}/guest-lists/${guest.id}/segment/preview?${qs.toString()}`, {
+        headers: getHeaders(),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        onToast(data.message || data.error || 'Could not load the email preview', 'error');
+        return;
+      }
+      if (!data.sendsEmail) {
+        await applySegment(guest, segment);
+        return;
+      }
+      setPreview({
+        guest,
+        segment,
+        subject: data.subject || '',
+        emailBody: data.emailBody || '',
+        html: data.html || '',
+        dirty: false,
+      });
+    } catch (err) {
+      console.error('Preview failed:', err);
+      onToast('Could not load the email preview', 'error');
+    } finally {
+      setPreviewLoading(false);
+      setActionInProgress(null);
+    }
+  };
+
+  // Re-render the preview after the client edits the copy
+  const refreshPreview = async () => {
+    if (!preview) return;
+    setPreviewLoading(true);
+    try {
+      const res = await fetch(`${API_URL}/guest-lists/${preview.guest.id}/segment/preview`, {
+        method: 'POST',
+        headers: getHeaders('application/json'),
+        body: JSON.stringify({
+          segment: preview.segment,
+          subject: preview.subject,
+          emailBody: preview.emailBody,
+          ticketUrl: ticketLink.trim() || undefined,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.html) {
+        setPreview((prev) => (prev ? { ...prev, html: data.html, dirty: false } : prev));
+      } else {
+        onToast(data.message || 'Could not refresh the preview', 'error');
+      }
+    } catch (err) {
+      onToast('Could not refresh the preview', 'error');
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
+  // Step 2: the client confirmed, so send it (with any edits)
+  const confirmSend = async () => {
+    if (!preview) return;
+    setSending(true);
+    await applySegment(preview.guest, preview.segment, {
+      subject: preview.subject,
+      emailBody: preview.emailBody,
+    });
+    setSending(false);
+    setPreview(null);
+  };
+
+  // Apply a segment via the dashboard server proxy -> berry-api (handles emails + validation)
+  const applySegment = async (
+    guest: ApprovalGuest,
+    segment: string,
+    edited?: { subject: string; emailBody: string }
+  ) => {
+    const payload: { segment: string; ticketUrl?: string; subject?: string; emailBody?: string } = { segment };
     if (TICKET_SEGMENTS.includes(segment)) {
       // Optional override: leaving it empty uses the client's official ticket link
       const link = ticketLink.trim();
       if (link) payload.ticketUrl = link;
+    }
+    if (edited) {
+      payload.subject = edited.subject;
+      payload.emailBody = edited.emailBody;
     }
 
     setActionInProgress(guest.id);
@@ -513,7 +619,7 @@ export function GuestApprovalsView({ onToast, token, fixedGender }: GuestApprova
                       {ACTIONS[gender].map((action) => (
                         <button
                           key={action.segment}
-                          onClick={() => applySegment(guest, action.segment)}
+                          onClick={() => requestSegment(guest, action.segment)}
                           disabled={actionInProgress === guest.id || guest.segment === action.segment}
                           style={{
                             background: `${action.color}20`,
@@ -554,6 +660,132 @@ export function GuestApprovalsView({ onToast, token, fixedGender }: GuestApprova
           </div>
         )}
       </div>
+
+      {/* Email confirmation preview: nothing is sent until the client approves this */}
+      {preview && (
+        <div
+          onClick={() => !sending && setPreview(null)}
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(4px)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 20,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: '#0a0a0a', border: '1px solid #222', borderRadius: 16, width: '100%', maxWidth: 1100,
+              maxHeight: '92vh', display: 'flex', flexDirection: 'column', overflow: 'hidden',
+            }}
+          >
+            {/* Header */}
+            <div style={{ padding: '18px 22px', borderBottom: '1px solid #1a1a1a', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div>
+                <div style={{ color: '#fff', fontSize: 17, fontWeight: 600 }}>Review before sending</div>
+                <div style={{ color: '#777', fontSize: 13, marginTop: 3 }}>
+                  To <span style={{ color: '#d4af37' }}>{preview.guest.name}</span> ({preview.guest.email}) - {SEGMENT_LABELS[preview.segment] || preview.segment}
+                </div>
+              </div>
+              <button
+                onClick={() => !sending && setPreview(null)}
+                style={{ background: 'transparent', border: 'none', color: '#666', fontSize: 24, cursor: 'pointer', lineHeight: 1 }}
+              >
+                &times;
+              </button>
+            </div>
+
+            {/* Body: editor + live preview */}
+            <div style={{ display: 'flex', flex: 1, minHeight: 0, flexWrap: 'wrap' }}>
+              {/* Editor */}
+              <div style={{ flex: '1 1 380px', minWidth: 320, padding: 20, borderRight: '1px solid #1a1a1a', overflowY: 'auto' }}>
+                <label style={{ display: 'block', color: '#888', fontSize: 11, textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 6 }}>
+                  Subject
+                </label>
+                <input
+                  value={preview.subject}
+                  onChange={(e) => setPreview({ ...preview, subject: e.target.value, dirty: true })}
+                  style={{
+                    width: '100%', background: '#111', border: '1px solid #262626', borderRadius: 8,
+                    color: '#fff', padding: '10px 12px', fontSize: 14, marginBottom: 18,
+                  }}
+                />
+
+                <label style={{ display: 'block', color: '#888', fontSize: 11, textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 6 }}>
+                  Message
+                </label>
+                <textarea
+                  value={preview.emailBody}
+                  onChange={(e) => setPreview({ ...preview, emailBody: e.target.value, dirty: true })}
+                  rows={16}
+                  style={{
+                    width: '100%', background: '#111', border: '1px solid #262626', borderRadius: 8,
+                    color: '#eee', padding: '12px', fontSize: 13, lineHeight: 1.65, fontFamily: 'inherit', resize: 'vertical',
+                  }}
+                />
+                <div style={{ color: '#555', fontSize: 12, marginTop: 8, lineHeight: 1.6 }}>
+                  <code style={{ color: '#d4af37' }}>{'{{NAME}}'}</code> becomes the guest name.
+                  {TICKET_SEGMENTS.includes(preview.segment) && (
+                    <>
+                      {' '}<code style={{ color: '#d4af37' }}>{'{{TICKET_BUTTON}}'}</code> and{' '}
+                      <code style={{ color: '#d4af37' }}>{'{{PROMO_CODE}}'}</code> place the button and the code.
+                    </>
+                  )}
+                </div>
+
+                {preview.dirty && (
+                  <button
+                    onClick={refreshPreview}
+                    disabled={previewLoading}
+                    style={{
+                      marginTop: 14, background: 'transparent', border: '1px solid #d4af37', color: '#d4af37',
+                      borderRadius: 8, padding: '9px 16px', fontSize: 13, cursor: previewLoading ? 'default' : 'pointer',
+                      display: 'flex', alignItems: 'center', gap: 8,
+                    }}
+                  >
+                    <RefreshCw size={14} /> {previewLoading ? 'Updating...' : 'Update preview'}
+                  </button>
+                )}
+              </div>
+
+              {/* Live preview */}
+              <div style={{ flex: '1 1 420px', minWidth: 320, background: '#050505', display: 'flex', flexDirection: 'column' }}>
+                <div style={{ padding: '10px 16px', color: '#666', fontSize: 11, textTransform: 'uppercase', letterSpacing: 1.5, borderBottom: '1px solid #1a1a1a' }}>
+                  Preview {preview.dirty && <span style={{ color: '#d4af37', textTransform: 'none', letterSpacing: 0 }}>- press Update preview to refresh</span>}
+                </div>
+                <iframe
+                  title="Email preview"
+                  srcDoc={preview.html}
+                  style={{ flex: 1, width: '100%', border: 'none', minHeight: 420, background: '#0a0a0a' }}
+                />
+              </div>
+            </div>
+
+            {/* Footer actions */}
+            <div style={{ padding: '16px 22px', borderTop: '1px solid #1a1a1a', display: 'flex', justifyContent: 'flex-end', gap: 12 }}>
+              <button
+                onClick={() => setPreview(null)}
+                disabled={sending}
+                style={{
+                  background: 'transparent', border: '1px solid #333', color: '#aaa', borderRadius: 8,
+                  padding: '11px 20px', fontSize: 14, cursor: sending ? 'default' : 'pointer',
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmSend}
+                disabled={sending}
+                style={{
+                  background: sending ? '#5a4a1a' : 'linear-gradient(135deg, #d4af37 0%, #b8962e 100%)',
+                  border: 'none', color: '#000', borderRadius: 8, padding: '11px 24px', fontSize: 14,
+                  fontWeight: 600, cursor: sending ? 'default' : 'pointer',
+                }}
+              >
+                {sending ? 'Sending...' : 'Confirm & send email'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

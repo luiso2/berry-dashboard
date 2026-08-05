@@ -4776,6 +4776,52 @@ app.patch('/api/v1/guest-lists/:id/segment', async (req, res) => {
   }
 });
 
+// GET /api/v1/guest-lists/:id/segment/preview - Proxy the email preview from berry-api
+// so the dashboard can show it before anything is sent
+app.get('/api/v1/guest-lists/:id/segment/preview', async (req, res) => {
+  try {
+    if (!BERRY_API_KEY) {
+      return res.status(500).json({ error: 'BERRY_API_KEY not configured' });
+    }
+
+    const { id } = req.params;
+    const qs = new URLSearchParams();
+    if (req.query.segment) qs.set('segment', String(req.query.segment));
+    if (req.query.ticketUrl) qs.set('ticketUrl', String(req.query.ticketUrl));
+    if (req.query.promoCode) qs.set('promoCode', String(req.query.promoCode));
+
+    const upstream = await fetch(`${BERRY_API_URL}/guest-lists/${id}/segment/preview?${qs.toString()}`, {
+      headers: { 'X-API-Key': BERRY_API_KEY },
+    });
+    const body = await upstream.json().catch(() => ({ error: 'Invalid JSON response from berry-api' }));
+    res.status(upstream.status).json(body);
+  } catch (error) {
+    console.error('Error fetching segment preview from berry-api:', error);
+    res.status(502).json({ error: 'Failed to reach berry-api' });
+  }
+});
+
+// POST /api/v1/guest-lists/:id/segment/preview - Re-render the preview with edited copy
+app.post('/api/v1/guest-lists/:id/segment/preview', async (req, res) => {
+  try {
+    if (!BERRY_API_KEY) {
+      return res.status(500).json({ error: 'BERRY_API_KEY not configured' });
+    }
+
+    const { id } = req.params;
+    const upstream = await fetch(`${BERRY_API_URL}/guest-lists/${id}/segment/preview`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-API-Key': BERRY_API_KEY },
+      body: JSON.stringify(req.body),
+    });
+    const body = await upstream.json().catch(() => ({ error: 'Invalid JSON response from berry-api' }));
+    res.status(upstream.status).json(body);
+  } catch (error) {
+    console.error('Error rendering segment preview:', error);
+    res.status(502).json({ error: 'Failed to reach berry-api' });
+  }
+});
+
 // GET /api/v1/berry-events - Proxy upcoming events from berry-api (public, no key needed)
 app.get('/api/v1/berry-events', async (req, res) => {
   try {
