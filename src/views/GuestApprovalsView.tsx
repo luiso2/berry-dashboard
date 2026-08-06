@@ -620,7 +620,12 @@ export function GuestApprovalsView({ onToast, token, fixedGender }: GuestApprova
                         <button
                           key={action.segment}
                           onClick={() => requestSegment(guest, action.segment)}
-                          disabled={actionInProgress === guest.id || guest.segment === action.segment}
+                          disabled={
+                            actionInProgress === guest.id ||
+                            // Already in this folder, unless its email never went out (retry)
+                            (guest.segment === action.segment &&
+                              !(EMAIL_SEGMENTS.includes(action.segment) && !guest.emailSent))
+                          }
                           style={{
                             background: `${action.color}20`,
                             border: `1px solid ${action.color}40`,
@@ -629,7 +634,7 @@ export function GuestApprovalsView({ onToast, token, fixedGender }: GuestApprova
                             borderRadius: 6,
                             fontSize: 11,
                             fontWeight: 600,
-                            cursor: actionInProgress === guest.id || guest.segment === action.segment ? 'default' : 'pointer',
+                            cursor: actionInProgress === guest.id ? 'default' : 'pointer',
                             opacity: guest.segment === action.segment ? 0.35 : 1,
                             letterSpacing: '0.3px',
                           }}
